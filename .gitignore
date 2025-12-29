@@ -1,0 +1,32 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+.python-version
+
+# IDE / editor
+.idea/
+.vscode/
+*.code-workspace
+
+# Environment / secrets
+.env
+.env.*
+
+# Logs / coverage
+*.log
+.coverage
+.coverage.*
+
+# OS / misc
+.DS_Store
+Thumbs.db
+
+*.csv

@@ -1,0 +1,315 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "id": 100,
+      "panels": [],
+      "title": "📊 현재 상태",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "#3274D9", "value": null}]}, "unit": "celsius"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 1},
+      "id": 1,
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT AVG(temperature) AS \"전국 평균 기온\" FROM mv_latest_weather", "refId": "A"}],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "#5794F2", "value": null}]}, "unit": "percent"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 4, "x": 4, "y": 1},
+      "id": 2,
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT AVG(humidity) AS \"전국 평균 습도\" FROM mv_latest_weather", "refId": "A"}],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "#73BF69", "value": null}]}, "unit": "MW"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 4, "x": 8, "y": 1},
+      "id": 3,
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT AVG(demand_avg) AS \"1시간 평균 수요\" FROM mv_latest_weather", "refId": "A"}],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "#FF9830", "value": null}]}, "unit": "none"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 4, "x": 12, "y": 1},
+      "id": 4,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT COUNT(*) AS \"관측소 수\" FROM mv_latest_weather", "refId": "A"}],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "#8F3BB8", "value": null}]}, "unit": "none"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 4, "x": 16, "y": 1},
+      "id": 5,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT COUNT(*) AS \"1시간 데이터 건수\" FROM demand_weather_1h", "refId": "A"}],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "#F2495C", "value": null}]}, "unit": "celsius"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 1},
+      "id": 6,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT MAX(temperature) AS \"최고 기온\" FROM mv_latest_weather", "refId": "A"}],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 6},
+      "id": 101,
+      "panels": [],
+      "title": "🌤️ 기상 데이터 추이",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "opacity", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "평균 기온"}, "properties": [{"id": "unit", "value": "celsius"}, {"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "평균 습도"}, "properties": [{"id": "unit", "value": "percent"}, {"id": "custom.axisPlacement", "value": "right"}, {"id": "color", "value": {"fixedColor": "#5794F2", "mode": "fixed"}}]}
+        ]
+      },
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 7},
+      "id": 10,
+      "options": {"legend": {"calcs": ["mean", "max", "min", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "time_series", "rawQuery": true, "rawSql": "SELECT timestamp AS time, avg_temp AS \"평균 기온\", avg_humidity AS \"평균 습도\" FROM mv_hourly_national WHERE $__timeFilter(timestamp) ORDER BY timestamp", "refId": "A"}],
+      "title": "전국 평균 기온/습도 추이",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+      "id": 102,
+      "panels": [],
+      "title": "⚡ 전력 수요 추이",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "MW", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "opacity", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "MW"},
+        "overrides": []
+      },
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 17},
+      "id": 11,
+      "options": {"legend": {"calcs": ["mean", "max", "min", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "time_series", "rawQuery": true, "rawSql": "SELECT timestamp AS time, avg_demand AS \"1시간 평균 수요\" FROM mv_hourly_national WHERE $__timeFilter(timestamp) ORDER BY timestamp", "refId": "A"}],
+      "title": "1시간 평균 전력 수요",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "MW", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "MW"},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "평일"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "주말"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "공휴일"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}
+        ]
+      },
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 17},
+      "id": 16,
+      "options": {"legend": {"calcs": ["mean", "max", "min"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "time_series", "rawQuery": true, "rawSql": "SELECT timestamp AS time, CASE WHEN day_type = 0 THEN avg_demand END AS \"평일\", CASE WHEN day_type = 1 THEN avg_demand END AS \"주말\", CASE WHEN day_type = 2 THEN avg_demand END AS \"공휴일\" FROM mv_hourly_national WHERE $__timeFilter(timestamp) ORDER BY timestamp", "refId": "A"}],
+      "title": "평일/주말/공휴일 수요 비교",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 26},
+      "id": 103,
+      "panels": [],
+      "title": "📈 기온-수요 상관관계",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "opacity", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "평균 기온 (°C)"}, "properties": [{"id": "unit", "value": "celsius"}, {"id": "color", "value": {"fixedColor": "#F2495C", "mode": "fixed"}}, {"id": "custom.axisPlacement", "value": "left"}]},
+          {"matcher": {"id": "byName", "options": "전력 수요 (MW)"}, "properties": [{"id": "unit", "value": "MW"}, {"id": "color", "value": {"fixedColor": "#73BF69", "mode": "fixed"}}, {"id": "custom.axisPlacement", "value": "right"}]}
+        ]
+      },
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 27},
+      "id": 20,
+      "options": {"legend": {"calcs": ["mean", "max", "min", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "none"}},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "time_series", "rawQuery": true, "rawSql": "SELECT timestamp AS time, avg_temp AS \"평균 기온 (°C)\", avg_demand AS \"전력 수요 (MW)\" FROM mv_hourly_national WHERE $__timeFilter(timestamp) ORDER BY timestamp", "refId": "A"}],
+      "title": "기온 vs 전력수요 비교",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 37},
+      "id": 104,
+      "panels": [],
+      "title": "📍 지역별 현황",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}, {"color": "green", "value": 10}, {"color": "yellow", "value": 25}, {"color": "red", "value": 30}]}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "기온"}, "properties": [{"id": "unit", "value": "celsius"}, {"id": "custom.cellOptions", "value": {"mode": "gradient", "type": "gauge", "valueDisplayMode": "text"}}]},
+          {"matcher": {"id": "byName", "options": "습도"}, "properties": [{"id": "unit", "value": "percent"}, {"id": "custom.cellOptions", "value": {"mode": "basic", "type": "gauge", "valueDisplayMode": "text"}}, {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}, {"color": "green", "value": 40}, {"color": "blue", "value": 70}]}}]}
+        ]
+      },
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 38},
+      "id": 14,
+      "options": {"cellHeight": "sm", "footer": {"countRows": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true, "sortBy": [{"desc": true, "displayName": "기온"}]},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT station_name AS \"관측소\", temperature AS \"기온\", humidity AS \"습도\" FROM mv_latest_weather ORDER BY temperature DESC", "refId": "A"}],
+      "title": "지역별 현재 기온/습도",
+      "type": "table"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "mappings": [{"options": {"0": {"color": "green", "index": 0, "text": "평일"}, "1": {"color": "blue", "index": 1, "text": "주말"}, "2": {"color": "red", "index": 2, "text": "공휴일"}}, "type": "value"}], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "none"},
+        "overrides": []
+      },
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 38},
+      "id": 17,
+      "options": {"colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value"},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT day_type AS \"오늘 요일 유형\" FROM mv_latest_weather LIMIT 1", "refId": "A"}],
+      "title": "오늘 요일 유형",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"hideFrom": {"legend": false, "tooltip": false, "viz": false}}, "mappings": []},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "평일"}, "properties": [{"id": "color", "value": {"fixedColor": "green", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "주말"}, "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]},
+          {"matcher": {"id": "byName", "options": "공휴일"}, "properties": [{"id": "color", "value": {"fixedColor": "red", "mode": "fixed"}}]}
+        ]
+      },
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 38},
+      "id": 18,
+      "options": {"legend": {"displayMode": "list", "placement": "right", "showLegend": true}, "pieType": "pie", "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT CASE day_type WHEN 0 THEN '평일' WHEN 1 THEN '주말' WHEN 2 THEN '공휴일' END AS \"요일유형\", COUNT(*) AS \"건수\" FROM mv_hourly_national WHERE $__timeFilter(timestamp) GROUP BY day_type ORDER BY day_type", "refId": "A"}],
+      "title": "요일유형별 분포",
+      "type": "piechart"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "thresholds"}, "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": false}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}},
+        "overrides": [{"matcher": {"id": "byName", "options": "평균 수요"}, "properties": [{"id": "unit", "value": "MW"}]}]
+      },
+      "gridPos": {"h": 5, "w": 12, "x": 12, "y": 43},
+      "id": 19,
+      "options": {"cellHeight": "sm", "footer": {"countRows": false, "fields": "", "reducer": ["sum"], "show": false}, "showHeader": true},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "table", "rawQuery": true, "rawSql": "SELECT CASE day_type WHEN 0 THEN '평일' WHEN 1 THEN '주말' WHEN 2 THEN '공휴일' END AS \"요일유형\", ROUND(AVG(avg_demand)::numeric, 0) AS \"평균 수요\", ROUND(MAX(avg_demand)::numeric, 0) AS \"최대 수요\", ROUND(MIN(avg_demand)::numeric, 0) AS \"최소 수요\" FROM mv_hourly_national WHERE $__timeFilter(timestamp) AND avg_demand IS NOT NULL GROUP BY day_type ORDER BY day_type", "refId": "A"}],
+      "title": "요일유형별 수요 통계",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 48},
+      "id": 105,
+      "panels": [],
+      "title": "🗺️ 선택 지역 기상 추이",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 5, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "celsius"},
+        "overrides": []
+      },
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 49},
+      "id": 21,
+      "options": {"legend": {"calcs": ["mean", "max", "min", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "time_series", "rawQuery": true, "rawSql": "SELECT timestamp AS time, station_name AS metric, temperature AS value FROM demand_weather_1h WHERE $__timeFilter(timestamp) AND station_name IN (${station:singlequote}) ORDER BY timestamp", "refId": "A"}],
+      "title": "선택 지역 기온 추이",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+      "fieldConfig": {
+        "defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 5, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "smooth", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}, "thresholdsStyle": {"mode": "off"}}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "percent"},
+        "overrides": []
+      },
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 49},
+      "id": 22,
+      "options": {"legend": {"calcs": ["mean", "max", "min", "lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"}, "editorMode": "code", "format": "time_series", "rawQuery": true, "rawSql": "SELECT timestamp AS time, station_name AS metric, humidity AS value FROM demand_weather_1h WHERE $__timeFilter(timestamp) AND station_name IN (${station:singlequote}) ORDER BY timestamp", "refId": "A"}],
+      "title": "선택 지역 습도 추이",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["weather", "demand", "1hour"],
+  "templating": {
+    "list": [
+      {
+        "current": {"selected": true, "text": ["서울"], "value": ["서울"]},
+        "datasource": {"type": "grafana-postgresql-datasource", "uid": "demand-postgres"},
+        "definition": "SELECT DISTINCT station_name FROM demand_weather_1h ORDER BY station_name",
+        "hide": 0,
+        "includeAll": false,
+        "label": "지역 선택",
+        "multi": true,
+        "name": "station",
+        "options": [],
+        "query": "SELECT DISTINCT station_name FROM demand_weather_1h ORDER BY station_name",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {"from": "now-7d", "to": "now"},
+  "timepicker": {"refresh_intervals": ["5m", "15m", "30m", "1h"]},
+  "timezone": "Asia/Seoul",
+  "title": "기상+수요 (1시간)",
+  "uid": "weather-demand-1h",
+  "version": 1
+}

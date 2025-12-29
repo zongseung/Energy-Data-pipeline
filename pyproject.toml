@@ -1,0 +1,18 @@
+[project]
+name = "weather-pipeline"
+version = "0.2.0"
+description = "Weather and Power Demand ETL Pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp>=3.13.2",
+    "asyncpg>=0.29.0",
+    "ipykernel>=7.1.0",
+    "pandas>=2.3.3",
+    "prefect>=3.6.5",
+    "pydantic>=2.12.5",
+    "requests>=2.32.5",
+    "scipy>=1.15.3",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "workalendar>=17.0.0",
+]

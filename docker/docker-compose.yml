@@ -1,0 +1,159 @@
+services:
+  # ==============================
+  # Prefect PostgreSQL (기존)
+  # ==============================
+  postgres-new:
+    image: postgres:14
+    container_name: prefect-postgres-new
+    environment:
+      - POSTGRES_USER=prefect
+      - POSTGRES_PASSWORD=prefect
+      - POSTGRES_DB=prefect
+    volumes:
+      - postgres_data_new:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prefect"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - prefect-new
+
+  # ==============================
+  # Demand DB (전력수급 데이터 저장용)
+  # ==============================
+  demand-db:
+    image: postgres:14
+    container_name: demand-postgres
+    environment:
+      - POSTGRES_USER=demand
+      - POSTGRES_PASSWORD=demand
+      - POSTGRES_DB=demand
+    volumes:
+      - demand_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"  # 호스트에서 localhost:5433으로 접속
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U demand"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - prefect-new
+
+  # ==============================
+  # Grafana (대시보드)
+  # ==============================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"  # 호스트 3001 -> 컨테이너 3000
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - TZ=Asia/Seoul
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      demand-db:
+        condition: service_healthy
+    networks:
+      - prefect-new
+
+  prefect-server-new:
+    image: prefecthq/prefect:2-python3.10
+    container_name: prefect-server-new
+    ports:
+      - "4300:4200"   # 호스트에서 http://localhost:4300 으로 접속
+    environment:
+      - PREFECT_SERVER_API_HOST=0.0.0.0
+      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@postgres-new:5432/prefect
+    command: >
+      bash -c "
+        apt-get update &&
+        apt-get install -y curl &&
+        prefect server start
+      "
+    depends_on:
+      postgres-new:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - prefect-new
+
+  # 배포/등록용 컨테이너 (한 번 실행되었다가 종료됨)
+  weather-deployer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: weather-pipeline:latest
+    container_name: weather-deployer
+    env_file:
+      - ../.env          # SERVICE_KEY 등
+    environment:
+      - PREFECT_API_URL=http://prefect-server-new:4200/api
+      - DEMAND_DATABASE_URL=postgresql+asyncpg://demand:demand@demand-db:5432/demand
+      - TZ=Asia/Seoul
+    working_dir: /app
+    depends_on:
+      prefect-server-new:
+        condition: service_healthy
+      demand-db:
+        condition: service_healthy
+    networks:
+      - prefect-new
+    command: >
+      bash -c "
+        echo 'Waiting 15s for Prefect API...' &&
+        sleep 15 &&
+        python -m prefect_flows.deploy
+      "
+
+  # 실제 flow 돌리는 Docker Worker
+  weather-worker-new:
+    image: prefecthq/prefect:2-python3.10
+    container_name: weather-worker-new
+    env_file:
+      - ../.env
+    environment:
+      - PREFECT_API_URL=http://prefect-server-new:4200/api
+      - PREFECT_WORK_POOL=weather-new-pool
+      - DEMAND_DATABASE_URL=postgresql+asyncpg://demand:demand@demand-db:5432/demand
+      - TZ=Asia/Seoul
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      bash -c "
+        echo 'Installing compatible pydantic & prefect-docker...' &&
+        pip install 'pydantic<2.11' &&
+        pip install 'prefect-docker<0.5.0,>=0.3.0' &&
+        pip install 'aiohttp' &&
+        echo 'Starting Prefect docker worker...' &&
+        prefect worker start --type docker --pool weather-new-pool
+      "
+    depends_on:
+      prefect-server-new:
+        condition: service_healthy
+      demand-db:
+        condition: service_healthy
+    networks:
+      - prefect-new
+
+volumes:
+  postgres_data_new:
+  demand_data:
+  grafana_data:
+
+networks:
+  prefect-new:
+    driver: bridge
+    name: weather-pipeline_prefect-new

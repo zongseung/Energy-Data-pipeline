@@ -1,0 +1,48 @@
+services:
+  # ==============================
+  # DB 초기화 (CSV -> SQLite)
+  # ==============================
+  pv-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pv-init
+    environment:
+      - VWORLD_API_KEY=${VWORLD_API_KEY:-}
+      - KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY:-}
+    volumes:
+      - pv_data:/app/data
+    networks:
+      - pv-net
+
+  # ==============================
+  # Grafana (PV 대시보드)
+  # ==============================
+  pv-grafana:
+    build:
+      context: .
+      dockerfile: Dockerfile.grafana
+    container_name: pv-grafana
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - TZ=Asia/Seoul
+    volumes:
+      - grafana_pv_data:/var/lib/grafana
+      - pv_data:/var/lib/grafana/data:ro
+    depends_on:
+      pv-init:
+        condition: service_completed_successfully
+    networks:
+      - pv-net
+
+volumes:
+  pv_data:
+  grafana_pv_data:
+
+networks:
+  pv-net:
+    driver: bridge

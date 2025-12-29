@@ -1,0 +1,22 @@
+FROM grafana/grafana:latest
+
+USER root
+
+# SQLite 플러그인 설치
+ENV GF_INSTALL_PLUGINS=frser-sqlite-datasource
+
+# 디렉토리 생성 (볼륨에 덮어쓰이지 않는 경로 사용)
+RUN mkdir -p /etc/grafana/provisioning/datasources && \
+    mkdir -p /etc/grafana/provisioning/dashboards && \
+    mkdir -p /etc/grafana/dashboards
+
+# Provisioning 설정 복사
+COPY grafana/provisioning/datasources/datasources.yml /etc/grafana/provisioning/datasources/
+COPY grafana/provisioning/dashboards/dashboards.yml /etc/grafana/provisioning/dashboards/
+COPY grafana/dashboards/pv_dashboard.json /etc/grafana/dashboards/
+
+# 권한 설정
+RUN chown -R grafana:root /etc/grafana && \
+    chmod -R 755 /etc/grafana
+
+USER grafana
