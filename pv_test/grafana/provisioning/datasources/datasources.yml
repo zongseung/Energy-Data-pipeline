@@ -1,11 +1,18 @@
 apiVersion: 1
 
 datasources:
-  - name: PV-SQLite
-    uid: pv-sqlite
-    type: frser-sqlite-datasource
-    access: proxy
+  - name: PV-PostgreSQL
+    uid: pv-postgres
+    type: postgres
+    url: pv-db:5432
+    database: pv_data
+    user: pv_admin
+    secureJsonData:
+      password: pv_secure_2024
     jsonData:
-      path: /var/lib/grafana/data/pv.db
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 5
+      connMaxLifetime: 14400
     isDefault: true
     editable: true

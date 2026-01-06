@@ -1,0 +1,444 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "gridPos": { "h": 2, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "options": {
+        "content": "# 🌞 태양광 발전 현황 대시보드\n남동발전 / 남부발전 발전량 모니터링",
+        "mode": "markdown"
+      },
+      "title": "",
+      "type": "text"
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 2 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["sum"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT SUM(generation) as total FROM namdong_generation WHERE datetime >= NOW() - INTERVAL '30 days'",
+          "refId": "A"
+        }
+      ],
+      "title": "남동발전 총 발전량 (30일)",
+      "type": "stat"
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 2 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["sum"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT SUM(generation) as total FROM nambu_generation WHERE datetime >= NOW() - INTERVAL '30 days'",
+          "refId": "A"
+        }
+      ],
+      "title": "남부발전 총 발전량 (30일)",
+      "type": "stat"
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 2 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["count"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as cnt FROM namdong_plants",
+          "refId": "A"
+        }
+      ],
+      "title": "남동발전 발전소 수",
+      "type": "stat"
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 2 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["count"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) as cnt FROM nambu_plants",
+          "refId": "A"
+        }
+      ],
+      "title": "남부발전 발전소 수",
+      "type": "stat"
+    },
+    {
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "id": 10,
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "발전량 (kWh)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["sum", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT datetime as time, SUM(generation) as \"남동발전\" FROM namdong_generation WHERE $__timeFilter(datetime) GROUP BY datetime ORDER BY datetime",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 남동발전 일별 발전량",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "id": 11,
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "발전량 (kWh)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "calcs": ["sum", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT datetime as time, SUM(generation) as \"남부발전\" FROM nambu_generation WHERE $__timeFilter(datetime) GROUP BY datetime ORDER BY datetime",
+          "refId": "A"
+        }
+      ],
+      "title": "📊 남부발전 일별 발전량",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 16 },
+      "id": 20,
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "pieType": "pie",
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT plant_name, SUM(generation) as total FROM namdong_generation GROUP BY plant_name ORDER BY total DESC LIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "🏭 남동발전 발전소별 발전량 (Top 10)",
+      "type": "piechart"
+    },
+    {
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 16 },
+      "id": 21,
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "pieType": "pie",
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT plant_name, SUM(generation) as total FROM nambu_generation GROUP BY plant_name ORDER BY total DESC LIMIT 10",
+          "refId": "A"
+        }
+      ],
+      "title": "🏭 남부발전 발전소별 발전량 (Top 10)",
+      "type": "piechart"
+    },
+    {
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 26 },
+      "id": 30,
+      "options": {
+        "basemap": { "config": {}, "name": "Layer 0", "type": "default" },
+        "controls": { "mouseWheelZoom": true, "showAttribution": true, "showDebug": false, "showMeasure": false, "showScale": false, "showZoom": true },
+        "layers": [
+          {
+            "config": {
+              "showLegend": true,
+              "style": {
+                "color": { "fixed": "#F2495C" },
+                "opacity": 0.8,
+                "rotation": { "fixed": 0, "max": 360, "min": -360, "mode": "mod" },
+                "size": { "fixed": 8, "max": 15, "min": 2 },
+                "symbol": { "fixed": "img/icons/marker/circle.svg", "mode": "fixed" },
+                "textConfig": { "fontSize": 12, "offsetX": 0, "offsetY": 0, "textAlign": "center", "textBaseline": "middle" }
+              }
+            },
+            "location": { "latitude": "latitude", "longitude": "longitude", "mode": "coords" },
+            "name": "남동발전 발전소",
+            "tooltip": true,
+            "type": "markers"
+          }
+        ],
+        "tooltip": { "mode": "details" },
+        "view": { "allLayers": true, "id": "coords", "lat": 36.5, "lon": 127.5, "zoom": 6 }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT plant_name, latitude, longitude FROM namdong_plants WHERE latitude IS NOT NULL",
+          "refId": "A"
+        }
+      ],
+      "title": "🗺️ 남동발전 발전소 위치",
+      "type": "geomap"
+    },
+    {
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 26 },
+      "id": 31,
+      "options": {
+        "basemap": { "config": {}, "name": "Layer 0", "type": "default" },
+        "controls": { "mouseWheelZoom": true, "showAttribution": true, "showDebug": false, "showMeasure": false, "showScale": false, "showZoom": true },
+        "layers": [
+          {
+            "config": {
+              "showLegend": true,
+              "style": {
+                "color": { "fixed": "#73BF69" },
+                "opacity": 0.8,
+                "rotation": { "fixed": 0, "max": 360, "min": -360, "mode": "mod" },
+                "size": { "fixed": 8, "max": 15, "min": 2 },
+                "symbol": { "fixed": "img/icons/marker/circle.svg", "mode": "fixed" },
+                "textConfig": { "fontSize": 12, "offsetX": 0, "offsetY": 0, "textAlign": "center", "textBaseline": "middle" }
+              }
+            },
+            "location": { "latitude": "latitude", "longitude": "longitude", "mode": "coords" },
+            "name": "남부발전 발전소",
+            "tooltip": true,
+            "type": "markers"
+          }
+        ],
+        "tooltip": { "mode": "details" },
+        "view": { "allLayers": true, "id": "coords", "lat": 36.5, "lon": 127.5, "zoom": 6 }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT plant_name, address, latitude, longitude FROM nambu_plants WHERE latitude IS NOT NULL",
+          "refId": "A"
+        }
+      ],
+      "title": "🗺️ 남부발전 발전소 위치",
+      "type": "geomap"
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 38 },
+      "id": 40,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": true,
+            "inspect": true
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "total" }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT plant_name as \"발전소명\", latitude as \"위도\", longitude as \"경도\" FROM namdong_plants ORDER BY plant_name",
+          "refId": "A"
+        }
+      ],
+      "title": "📋 남동발전 발전소 목록",
+      "type": "table"
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 38 },
+      "id": 41,
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": { "type": "auto" },
+            "filterable": true,
+            "inspect": true
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "enablePagination": true, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true,
+        "sortBy": [{ "desc": true, "displayName": "total" }]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
+          "format": "table",
+          "rawSql": "SELECT plant_name as \"발전소명\", address as \"주소\", capacity as \"설치용량\", latitude as \"위도\", longitude as \"경도\" FROM nambu_plants ORDER BY plant_name",
+          "refId": "A"
+        }
+      ],
+      "title": "📋 남부발전 발전소 목록",
+      "type": "table"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["solar", "pv", "energy"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "Asia/Seoul",
+  "title": "태양광 발전 현황 (남동/남부)",
+  "uid": "pv-dashboard-v2",
+  "version": 1,
+  "weekStart": ""
+}

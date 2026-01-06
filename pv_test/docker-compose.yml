@@ -1,17 +1,44 @@
 services:
   # ==============================
-  # DB 초기화 (CSV -> SQLite)
+  # PostgreSQL DB
+  # ==============================
+  pv-db:
+    image: postgres:15-alpine
+    container_name: pv-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASS}
+      - POSTGRES_DB=${DB_NAME}
+    ports:
+      - "5435:5432"
+    volumes:
+      - pv_postgres_data:/var/lib/postgresql/data
+    networks:
+      - pv-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==============================
+  # DB 초기화 (CSV -> PostgreSQL)
   # ==============================
   pv-init:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: pv-init
+    env_file: .env
     environment:
-      - VWORLD_API_KEY=${VWORLD_API_KEY:-}
-      - KAKAO_REST_API_KEY=${KAKAO_REST_API_KEY:-}
+      - DB_HOST=pv-db
+      - DB_PORT=5432
     volumes:
-      - pv_data:/app/data
+      - ./input:/app/input:ro
+    depends_on:
+      pv-db:
+        condition: service_healthy
     networks:
       - pv-net
 
@@ -24,15 +51,14 @@ services:
       dockerfile: Dockerfile.grafana
     container_name: pv-grafana
     ports:
-      - "3002:3000"
+      - "3005:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
       - GF_USERS_ALLOW_SIGN_UP=false
       - TZ=Asia/Seoul
     volumes:
       - grafana_pv_data:/var/lib/grafana
-      - pv_data:/var/lib/grafana/data:ro
     depends_on:
       pv-init:
         condition: service_completed_successfully
@@ -40,7 +66,7 @@ services:
       - pv-net
 
 volumes:
-  pv_data:
+  pv_postgres_data:
   grafana_pv_data:
 
 networks:

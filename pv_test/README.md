@@ -119,7 +119,7 @@ docker-compose up -d
 
 - **Prefect 파이프라인 없음** (테스트용)
 - **SQLite 사용** (경량화)
-- **기존 demand/weather 환경과 독립적** 운영
+- **기존 PV/weather 환경과 독립적** 운영
 - **Grafana Geomap**: OpenStreetMap 기반 (API 키 불필요)
 
 ## API 키 발급
