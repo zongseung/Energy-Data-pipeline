@@ -11,7 +11,7 @@
   "panels": [
     {
       "datasource": {
-        "type": "grafana-postgresql-datasource",
+        "type": "postgres",
         "uid": "pv-postgres"
       },
       "fieldConfig": {
@@ -30,40 +30,19 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 100
-              },
-              {
-                "color": "orange",
-                "value": 500
-              },
-              {
-                "color": "red",
-                "value": 1000
-              }
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "orange", "value": 500 },
+              { "color": "red", "value": 1000 }
             ]
           }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 12,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
+      "gridPos": { "h": 12, "w": 12, "x": 0, "y": 0 },
       "id": 1,
       "options": {
-        "basemap": {
-          "config": {},
-          "name": "Layer 0",
-          "type": "default"
-        },
+        "basemap": { "config": {}, "name": "Layer 0", "type": "default" },
         "controls": {
           "mouseWheelZoom": true,
           "showAttribution": true,
@@ -77,68 +56,31 @@
             "config": {
               "showLegend": true,
               "style": {
-                "color": {
-                  "field": "generation",
-                  "fixed": "dark-green"
-                },
+                "color": { "field": "generation", "fixed": "dark-green" },
                 "opacity": 0.8,
-                "rotation": {
-                  "fixed": 0,
-                  "max": 360,
-                  "min": -360,
-                  "mode": "mod"
-                },
-                "size": {
-                  "field": "generation",
-                  "fixed": 5,
-                  "max": 20,
-                  "min": 5
-                },
-                "symbol": {
-                  "fixed": "img/icons/marker/circle.svg",
-                  "mode": "fixed"
-                },
-                "textConfig": {
-                  "fontSize": 12,
-                  "offsetX": 0,
-                  "offsetY": 0,
-                  "textAlign": "center",
-                  "textBaseline": "middle"
-                }
+                "rotation": { "fixed": 0, "max": 360, "min": -360, "mode": "mod" },
+                "size": { "field": "generation", "fixed": 5, "max": 20, "min": 5 },
+                "symbol": { "fixed": "img/icons/marker/circle.svg", "mode": "fixed" },
+                "textConfig": { "fontSize": 12, "offsetX": 0, "offsetY": 0, "textAlign": "center", "textBaseline": "middle" }
               }
             },
-            "location": {
-              "latitude": "lat",
-              "longitude": "lon",
-              "mode": "coords"
-            },
+            "location": { "latitude": "latitude", "longitude": "longitude", "mode": "coords" },
             "name": "Nambu Plants",
             "tooltip": true,
             "type": "markers"
           }
         ],
-        "tooltip": {
-          "mode": "details"
-        },
-        "view": {
-          "allLayers": true,
-          "id": "coords",
-          "lat": 36.0,
-          "lon": 127.5,
-          "zoom": 7
-        }
+        "tooltip": { "mode": "details" },
+        "view": { "allLayers": true, "id": "coords", "latitude": 35.5, "longitude": 128.0, "zoom": 7 }
       },
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT \n  plant_name,\n  lat,\n  lon,\n  SUM(generation) as generation\nFROM pv_nambu\nWHERE timestamp >= NOW() - INTERVAL '24 hours'\n  AND lat IS NOT NULL\nGROUP BY plant_name, lat, lon\nORDER BY generation DESC",
+          "rawSql": "SELECT p.plant_name, p.latitude, p.longitude, COALESCE(SUM(g.generation), 0) as generation FROM nambu_plants p LEFT JOIN nambu_generation g ON p.plant_name = g.plant_name AND g.datetime >= $__timeFrom() AND g.datetime <= $__timeTo() WHERE p.latitude IS NOT NULL GROUP BY p.plant_name, p.latitude, p.longitude ORDER BY generation DESC",
           "refId": "A"
         }
       ],
@@ -147,7 +89,7 @@
     },
     {
       "datasource": {
-        "type": "grafana-postgresql-datasource",
+        "type": "postgres",
         "uid": "pv-postgres"
       },
       "fieldConfig": {
@@ -166,40 +108,19 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {
-                "color": "blue",
-                "value": null
-              },
-              {
-                "color": "cyan",
-                "value": 100
-              },
-              {
-                "color": "light-blue",
-                "value": 500
-              },
-              {
-                "color": "dark-blue",
-                "value": 1000
-              }
+              { "color": "blue", "value": null },
+              { "color": "cyan", "value": 100 },
+              { "color": "light-blue", "value": 500 },
+              { "color": "dark-blue", "value": 1000 }
             ]
           }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 12,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
+      "gridPos": { "h": 12, "w": 12, "x": 12, "y": 0 },
       "id": 2,
       "options": {
-        "basemap": {
-          "config": {},
-          "name": "Layer 0",
-          "type": "default"
-        },
+        "basemap": { "config": {}, "name": "Layer 0", "type": "default" },
         "controls": {
           "mouseWheelZoom": true,
           "showAttribution": true,
@@ -213,68 +134,31 @@
             "config": {
               "showLegend": true,
               "style": {
-                "color": {
-                  "field": "generation",
-                  "fixed": "dark-blue"
-                },
+                "color": { "field": "generation", "fixed": "dark-blue" },
                 "opacity": 0.8,
-                "rotation": {
-                  "fixed": 0,
-                  "max": 360,
-                  "min": -360,
-                  "mode": "mod"
-                },
-                "size": {
-                  "field": "generation",
-                  "fixed": 5,
-                  "max": 20,
-                  "min": 5
-                },
-                "symbol": {
-                  "fixed": "img/icons/marker/circle.svg",
-                  "mode": "fixed"
-                },
-                "textConfig": {
-                  "fontSize": 12,
-                  "offsetX": 0,
-                  "offsetY": 0,
-                  "textAlign": "center",
-                  "textBaseline": "middle"
-                }
+                "rotation": { "fixed": 0, "max": 360, "min": -360, "mode": "mod" },
+                "size": { "field": "generation", "fixed": 5, "max": 20, "min": 5 },
+                "symbol": { "fixed": "img/icons/marker/circle.svg", "mode": "fixed" },
+                "textConfig": { "fontSize": 12, "offsetX": 0, "offsetY": 0, "textAlign": "center", "textBaseline": "middle" }
               }
             },
-            "location": {
-              "latitude": "lat",
-              "longitude": "lon",
-              "mode": "coords"
-            },
+            "location": { "latitude": "latitude", "longitude": "longitude", "mode": "coords" },
             "name": "Namdong Plants",
             "tooltip": true,
             "type": "markers"
           }
         ],
-        "tooltip": {
-          "mode": "details"
-        },
-        "view": {
-          "allLayers": true,
-          "id": "coords",
-          "lat": 36.0,
-          "lon": 127.5,
-          "zoom": 7
-        }
+        "tooltip": { "mode": "details" },
+        "view": { "allLayers": true, "id": "coords", "latitude": 36.5, "longitude": 127.5, "zoom": 7 }
       },
       "pluginVersion": "10.0.0",
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT \n  plant_name,\n  lat,\n  lon,\n  SUM(generation) as generation\nFROM pv_namdong\nWHERE timestamp >= NOW() - INTERVAL '24 hours'\n  AND lat IS NOT NULL\nGROUP BY plant_name, lat, lon\nORDER BY generation DESC",
+          "rawSql": "SELECT p.plant_name, p.latitude, p.longitude, COALESCE(SUM(g.generation), 0) as generation FROM namdong_plants p LEFT JOIN namdong_generation g ON p.plant_name = g.plant_name AND g.datetime >= $__timeFrom() AND g.datetime <= $__timeTo() WHERE p.latitude IS NOT NULL GROUP BY p.plant_name, p.latitude, p.longitude ORDER BY generation DESC",
           "refId": "A"
         }
       ],
@@ -282,15 +166,10 @@
       "type": "geomap"
     },
     {
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "pv-postgres"
-      },
+      "datasource": { "type": "postgres", "uid": "pv-postgres" },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "color": { "mode": "palette-classic" },
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
@@ -300,70 +179,35 @@
             "drawStyle": "line",
             "fillOpacity": 20,
             "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
+            "scaleDistribution": { "type": "linear" },
             "showPoints": "auto",
             "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
           },
           "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
           "unit": "kwatth"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 12
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "id": 3,
       "options": {
-        "legend": {
-          "calcs": ["sum", "mean"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "calcs": ["sum", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT \n  date_trunc('hour', timestamp) as time,\n  plant_name,\n  SUM(generation) as generation\nFROM pv_nambu\nWHERE timestamp >= $__timeFrom() AND timestamp <= $__timeTo()\nGROUP BY date_trunc('hour', timestamp), plant_name\nORDER BY time",
+          "rawSql": "SELECT date_trunc('hour', datetime) as time, plant_name, SUM(generation) as generation FROM nambu_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo() GROUP BY date_trunc('hour', datetime), plant_name ORDER BY time",
           "refId": "A"
         }
       ],
@@ -371,15 +215,10 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "pv-postgres"
-      },
+      "datasource": { "type": "postgres", "uid": "pv-postgres" },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
+          "color": { "mode": "palette-classic" },
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
@@ -389,70 +228,35 @@
             "drawStyle": "line",
             "fillOpacity": 20,
             "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
             "lineInterpolation": "smooth",
             "lineWidth": 2,
             "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
+            "scaleDistribution": { "type": "linear" },
             "showPoints": "auto",
             "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
           },
           "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
           "unit": "kwatth"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 12
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "id": 4,
       "options": {
-        "legend": {
-          "calcs": ["sum", "mean"],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "calcs": ["sum", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       },
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT \n  date_trunc('hour', timestamp) as time,\n  plant_name,\n  SUM(generation) as generation\nFROM pv_namdong\nWHERE timestamp >= $__timeFrom() AND timestamp <= $__timeTo()\nGROUP BY date_trunc('hour', timestamp), plant_name\nORDER BY time",
+          "rawSql": "SELECT (datetime + (hour * INTERVAL '1 hour')) as time, plant_name, SUM(generation) as generation FROM namdong_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo() GROUP BY (datetime + (hour * INTERVAL '1 hour')), plant_name ORDER BY time",
           "refId": "A"
         }
       ],
@@ -460,175 +264,100 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "pv-postgres"
-      },
+      "datasource": { "type": "postgres", "uid": "pv-postgres" },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
           "unit": "kwatth"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 0,
-        "y": 20
-      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
       "id": 5,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(generation) as total FROM pv_nambu WHERE timestamp >= NOW() - INTERVAL '24 hours'",
+          "rawSql": "SELECT SUM(generation) as total FROM nambu_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo()",
           "refId": "A"
         }
       ],
-      "title": "남부발전 24시간 총 발전량",
+      "title": "남부발전 선택기간 총 발전량",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "pv-postgres"
-      },
+      "datasource": { "type": "postgres", "uid": "pv-postgres" },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
           "unit": "kwatth"
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 20
-      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 20 },
       "id": 6,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(generation) as total FROM pv_namdong WHERE timestamp >= NOW() - INTERVAL '24 hours'",
+          "rawSql": "SELECT SUM(generation) as total FROM namdong_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo()",
           "refId": "A"
         }
       ],
-      "title": "남동발전 24시간 총 발전량",
+      "title": "남동발전 선택기간 총 발전량",
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "pv-postgres"
-      },
+      "datasource": { "type": "postgres", "uid": "pv-postgres" },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          }
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 20
-      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 20 },
       "id": 7,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM plant_info_nambu",
+          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM nambu_plants",
           "refId": "A"
         }
       ],
@@ -636,57 +365,32 @@
       "type": "stat"
     },
     {
-      "datasource": {
-        "type": "grafana-postgresql-datasource",
-        "uid": "pv-postgres"
-      },
+      "datasource": { "type": "postgres", "uid": "pv-postgres" },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
+          "color": { "mode": "thresholds" },
           "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          }
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
         },
         "overrides": []
       },
-      "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 20
-      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 20 },
       "id": 8,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        },
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
       "targets": [
         {
-          "datasource": {
-            "type": "grafana-postgresql-datasource",
-            "uid": "pv-postgres"
-          },
+          "datasource": { "type": "postgres", "uid": "pv-postgres" },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM plant_info_namdong",
+          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM namdong_plants",
           "refId": "A"
         }
       ],
@@ -698,13 +402,8 @@
   "schemaVersion": 38,
   "style": "dark",
   "tags": ["pv", "solar", "energy"],
-  "templating": {
-    "list": []
-  },
-  "time": {
-    "from": "now-7d",
-    "to": "now"
-  },
+  "templating": { "list": [] },
+  "time": { "from": "2025-12-01T00:00:00.000Z", "to": "2025-12-31T23:59:59.000Z" },
   "timepicker": {},
   "timezone": "Asia/Seoul",
   "title": "PV Solar Generation Dashboard",

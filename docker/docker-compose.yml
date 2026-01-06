@@ -1,77 +1,80 @@
 services:
   # ==============================
-  # Prefect PostgreSQL (기존)
+  # Prefect PostgreSQL (PV 전용)
   # ==============================
-  postgres-new:
+  pv-prefect-postgres:
     image: postgres:14
-    container_name: prefect-postgres-new
+    container_name: pv-prefect-postgres
     environment:
       - POSTGRES_USER=prefect
       - POSTGRES_PASSWORD=prefect
       - POSTGRES_DB=prefect
     volumes:
-      - postgres_data_new:/var/lib/postgresql/data
+      - pv_prefect_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U prefect"]
       interval: 5s
       timeout: 5s
       retries: 10
     networks:
-      - prefect-new
+      - pv-network
 
   # ==============================
   # PV DB (태양광 발전 데이터 저장용)
   # ==============================
   pv-db:
     image: postgres:14
-    container_name: pv-postgres
+    container_name: pv-data-postgres
     environment:
       - POSTGRES_USER=pv
       - POSTGRES_PASSWORD=pv
       - POSTGRES_DB=pv
     volumes:
-      - pv_data:/var/lib/postgresql/data
+      - pv_data_postgres:/var/lib/postgresql/data
     ports:
-      - "5434:5432"  # 호스트에서 localhost:5434으로 접속
+      - "5436:5432"  # 호스트에서 localhost:5436으로 접속
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pv"]
       interval: 5s
       timeout: 5s
       retries: 10
     networks:
-      - prefect-new
+      - pv-network
 
   # ==============================
   # Grafana (대시보드)
   # ==============================
   pv-grafana:
     image: grafana/grafana:latest
-    container_name: pv-grafana
+    container_name: pv-pipeline-grafana
     ports:
-      - "3003:3000"  # 호스트 3003 -> 컨테이너 3000
+      - "3006:3000"  # 호스트 3006 -> 컨테이너 3000
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - TZ=Asia/Seoul
     volumes:
-      - grafana_data:/var/lib/grafana
+      - pv_grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       pv-db:
         condition: service_healthy
     networks:
-      - prefect-new
+      - pv-network
 
-  prefect-server-new:
+  # ==============================
+  # Prefect Server (PV 전용)
+  # ==============================
+  pv-prefect-server:
     image: prefecthq/prefect:2-python3.10
-    container_name: prefect-server-new
+    container_name: pv-prefect-server
     ports:
-      - "4300:4200"   # 호스트에서 http://localhost:4300 으로 접속
+      - "4400:4200"   # 호스트에서 http://localhost:4400 으로 접속
     environment:
       - PREFECT_SERVER_API_HOST=0.0.0.0
-      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@postgres-new:5432/prefect
+      - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@pv-prefect-postgres:5432/prefect
     command: >
       bash -c "
         apt-get update &&
@@ -79,7 +82,7 @@ services:
         prefect server start
       "
     depends_on:
-      postgres-new:
+      pv-prefect-postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
@@ -87,7 +90,7 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - prefect-new
+      - pv-network
 
   # 배포/등록용 컨테이너 (한 번 실행되었다가 종료됨)
   pv-deployer:
@@ -97,19 +100,19 @@ services:
     image: pv-pipeline:latest
     container_name: pv-deployer
     env_file:
-      - ../.env          # SERVICE_KEY 등
+      - ../.env
     environment:
-      - PREFECT_API_URL=http://prefect-server-new:4200/api
+      - PREFECT_API_URL=http://pv-prefect-server:4200/api
       - PV_DATABASE_URL=postgresql+psycopg2://pv:pv@pv-db:5432/pv
       - TZ=Asia/Seoul
     working_dir: /app
     depends_on:
-      prefect-server-new:
+      pv-prefect-server:
         condition: service_healthy
       pv-db:
         condition: service_healthy
     networks:
-      - prefect-new
+      - pv-network
     command: >
       bash -c "
         echo 'Waiting 15s for Prefect API...' &&
@@ -120,11 +123,11 @@ services:
   # 실제 flow 돌리는 Docker Worker
   pv-worker:
     image: prefecthq/prefect:2-python3.10
-    container_name: pv-worker
+    container_name: pv-pipeline-worker
     env_file:
       - ../.env
     environment:
-      - PREFECT_API_URL=http://prefect-server-new:4200/api
+      - PREFECT_API_URL=http://pv-prefect-server:4200/api
       - PREFECT_WORK_POOL=pv-pool
       - PV_DATABASE_URL=postgresql+psycopg2://pv:pv@pv-db:5432/pv
       - TZ=Asia/Seoul
@@ -141,19 +144,19 @@ services:
         prefect worker start --type docker --pool pv-pool
       "
     depends_on:
-      prefect-server-new:
+      pv-prefect-server:
         condition: service_healthy
       pv-db:
         condition: service_healthy
     networks:
-      - prefect-new
+      - pv-network
 
 volumes:
-  postgres_data_new:
-  pv_data:
-  grafana_data:
+  pv_prefect_postgres_data:
+  pv_data_postgres:
+  pv_grafana_data:
 
 networks:
-  prefect-new:
+  pv-network:
     driver: bridge
-    name: pv-pipeline_prefect
+    name: pv-pipeline-network
