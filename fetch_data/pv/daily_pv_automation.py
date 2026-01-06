@@ -143,3 +143,5 @@ def solar_automation_flow():
 
 if __name__ == "__main__":
     solar_automation_flow()
+
+    #teset
