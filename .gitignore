@@ -1,48 +1,101 @@
-# Byte-compiled / cache
+############################
+# 🐍 Python bytecode / cache
+############################
 __pycache__/
 *.py[cod]
 *.pyo
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Virtual environments
+############################
+# 🧪 Virtual environments
+############################
 .venv/
 venv/
+env/
 .python-version
 
-# IDE / editor
+############################
+# 🧠 IDE / Editors
+############################
 .idea/
 .vscode/
 *.code-workspace
 
-# Environment / secrets
+############################
+# 🔐 Environment / Secrets
+############################
 .env
 .env.*
+*.env
 
-# Logs / coverage
+docker/secrets/
+docker/*secret*
+docker/*token*
+docker/*pat*
+docker/github_pat_*
+
+############################
+# 📜 Logs / Coverage
+############################
 *.log
 .coverage
 .coverage.*
 
-# OS / misc
+############################
+# 💻 OS / Misc
+############################
 .DS_Store
 Thumbs.db
+Untitled
+*.tmp
 
+############################
+# 📊 Data files
+############################
 *.csv
 
-# Data Directories (데이터 용량이 크므로 Git에서 제외)
-pv_data_raw/          # nambu_bulk_sync.py에서 생성
-pv_data_processed/    # nambu_merge_pv_data.py에서 생성
-pv_start_dates.csv    # nambu_probe_date.py에서 생성
+############################
+# 🗃 Large Data Directories
+# (auto-generated, DO NOT COMMIT)
+############################
+pv_data_raw/          # nambu_bulk_sync.py
+pv_data_processed/    # nambu_merge_pv_data.py
+pv_start_dates.csv    # nambu_probe_date.py
 
-# Prefect internal files
-.prefect/             # Prefect 로컬 설정 및 캐시
-prefect.db            # 로컬 Prefect DB 사용 시 생성
+pv_data/
+data/
+db/
 
-# Jupyter Notebook (연구용으로 사용하실 경우 대비)
+############################
+# 🧠 Prefect
+############################
+.prefect/
+.prefectignore
+prefect.db
+
+############################
+# 📓 Jupyter
+############################
 .ipynb_checkpoints/
 
-# Docker 관련 (로컬 볼륨 매핑 시 대비)
+############################
+# 🐳 Docker (local volumes)
+############################
 postgres_data/
 grafana_data/
+
+############################
+# 📈 Grafana runtime
+############################
+grafana/data/
+grafana/logs/
+
+############################
+# 📦 Build / Packaging
+############################
+build/
+dist/
+*.egg-info/
