@@ -1,7 +1,7 @@
 """
 Prefect ETL Pipeline
 
-일일 기상 데이터 수집 + 시간별 전력수요 수집 통합 파이프라인
+일일 기상 데이터 수집 파이프라인
 """
 
 import sys
@@ -18,9 +18,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fetch_data.weather.collect_asos import select_data_async, station_ids
 from fetch_data.common.impute_missing import impute_missing_values
-from fetch_data.demand.collect_demand import collect_recent_hours, collect_with_backfill
-from fetch_data.aggregate_hourly import aggregate_recent_hours, aggregate_with_backfill
-from fetch_data.common.database import init_db
 from prefect_flows.merge_to_all import merge_to_all_csv
 
 
@@ -207,69 +204,6 @@ def merge_weather_to_all(output_path: str) -> str:
 
 
 # ==============================
-# 전력수요 수집 Tasks
-# ==============================
-
-@task(name="DB 초기화", retries=2)
-async def initialize_database():
-    """데이터베이스 테이블을 초기화합니다."""
-    await init_db()
-    print("[DB] 테이블 초기화 완료")
-
-
-@task(name="전력수요 수집 (최근)", retries=3, retry_delay_seconds=60)
-async def collect_demand_recent(hours: int = 2) -> int:
-    """최근 N시간의 전력수요 데이터를 수집합니다."""
-    print(f"\n{'='*60}")
-    print(f"전력수요 수집 (최근 {hours}시간)")
-    print(f"{'='*60}\n")
-
-    count = await collect_recent_hours(hours=hours)
-    print(f"수집 완료: {count}건")
-
-    return count
-
-
-@task(name="전력수요 백필", retries=2, retry_delay_seconds=300)
-async def collect_demand_backfill() -> int:
-    """전력수요 데이터를 백필합니다."""
-    print(f"\n{'='*60}")
-    print("전력수요 백필 시작")
-    print(f"{'='*60}\n")
-
-    count = await collect_with_backfill()
-    print(f"백필 완료: {count}건")
-
-    return count
-
-
-@task(name="1시간 데이터 통합 (최근)", retries=2)
-async def aggregate_hourly_recent(hours: int = 24) -> int:
-    """최근 N시간의 기상+수요 데이터를 통합합니다."""
-    print(f"\n{'='*60}")
-    print(f"1시간 데이터 통합 (최근 {hours}시간)")
-    print(f"{'='*60}\n")
-
-    count = await aggregate_recent_hours(hours=hours)
-    print(f"통합 완료: {count}건")
-
-    return count
-
-
-@task(name="1시간 데이터 백필", retries=2)
-async def aggregate_hourly_backfill() -> int:
-    """1시간 단위 통합 데이터를 백필합니다."""
-    print(f"\n{'='*60}")
-    print("1시간 데이터 백필 시작")
-    print(f"{'='*60}\n")
-
-    count = await aggregate_with_backfill()
-    print(f"백필 완료: {count}건")
-
-    return count
-
-
-# ==============================
 # Utility Functions
 # ==============================
 
@@ -339,143 +273,12 @@ def daily_weather_collection_flow(target_date: str | None = None):
         raise
 
 
-@flow(name="hourly-demand-collection-flow", log_prints=True)
-async def hourly_demand_collection_flow(hours: int = 2):
-    """
-    시간별 전력수요 수집 플로우
-
-    매 시간 실행되어 최근 데이터를 수집합니다.
-    """
-    start_time = datetime.now()
-    print(f"\n{'='*60}")
-    print("시간별 전력수요 수집 플로우 시작")
-    print(f"실행 시각: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}\n")
-
-    try:
-        # 1. DB 초기화
-        await initialize_database()
-
-        # 2. 최근 전력수요 수집
-        demand_count = await collect_demand_recent(hours=hours)
-
-        # 3. 1시간 데이터 통합
-        hourly_count = await aggregate_hourly_recent(hours=24)
-
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-
-        print(f"\n플로우 완료!")
-        print(f"- 전력수요: {demand_count}건")
-        print(f"- 1시간 통합: {hourly_count}건")
-        print(f"- 소요시간: {duration:.1f}초")
-
-        # 4. Slack 리치 알림
-        notify_slack_rich.submit(
-            "전력수요 수집 완료",
-            "success",
-            {
-                "수집 기간": f"최근 {hours}시간",
-                "5분 데이터": f"{demand_count:,}건",
-                "1시간 통합": f"{hourly_count:,}건",
-                "소요시간": f"{duration:.1f}초",
-            }
-        )
-
-        return {"demand": demand_count, "hourly": hourly_count}
-
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {e}"
-        print(f"\n플로우 실행 중 에러 발생: {error_msg}")
-
-        # 실패 알림
-        notify_slack_rich.submit(
-            "전력수요 수집 실패",
-            "error",
-            {
-                "에러 타입": type(e).__name__,
-                "에러 메시지": str(e)[:200],
-            }
-        )
-        raise
-
-
-@flow(name="backfill-flow", log_prints=True)
-async def backfill_flow(default_start: str = "20240101"):
-    """
-    백필 플로우
-
-    누락된 모든 데이터를 수집합니다.
-    """
-    start_time = datetime.now()
-    print(f"\n{'='*60}")
-    print("백필 플로우 시작")
-    print(f"실행 시각: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"기본 시작일: {default_start}")
-    print(f"{'='*60}\n")
-
-    # 시작 알림
-    notify_slack_rich.submit(
-        "백필 작업 시작",
-        "info",
-        {
-            "기본 시작일": default_start,
-            "시작 시각": start_time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-    )
-
-    try:
-        # 1. DB 초기화
-        await initialize_database()
-
-        # 2. 전력수요 백필
-        demand_count = await collect_demand_backfill()
-
-        # 3. 1시간 데이터 백필
-        hourly_count = await aggregate_hourly_backfill()
-
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-
-        print(f"\n백필 완료!")
-        print(f"- 전력수요: {demand_count}건")
-        print(f"- 1시간 통합: {hourly_count}건")
-        print(f"- 소요시간: {duration:.1f}초")
-
-        # 완료 알림
-        notify_slack_rich.submit(
-            "백필 작업 완료",
-            "success",
-            {
-                "5분 데이터": f"{demand_count:,}건",
-                "1시간 통합": f"{hourly_count:,}건",
-                "소요시간": f"{duration:.1f}초",
-            }
-        )
-
-        return {"demand": demand_count, "hourly": hourly_count}
-
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {e}"
-        print(f"\n백필 중 에러 발생: {error_msg}")
-
-        notify_slack_rich.submit(
-            "백필 작업 실패",
-            "error",
-            {
-                "에러 타입": type(e).__name__,
-                "에러 메시지": str(e)[:200],
-            }
-        )
-        raise
-
-
 @flow(name="full-etl-flow", log_prints=True)
-async def full_etl_flow(target_date: str | None = None):
+def full_etl_flow(target_date: str | None = None):
     """
     전체 ETL 플로우
 
-    기상 데이터 수집 + 전력수요 수집 + 1시간 통합을 모두 수행합니다.
+    기상 데이터 수집을 수행합니다.
     """
     print(f"\n{'='*60}")
     print("전체 ETL 플로우 시작")
@@ -485,30 +288,17 @@ async def full_etl_flow(target_date: str | None = None):
     results = {}
 
     try:
-        # 1. 기상 데이터 수집
-        print("\n[1/3] 기상 데이터 수집...")
+        # 기상 데이터 수집
+        print("\n[1/1] 기상 데이터 수집...")
         weather_path = daily_weather_collection_flow(target_date)
         results["weather"] = weather_path
 
-        # 2. 전력수요 수집
-        print("\n[2/3] 전력수요 수집...")
-        await initialize_database()
-        demand_count = await collect_demand_recent(hours=2)
-        results["demand"] = demand_count
-
-        # 3. 1시간 데이터 통합
-        print("\n[3/3] 1시간 데이터 통합...")
-        hourly_count = await aggregate_hourly_recent(hours=24)
-        results["hourly"] = hourly_count
-
         print(f"\n전체 ETL 완료!")
         print(f"- 기상 데이터: {weather_path}")
-        print(f"- 전력수요: {demand_count}건")
-        print(f"- 1시간 통합: {hourly_count}건")
 
         notify_slack_success.submit(
             "Full ETL",
-            f"- 기상: {weather_path}\n- 전력수요: {demand_count}건\n- 통합: {hourly_count}건"
+            f"- 기상: {weather_path}"
         )
 
         return results

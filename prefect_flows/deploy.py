@@ -1,10 +1,9 @@
 """
 Prefect Deployment Script
 
-모든 Flow를 배포하고 스케줄을 등록합니다.
-- daily-weather-collection-flow: 매일 오전 9시
-- hourly-demand-collection-flow: 매 시간
-- backfill-flow: 수동 실행
+PV 파이프라인 Flow를 배포하고 스케줄을 등록합니다.
+- daily-weather-collection-flow: 매일 오전 9시 (기상 데이터)
+- full-etl: 수동 실행 (전체 ETL)
 """
 
 import asyncio
@@ -23,16 +22,15 @@ from prefect.utilities.importtools import import_object
 # =======================================================================
 
 PREFECT_API_URL = os.getenv("PREFECT_API_URL", "http://prefect-server-new:4200/api")
-DOCKER_NETWORK = os.getenv("PREFECT_DOCKER_NETWORK", "weather-pipeline_prefect-new")
-DEMAND_DATABASE_URL = os.getenv(
-    "DEMAND_DATABASE_URL",
-    "postgresql+asyncpg://demand:demand@demand-db:5432/demand"
+DOCKER_NETWORK = os.getenv("PREFECT_DOCKER_NETWORK", "pv-pipeline_prefect")
+PV_DATABASE_URL = os.getenv(
+    "PV_DATABASE_URL",
+    "postgresql+psycopg2://pv:pv@pv-db:5432/pv"
 )
 
-SERVICE_KEY = os.getenv("SERVICE_KEY")
+SERVICE_KEY = os.getenv("SERVICE_KEY", "")
 if not SERVICE_KEY:
-    raise ValueError("SERVI" \
-    "CE_KEY 환경변수를 찾을 수 없습니다.")
+    print("[WARN] SERVICE_KEY가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생할 수 있습니다.")
 
 os.environ.setdefault("PREFECT_API_URL", PREFECT_API_URL)
 
@@ -44,17 +42,17 @@ os.environ.setdefault("PREFECT_API_URL", PREFECT_API_URL)
 def get_infra_overrides():
     """Docker 인프라 설정을 반환합니다."""
     return {
-        "image": "weather-pipeline:latest",
+        "image": "pv-pipeline:latest",
         "image_pull_policy": "Never",
         "auto_remove": True,
         "env": {
             "PREFECT_API_URL": PREFECT_API_URL,
             "SERVICE_KEY": SERVICE_KEY,
-            "DEMAND_DATABASE_URL": DEMAND_DATABASE_URL,
+            "PV_DATABASE_URL": PV_DATABASE_URL,
             "TZ": "Asia/Seoul",
         },
         "networks": [DOCKER_NETWORK],
-        "volumes": ["/mnt/nvme/weather-pipeline/data:/app/data"],
+        "volumes": ["/mnt/nvme/Energy-Data-pipeline/data:/app/data"],
     }
 
 
@@ -78,7 +76,7 @@ async def wait_for_api(timeout: int = 120) -> None:
             await asyncio.sleep(5)
 
 
-async def ensure_work_pool(pool_name: str = "weather-new-pool") -> None:
+async def ensure_work_pool(pool_name: str = "pv-pool") -> None:
     """Docker 타입 work pool이 없으면 생성합니다."""
     async with get_client() as client:
         try:
@@ -87,11 +85,11 @@ async def ensure_work_pool(pool_name: str = "weather-new-pool") -> None:
         except Exception:
             base_job_template = {
                 "job_configuration": {
-                    "image": "weather-pipeline:latest",
+                    "image": "pv-pipeline:latest",
                     "env": {
                         "PREFECT_API_URL": PREFECT_API_URL,
                         "SERVICE_KEY": SERVICE_KEY,
-                        "DEMAND_DATABASE_URL": DEMAND_DATABASE_URL,
+                        "PV_DATABASE_URL": PV_DATABASE_URL,
                         "TZ": "Asia/Seoul",
                     },
                     "networks": [DOCKER_NETWORK],
@@ -103,7 +101,7 @@ async def ensure_work_pool(pool_name: str = "weather-new-pool") -> None:
                             "title": "Image",
                             "description": "Docker image to use",
                             "type": "string",
-                            "default": "weather-pipeline:latest",
+                            "default": "pv-pipeline:latest",
                         }
                     },
                 },
@@ -113,7 +111,7 @@ async def ensure_work_pool(pool_name: str = "weather-new-pool") -> None:
                 WorkPoolCreate(
                     name=pool_name,
                     type="docker",
-                    description="ETL 파이프라인용 Docker 워크 풀",
+                    description="PV 파이프라인용 Docker 워크 풀",
                     base_job_template=base_job_template,
                 )
             )
@@ -133,7 +131,7 @@ async def deploy_weather_flow() -> None:
     deployment = await Deployment.build_from_flow(
         flow=flow,
         name="daily-weather-collection",
-        work_pool_name="weather-new-pool",
+        work_pool_name="pv-pool",
         path="/app",
         entrypoint="prefect_flows/prefect_pipeline.py:daily_weather_collection_flow",
         parameters={"target_date": None},
@@ -152,57 +150,6 @@ async def deploy_weather_flow() -> None:
     print("Deployment 완료: 'daily-weather-collection' (매일 09:00)")
 
 
-async def deploy_demand_flow() -> None:
-    """시간별 전력수요 수집 플로우 배포"""
-    flow = import_object(
-        "prefect_flows.prefect_pipeline.hourly_demand_collection_flow"
-    )
-
-    deployment = await Deployment.build_from_flow(
-        flow=flow,
-        name="hourly-demand-collection",
-        work_pool_name="weather-new-pool",
-        path="/app",
-        entrypoint="prefect_flows/prefect_pipeline.py:hourly_demand_collection_flow",
-        parameters={"hours": 2},
-        schedules=[
-            CronSchedule(
-                cron="5 * * * *",  # 매 시간 5분
-                timezone="Asia/Seoul",
-            )
-        ],
-        tags=["demand", "hourly"],
-        description="매 시간 전력수요 데이터를 수집하고 1시간 단위로 통합",
-        infra_overrides=get_infra_overrides(),
-    )
-
-    await deployment.apply()
-    print("Deployment 완료: 'hourly-demand-collection' (매시간 :05)")
-
-
-async def deploy_backfill_flow() -> None:
-    """백필 플로우 배포 (수동 실행)"""
-    flow = import_object(
-        "prefect_flows.prefect_pipeline.backfill_flow"
-    )
-
-    deployment = await Deployment.build_from_flow(
-        flow=flow,
-        name="backfill",
-        work_pool_name="weather-new-pool",
-        path="/app",
-        entrypoint="prefect_flows/prefect_pipeline.py:backfill_flow",
-        parameters={},
-        schedules=[],  # 수동 실행만
-        tags=["backfill", "manual"],
-        description="누락된 데이터를 백필 (수동 실행)",
-        infra_overrides=get_infra_overrides(),
-    )
-
-    await deployment.apply()
-    print("Deployment 완료: 'backfill' (수동 실행)")
-
-
 async def deploy_full_etl_flow() -> None:
     """전체 ETL 플로우 배포 (수동 실행)"""
     flow = import_object(
@@ -212,13 +159,13 @@ async def deploy_full_etl_flow() -> None:
     deployment = await Deployment.build_from_flow(
         flow=flow,
         name="full-etl",
-        work_pool_name="weather-new-pool",
+        work_pool_name="pv-pool",
         path="/app",
         entrypoint="prefect_flows/prefect_pipeline.py:full_etl_flow",
         parameters={"target_date": None},
         schedules=[],  # 수동 실행만
         tags=["etl", "full", "manual"],
-        description="기상+전력수요 전체 ETL (수동 실행)",
+        description="기상+PV 전체 ETL (수동 실행)",
         infra_overrides=get_infra_overrides(),
     )
 
@@ -227,38 +174,10 @@ async def deploy_full_etl_flow() -> None:
 
 
 # =======================================================================
-# 백필 트리거
-# =======================================================================
-
-async def trigger_backfill() -> None:
-    """백필 플로우를 트리거합니다."""
-    async with get_client() as client:
-        try:
-            # 배포 조회
-            deployment = await client.read_deployment_by_name(
-                "backfill-flow/backfill"
-            )
-
-            # Flow Run 생성
-            flow_run = await client.create_flow_run_from_deployment(
-                deployment.id,
-                parameters={"default_start": "20240101"},
-                tags=["auto-backfill", "startup"],
-            )
-
-            print(f"백필 Flow 트리거 완료: {flow_run.id}")
-            return flow_run.id
-
-        except Exception as e:
-            print(f"백필 트리거 실패: {e}")
-            return None
-
-
-# =======================================================================
 # 메인 실행
 # =======================================================================
 
-async def create_all_deployments(auto_backfill: bool = True) -> None:
+async def create_all_deployments() -> None:
     """모든 배포를 생성합니다."""
     print("\n" + "=" * 60)
     print("Prefect Deployment 시작")
@@ -266,14 +185,12 @@ async def create_all_deployments(auto_backfill: bool = True) -> None:
 
     # API 대기 및 Work Pool 생성
     await wait_for_api()
-    await ensure_work_pool("weather-new-pool")
+    await ensure_work_pool("pv-pool")
 
     print("\n--- Flow 배포 ---\n")
 
     # 각 Flow 배포
     await deploy_weather_flow()
-    await deploy_demand_flow()
-    await deploy_backfill_flow()
     await deploy_full_etl_flow()
 
     print("\n" + "=" * 60)
@@ -283,26 +200,9 @@ async def create_all_deployments(auto_backfill: bool = True) -> None:
     # 배포 요약
     print("배포된 Flow:")
     print("  1. daily-weather-collection    - 매일 09:00 (기상 데이터)")
-    print("  2. hourly-demand-collection    - 매시간 :05 (전력수요)")
-    print("  3. backfill                    - 수동 실행 (백필)")
-    print("  4. full-etl                    - 수동 실행 (전체 ETL)")
+    print("  2. full-etl                    - 수동 실행 (전체 ETL)")
     print("")
-
-    # 자동 백필 실행
-    if auto_backfill:
-        print("\n" + "=" * 60)
-        print("자동 백필 시작...")
-        print("=" * 60 + "\n")
-
-        # Worker가 준비될 때까지 잠시 대기
-        await asyncio.sleep(10)
-
-        await trigger_backfill()
-        print("백필 작업이 백그라운드에서 실행됩니다.")
-        print("Prefect UI에서 진행 상황을 확인하세요: http://localhost:4300")
 
 
 if __name__ == "__main__":
-    # AUTO_BACKFILL 환경변수로 자동 백필 제어 (기본값: False - 수동 실행 권장)
-    auto_backfill = os.getenv("AUTO_BACKFILL", "false").lower() == "true"
-    asyncio.run(create_all_deployments(auto_backfill=auto_backfill))
+    asyncio.run(create_all_deployments())
