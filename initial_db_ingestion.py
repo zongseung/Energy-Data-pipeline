@@ -1,114 +1,261 @@
+"""
+PV 데이터 DB 적재 스크립트
+
+남부발전/남동발전 태양광 발전 데이터를 PostgreSQL에 적재합니다.
+- pv_nambu: 남부발전 데이터
+- pv_namdong: 남동발전 데이터
+- plant_info_nambu: 남부발전 발전소 정보
+- plant_info_namdong: 남동발전 발전소 정보
+"""
+
 import pandas as pd
-import os
 import re
-from sqlalchemy import create_engine, text, types
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 
-# 1. 환경 설정 및 DB 연결
+# 프로젝트 경로 설정
 PROJECT_ROOT = Path(__file__).parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-DB_URL = os.getenv("LOCAL_DB_URL") 
-engine = create_engine(DB_URL)
+# DB 모듈 임포트
+from fetch_data.pv.database import (
+    get_engine,
+    init_db,
+    drop_all_tables,
+    get_namdong_location,
+)
 
-# --- [정제 로직] ---
+# 데이터 경로 (NAS)
+PV_DATA_DIR = PROJECT_ROOT / "pv_data"
+NAMBU_PROCESSED_DIR = PV_DATA_DIR / "pv_nambu_data_processed"
+NAMDONG_DATA_FILE = PV_DATA_DIR / "pv_namdong_data" / "south_pv_all_long.csv"
+
+# ========================================
+# 남부발전 위경도 매핑
+# ========================================
+
+NAMBU_PLANT_LOCATIONS = {
+    '997D': {'lat': 33.2373862, 'lon': 126.3418842},   # 남제주
+    '997G': {'lat': 35.0586428, 'lon': 128.8157557},   # 부산신항
+    '997N': {'lat': 35.0586428, 'lon': 128.8157557},   # 부산복합자재
+    'B997': {'lat': 35.0870019, 'lon': 128.9989357},   # 부산본부
+    '997Q': {'lat': 35.2591938, 'lon': 129.2235041},   # 부산수처리장
+    '997R': {'lat': 35.1902253, 'lon': 129.0563480},   # 부산운동장
+    '9987': {'lat': 35.1157106, 'lon': 129.0428212},   # 부산역선상
+    '997S': {'lat': 37.536111, 'lon': 126.602318},     # 신인천
+    '997Y': {'lat': 37.536111, 'lon': 126.602318},     # 신인천
+    '8760': {'lat': 37.536111, 'lon': 126.602318},     # 신인천소내
+    '9985': {'lat': 37.536111, 'lon': 126.602318},     # 신인천주차장
+    '9988': {'lat': 37.536111, 'lon': 126.602318},     # 신인천북측
+    '9989': {'lat': 37.536111, 'lon': 126.602318},     # 신인천 1,2단계
+    '9979': {'lat': 37.3335822, 'lon': 127.4795795},   # 이천D
+    'S997': {'lat': 37.1902416, 'lon': 129.3387384},   # 삼척
+}
+
+
 def clean_spec(text_val):
-    if pd.isna(text_val): return None
+    """설치용량/설치각에서 숫자 추출"""
+    if pd.isna(text_val):
+        return None
     match = re.search(r'(\d+\.?\d*)', str(text_val))
-    return match.group(1) if match else None
+    return float(match.group(1)) if match else None
 
-# --- [수동 위경도 데이터] ---
-MANUAL_PLANT_DATA = [
-    {'gcd': '997D', 'hg': '1', 'lat': 33.2373862, 'lon': 126.3418842}, # 남제주
-    {'gcd': '997G', 'hg': '1', 'lat': 35.0586428, 'lon': 128.8157557}, # 부산신항
-    {'gcd': '997N', 'hg': '1', 'lat': 35.0586428, 'lon': 128.8157557}, # 부산복합자재
-    {'gcd': 'B997', 'hg': '1', 'lat': 35.0870019, 'lon': 128.9989357}, # 부산본부 1
-    {'gcd': 'B997', 'hg': '2', 'lat': 35.0870019, 'lon': 128.9989357}, # 부산본부 2
-    {'gcd': '997Q', 'hg': '1', 'lat': 35.2591938, 'lon': 129.2235041}, # 부산수처리장
-    {'gcd': '997R', 'hg': '1', 'lat': 35.1902253, 'lon': 129.0563480}, # 부산운동장
-    {'gcd': '9987', 'hg': '1', 'lat': 35.1157106, 'lon': 129.0428212}, # 부산역선상
-    {'gcd': '997S', 'hg': '1', 'lat': 37.536111, 'lon': 126.602318, 'cap': '1742', 'ang': '20', 'mod': '475W x 3,668', 'inv': '250kW x 7EA'},
-    {'gcd': '997Y', 'hg': '1', 'lat': 37.536111, 'lon': 126.602318, 'cap': '907.2', 'ang': '23', 'mod': '360W x 2,520', 'inv': '250kW x 4EA'},
-    {'gcd': '8760', 'hg': '1', 'lat': 37.536111, 'lon': 126.602318}, # 신인천소내
-    {'gcd': '9985', 'hg': '1', 'lat': 37.536111, 'lon': 126.602318}, # 신인천주차장
-    {'gcd': '9988', 'hg': '1', 'lat': 37.536111, 'lon': 126.602318}, # 신인천북측
-    {'gcd': '9989', 'hg': '1', 'lat': 37.536111, 'lon': 126.602318}, # 신인천 1,2단계
-    {'gcd': '9979', 'hg': '1', 'lat': 37.3335822, 'lon': 127.4795795}, # 이천D
-    {'gcd': 'S997', 'hg': '1', 'lat': 37.1902416, 'lon': 129.3387384, 'cap': '999', 'ang': '25', 'mod': '360W x 2,775', 'inv': '500kW x 2EA'},
-    {'gcd': 'S997', 'hg': '2', 'lat': 37.1902416, 'lon': 129.3387384, 'cap': '990.45', 'ang': '25', 'mod': '355W x 2,790', 'inv': '500kW x 2EA'},
-    {'gcd': 'S997', 'hg': '3', 'lat': 37.1902416, 'lon': 129.3387384, 'cap': '2002.32', 'ang': '25', 'mod': '360W x 5,562', 'inv': '500kW x 1EA, 1500kW x 1EA'}
-]
 
-def run_ingestion():
-    PROCESSED_DIR = PROJECT_ROOT / "pv_data_processed"
-    files = sorted(list(PROCESSED_DIR.glob("nambu_processed_*.csv")))
-    
+# ========================================
+# 남부발전 적재
+# ========================================
+
+def ingest_nambu():
+    """남부발전 데이터 적재"""
+    print("\n" + "=" * 60)
+    print("남부발전 데이터 적재 시작")
+    print("=" * 60)
+
+    files = sorted(list(NAMBU_PROCESSED_DIR.glob("nambu_processed_*.csv")))
     if not files:
-        print("❌ 가공된 CSV 파일이 없습니다.")
+        print("  [!] 남부발전 가공 파일이 없습니다.")
         return
 
-    # --- 1단계: 테이블 초기화 및 스키마 설정 (renit_db.py 스타일) ---
-    print("🧹 1. 테이블 초기화 및 스키마 설정 중...")
-    with engine.begin() as conn:
-        # 기존 테이블 삭제
-        conn.execute(text("DROP TABLE IF EXISTS pv_generation CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS plant_info CASCADE;"))
-        
-        # pv_generation 테이블 생성 (Primary Key 추가로 데이터 중복 방지)
-        conn.execute(text("""
-            CREATE TABLE pv_generation (
-                timestamp TIMESTAMP NOT NULL,
-                ipptnm TEXT NOT NULL,
-                hogi TEXT NOT NULL,
-                generation FLOAT,
-                gencd TEXT,
-                PRIMARY KEY (timestamp, ipptnm, hogi) -- 중복 데이터 방지 핵심!
-            );
-        """))
-    print("✅ 테이블 스키마 생성 완료")
+    print(f"  총 {len(files)}개 파일 발견")
 
-    # --- 2단계: 마스터 테이블(plant_info) 생성 ---
-    print("🏠 2. 마스터 테이블(plant_info) 구축 중...")
-    sample_dfs = []
-    for f in files:
-        df_tmp = pd.read_csv(f, encoding='utf-8-sig').iloc[:1]
-        sample_dfs.append(df_tmp)
-    
-    df_master = pd.concat(sample_dfs).drop_duplicates(['gencd', 'hogi'])
-    df_master['capacity_kw'] = df_master['설치용량'].apply(clean_spec)
-    df_master['angle_deg'] = df_master['설치각'].apply(clean_spec)
-    
-    df_manual = pd.DataFrame(MANUAL_PLANT_DATA)
-    df_master = pd.merge(df_master, df_manual, left_on=['gencd', 'hogi'], right_on=['gcd', 'hg'], how='left')
-    
-    master_cols = {
-        'gencd': 'gencd', 'hogi': 'hogi', 'ipptnm': 'plant_name', 
-        '발전소 주소지': 'address', 'capacity_kw': 'capacity_kw', 
-        'angle_deg': 'angle_deg', 'lat': 'lat', 'lon': 'lon',
-        'mod': 'module_spec', 'inv': 'inverter_spec'
-    }
-    df_master_final = df_master[list(master_cols.keys())].rename(columns=master_cols)
-    df_master_final.to_sql('plant_info', con=engine, if_exists='replace', index=False)
+    engine = get_engine()
+    total_rows = 0
+    plant_info_list = []
 
-    # --- 3단계: 시계열 데이터(pv_generation) 적재 및 중복 제거 ---
-    print(f"📈 3. 시계열 데이터 적재 시작 ({len(files)}개 파일)...")
     for file_path in files:
+        print(f"\n  처리 중: {file_path.name}")
+
         df = pd.read_csv(file_path, encoding='utf-8-sig')
-        
-        # 데이터 타입 변환 및 결측치 처리
+        if df.empty:
+            continue
+
+        # 데이터 타입 변환
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df['generation'] = pd.to_numeric(df['generation'], errors='coerce').fillna(0)
-        
-        # [중요!] CSV 내부의 중복 데이터 제거 (renit_db 로직)
-        df = df.drop_duplicates(subset=['timestamp', 'ipptnm', 'hogi'], keep='first')
-        
-        # 필요한 컬럼만 추출하여 적재
-        df_gen = df[['timestamp', 'ipptnm', 'hogi', 'generation', 'gencd']]
-        df_gen.to_sql('pv_generation', con=engine, if_exists='append', index=False)
-        print(f"  - ✅ {file_path.name} 이관 완료 ({len(df_gen)}행)")
+        df['hogi'] = df['hogi'].astype(str)
 
-    print("\n🎉 모든 데이터가 중복 없이 깨끗하게 저장되었습니다!")
+        # 중복 제거
+        df = df.drop_duplicates(subset=['timestamp', 'gencd', 'hogi'], keep='first')
+
+        # gencd에서 위경도 매핑
+        def get_location(row):
+            gencd = row['gencd']
+            if gencd in NAMBU_PLANT_LOCATIONS:
+                return pd.Series(NAMBU_PLANT_LOCATIONS[gencd])
+            return pd.Series({'lat': None, 'lon': None})
+
+        df[['lat', 'lon']] = df.apply(get_location, axis=1)
+
+        # pv_nambu 테이블에 적재할 데이터 준비
+        df_pv = df[['timestamp', 'gencd', 'ipptnm', 'hogi', 'generation', 'lat', 'lon']].copy()
+        df_pv.columns = ['timestamp', 'plant_id', 'plant_name', 'hogi', 'generation', 'lat', 'lon']
+
+        # DB 적재 (upsert 방식)
+        df_pv.to_sql('pv_nambu', con=engine, if_exists='append', index=False,
+                     method='multi', chunksize=5000)
+        total_rows += len(df_pv)
+        print(f"    -> {len(df_pv):,}건 적재 완료")
+
+        # 발전소 정보 수집 (첫 행만)
+        first_row = df.iloc[0]
+        plant_info = {
+            'plant_id': first_row['gencd'],
+            'plant_name': first_row['ipptnm'],
+            'hogi': first_row['hogi'],
+            'address': first_row.get('발전소 주소지', None),
+            'capacity_kw': clean_spec(first_row.get('설치용량', None)),
+            'angle_deg': clean_spec(first_row.get('설치각', None)),
+            'lat': first_row.get('lat', None),
+            'lon': first_row.get('lon', None),
+        }
+        plant_info_list.append(plant_info)
+
+    # 발전소 정보 테이블 적재
+    if plant_info_list:
+        df_plant = pd.DataFrame(plant_info_list)
+        df_plant = df_plant.drop_duplicates(subset=['plant_id', 'hogi'], keep='first')
+        df_plant.to_sql('plant_info_nambu', con=engine, if_exists='replace', index=False)
+        print(f"\n  [plant_info_nambu] {len(df_plant)}개 발전소 정보 적재")
+
+    print(f"\n  [pv_nambu] 총 {total_rows:,}건 적재 완료")
+
+
+# ========================================
+# 남동발전 적재
+# ========================================
+
+def ingest_namdong():
+    """남동발전 데이터 적재"""
+    print("\n" + "=" * 60)
+    print("남동발전 데이터 적재 시작")
+    print("=" * 60)
+
+    if not NAMDONG_DATA_FILE.exists():
+        print(f"  [!] 남동발전 파일이 없습니다: {NAMDONG_DATA_FILE}")
+        return
+
+    print(f"  파일 로드 중: {NAMDONG_DATA_FILE.name}")
+
+    df = pd.read_csv(NAMDONG_DATA_FILE, encoding='utf-8-sig')
+    print(f"  원본 데이터: {len(df):,}건")
+
+    # 타임스탬프 생성 (일자 + 시간)
+    df['일자'] = pd.to_datetime(df['일자'])
+    df['timestamp'] = df['일자'] + pd.to_timedelta(df['시간'], unit='h')
+
+    # 발전량 숫자 변환
+    df['발전량'] = pd.to_numeric(df['발전량'], errors='coerce').fillna(0)
+
+    # 중복 제거
+    df = df.drop_duplicates(subset=['timestamp', '발전소명'], keep='first')
+
+    # 위경도 매핑
+    def add_location(row):
+        loc = get_namdong_location(row['발전소명'])
+        return pd.Series(loc)
+
+    df[['lat', 'lon']] = df.apply(add_location, axis=1)
+
+    # pv_namdong 테이블용 데이터
+    df_pv = df[['timestamp', '발전소명', '발전량', 'lat', 'lon']].copy()
+    df_pv.columns = ['timestamp', 'plant_name', 'generation', 'lat', 'lon']
+
+    # DB 적재
+    engine = get_engine()
+    df_pv.to_sql('pv_namdong', con=engine, if_exists='append', index=False,
+                 method='multi', chunksize=10000)
+    print(f"  [pv_namdong] {len(df_pv):,}건 적재 완료")
+
+    # 발전소 정보 테이블
+    plants = df['발전소명'].unique()
+    plant_info_list = []
+    for plant_name in plants:
+        loc = get_namdong_location(plant_name)
+        plant_info_list.append({
+            'plant_name': plant_name,
+            'lat': loc['lat'],
+            'lon': loc['lon'],
+        })
+
+    df_plant = pd.DataFrame(plant_info_list)
+    df_plant.to_sql('plant_info_namdong', con=engine, if_exists='replace', index=False)
+    print(f"  [plant_info_namdong] {len(df_plant)}개 발전소 정보 적재")
+
+
+# ========================================
+# 메인 실행
+# ========================================
+
+def run_full_ingestion(reset_db: bool = True):
+    """
+    전체 데이터 적재 실행
+
+    Args:
+        reset_db: True면 테이블 초기화 후 적재
+    """
+    print("\n" + "=" * 60)
+    print("PV 데이터 전체 적재 시작")
+    print(f"시작 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+
+    if reset_db:
+        print("\n[1/4] 테이블 초기화 중...")
+        drop_all_tables()
+        init_db()
+        print("  테이블 초기화 완료")
+    else:
+        print("\n[1/4] 테이블 확인 중...")
+        init_db()
+
+    print("\n[2/4] 남부발전 데이터 적재...")
+    ingest_nambu()
+
+    print("\n[3/4] 남동발전 데이터 적재...")
+    ingest_namdong()
+
+    print("\n[4/4] 적재 완료!")
+    print("\n" + "=" * 60)
+    print("전체 적재 완료!")
+    print(f"종료 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
-    run_ingestion()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="PV 데이터 DB 적재")
+    parser.add_argument("--no-reset", action="store_true", help="테이블 초기화 없이 추가 적재")
+    parser.add_argument("--nambu-only", action="store_true", help="남부발전만 적재")
+    parser.add_argument("--namdong-only", action="store_true", help="남동발전만 적재")
+
+    args = parser.parse_args()
+
+    if args.nambu_only:
+        init_db()
+        ingest_nambu()
+    elif args.namdong_only:
+        init_db()
+        ingest_namdong()
+    else:
+        run_full_ingestion(reset_db=not args.no_reset)
