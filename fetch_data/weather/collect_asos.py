@@ -26,10 +26,10 @@ from prefect_flows.merge_to_all import merge_to_all_csv, DATA_DIR  # ★ 여기!
 
 # .env 파일 로드 (.env는 프로젝트 루트(/app)에 있다고 가정)
 load_dotenv(PROJECT_ROOT / ".env")
-SERVICE_KEY = os.getenv("SERVICE_KEY")
+SERVICE_KEY = os.getenv("SERVICE_KEY", "")
 
 if not SERVICE_KEY:
-    raise RuntimeError("SERVICE_KEY 환경변수가 설정되어 있지 않습니다. .env 를 확인하세요.")
+    print("[WARN] SERVICE_KEY 환경변수가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생합니다.")
 
 API_URL = "https://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList"
 
