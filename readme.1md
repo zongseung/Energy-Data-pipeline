@@ -1,0 +1,48 @@
+☀️ Energy-Data-Pipeline: 남부발전 태양광 데이터 자동화 프로젝트
+📌 프로젝트 개요
+이 프로젝트는 한국남부발전의 태양광 발전 실적 API를 활용하여 과거 데이터를 구축하고, 매일 새로운 데이터를 자동으로 수집하여 PostgreSQL DB에 적재하는 파이프라인입니다.
+
+🛠️ 필수 데이터 준비 (Data Preparation)
+본 프로젝트는 API 데이터 외에 발전소의 상세 사양 정보가 담긴 마스터 CSV 파일이 필요합니다.
+
+사양정보 다운로드: 공공데이터 포털 - 활용신청 및 데이터 내려받기에 접속합니다.
+
+파일 확보: 한국남부발전(주)_태양광발전기 사양정보_20250630.csv 파일을 다운로드합니다.
+
+파일 위치: 다운로드한 파일을 프로젝트 최상위 폴더(Root)에 저장합니다.
+
+참고: 파일명이 다를 경우 nambu_merge_pv_data.py 코드 내의 SPECS_FILE 경로를 수정해야 합니다.
+
+🚀 시작 가이드
+1. 환경 변수 설정
+.env.example 파일을 복사하여 .env 파일을 생성하고 필요한 정보를 입력합니다.
+
+NAMBU_API_KEY: 공공데이터 포털에서 발급받은 API 키
+
+DB_PASS: PostgreSQL 비밀번호
+
+PREFECT_API_URL: Prefect 서버 접속 주소
+
+2. 인프라 실행 (Docker)
+Bash
+
+docker-compose up -d
+3. 초기 데이터 구축 (순서대로 실행)
+기점 조사 (nambu_probe_date.py): 발전소별 최초 데이터 발생 기점 조사
+
+과거 데이터 수집 (nambu_bulk_sync.py): 과거 데이터 전체 수집 (CSV 저장)
+
+데이터 전처리 (nambu_merge_pv_data.py): 다운로드한 사양정보 CSV와 수집된 데이터를 병합하여 시간축 정렬
+
+통합 DB 적재 (initial_db_ingestion.py): 위경도 보정 및 중복 제거 후 DB 최종 적재
+
+적재 확인 (inspect_both_table.py): 데이터 정합성 점검
+
+🤖 데일리 자동화 (Prefect)
+매일 오전 9시에 새로운 데이터를 자동으로 수집하도록 설정되어 있습니다.
+
+Bash
+
+# 배포 정보 등록
+prefect deploy
+수집 로직: daily_pv_automation.py가 가동되어 전날의 발전량을 DB에 즉시 추가합니다.

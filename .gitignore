@@ -30,3 +30,19 @@ venv/
 Thumbs.db
 
 *.csv
+
+# Data Directories (데이터 용량이 크므로 Git에서 제외)
+pv_data_raw/          # nambu_bulk_sync.py에서 생성
+pv_data_processed/    # nambu_merge_pv_data.py에서 생성
+pv_start_dates.csv    # nambu_probe_date.py에서 생성
+
+# Prefect internal files
+.prefect/             # Prefect 로컬 설정 및 캐시
+prefect.db            # 로컬 Prefect DB 사용 시 생성
+
+# Jupyter Notebook (연구용으로 사용하실 경우 대비)
+.ipynb_checkpoints/
+
+# Docker 관련 (로컬 볼륨 매핑 시 대비)
+postgres_data/
+grafana_data/

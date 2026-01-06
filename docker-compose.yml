@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  pv-db:
+    image: postgres:15
+    container_name: pv-db
+    restart: always
+    environment:
+      # .env 파일에 정의된 변수를 사용하도록 수정
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASS}
+      - POSTGRES_DB=${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - pv-net
+
+  pv-grafana:
+    image: grafana/grafana:latest
+    container_name: pv-grafana
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
+    depends_on:
+      - pv-db
+    networks:
+      - pv-net
+
+  pv-worker:
+    build: .
+    container_name: solar-worker
+    restart: always
+    env_file: .env
+    environment:
+      # 비밀번호가 포함된 URL도 변수 처리
+      - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
+      - PREFECT_API_URL=${PREFECT_API_URL}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - pv-db
+    networks:
+      - pv-net
+
+volumes:
+  postgres_data:
+  grafana_data:
+
+networks:
+  pv-net:
+    driver: bridge
