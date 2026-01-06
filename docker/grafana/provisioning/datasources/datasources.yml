@@ -1,16 +1,16 @@
 apiVersion: 1
 
 datasources:
-  - name: Demand-PostgreSQL
-    uid: demand-postgres
+  - name: PV-PostgreSQL
+    uid: pv-postgres
     type: grafana-postgresql-datasource
     access: proxy
-    url: demand-db:5432
-    user: demand
+    url: pv-db:5432
+    user: pv
     secureJsonData:
-      password: demand
+      password: pv
     jsonData:
-      database: demand
+      database: pv
       sslmode: disable
       maxOpenConns: 10
       maxIdleConns: 2

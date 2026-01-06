@@ -20,21 +20,21 @@ services:
       - prefect-new
 
   # ==============================
-  # Demand DB (전력수급 데이터 저장용)
+  # PV DB (태양광 발전 데이터 저장용)
   # ==============================
-  demand-db:
+  pv-db:
     image: postgres:14
-    container_name: demand-postgres
+    container_name: pv-postgres
     environment:
-      - POSTGRES_USER=demand
-      - POSTGRES_PASSWORD=demand
-      - POSTGRES_DB=demand
+      - POSTGRES_USER=pv
+      - POSTGRES_PASSWORD=pv
+      - POSTGRES_DB=pv
     volumes:
-      - demand_data:/var/lib/postgresql/data
+      - pv_data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"  # 호스트에서 localhost:5433으로 접속
+      - "5434:5432"  # 호스트에서 localhost:5434으로 접속
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U demand"]
+      test: ["CMD-SHELL", "pg_isready -U pv"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -44,11 +44,11 @@ services:
   # ==============================
   # Grafana (대시보드)
   # ==============================
-  grafana:
+  pv-grafana:
     image: grafana/grafana:latest
-    container_name: grafana
+    container_name: pv-grafana
     ports:
-      - "3001:3000"  # 호스트 3001 -> 컨테이너 3000
+      - "3003:3000"  # 호스트 3003 -> 컨테이너 3000
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
@@ -59,7 +59,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
-      demand-db:
+      pv-db:
         condition: service_healthy
     networks:
       - prefect-new
@@ -90,23 +90,23 @@ services:
       - prefect-new
 
   # 배포/등록용 컨테이너 (한 번 실행되었다가 종료됨)
-  weather-deployer:
+  pv-deployer:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: weather-pipeline:latest
-    container_name: weather-deployer
+    image: pv-pipeline:latest
+    container_name: pv-deployer
     env_file:
       - ../.env          # SERVICE_KEY 등
     environment:
       - PREFECT_API_URL=http://prefect-server-new:4200/api
-      - DEMAND_DATABASE_URL=postgresql+asyncpg://demand:demand@demand-db:5432/demand
+      - PV_DATABASE_URL=postgresql+psycopg2://pv:pv@pv-db:5432/pv
       - TZ=Asia/Seoul
     working_dir: /app
     depends_on:
       prefect-server-new:
         condition: service_healthy
-      demand-db:
+      pv-db:
         condition: service_healthy
     networks:
       - prefect-new
@@ -118,15 +118,15 @@ services:
       "
 
   # 실제 flow 돌리는 Docker Worker
-  weather-worker-new:
+  pv-worker:
     image: prefecthq/prefect:2-python3.10
-    container_name: weather-worker-new
+    container_name: pv-worker
     env_file:
       - ../.env
     environment:
       - PREFECT_API_URL=http://prefect-server-new:4200/api
-      - PREFECT_WORK_POOL=weather-new-pool
-      - DEMAND_DATABASE_URL=postgresql+asyncpg://demand:demand@demand-db:5432/demand
+      - PREFECT_WORK_POOL=pv-pool
+      - PV_DATABASE_URL=postgresql+psycopg2://pv:pv@pv-db:5432/pv
       - TZ=Asia/Seoul
     privileged: true
     volumes:
@@ -138,22 +138,22 @@ services:
         pip install 'prefect-docker<0.5.0,>=0.3.0' &&
         pip install 'aiohttp' &&
         echo 'Starting Prefect docker worker...' &&
-        prefect worker start --type docker --pool weather-new-pool
+        prefect worker start --type docker --pool pv-pool
       "
     depends_on:
       prefect-server-new:
         condition: service_healthy
-      demand-db:
+      pv-db:
         condition: service_healthy
     networks:
       - prefect-new
 
 volumes:
   postgres_data_new:
-  demand_data:
+  pv_data:
   grafana_data:
 
 networks:
   prefect-new:
     driver: bridge
-    name: weather-pipeline_prefect-new
+    name: pv-pipeline_prefect
