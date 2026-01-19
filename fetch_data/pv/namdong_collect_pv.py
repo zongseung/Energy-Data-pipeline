@@ -1,14 +1,19 @@
 import asyncio
 import os
+from urllib.parse import urlparse, urlunparse
 import re
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import aiohttp
+import pandas as pd
 import requests
 from dotenv import load_dotenv
 from prefect import flow, task
+from sqlalchemy import create_engine, text
+
+from fetch_data.pv.namdong_merge_pv_data import read_csv_flexible, hour_columns, extract_hour
 
 BASE = "https://www.koenergy.kr"
 MENU_CD = "FN0912020217"
@@ -21,6 +26,43 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 _output_dir_env = os.getenv("NAMDONG_OUTPUT_DIR")
 OUTPUT_DIR = Path(_output_dir_env) if _output_dir_env else (PROJECT_ROOT / "pv_data_raw")
+
+def _running_in_docker() -> bool:
+    return Path("/.dockerenv").exists() or os.getenv("RUNNING_IN_DOCKER") == "1"
+
+
+def _resolve_db_url(cli_db_url: Optional[str]) -> str:
+    if cli_db_url:
+        return cli_db_url
+
+    db_url = os.getenv("DB_URL")
+    if db_url:
+        return db_url
+
+    pv_db_url = os.getenv("PV_DATABASE_URL") or ""
+    local_db_url = os.getenv("LOCAL_DB_URL") or ""
+
+    if not _running_in_docker() and pv_db_url:
+        try:
+            u = urlparse(pv_db_url)
+            if u.hostname == "pv-db" and local_db_url:
+                return local_db_url
+            if u.hostname == "pv-db":
+                host_port = int(os.getenv("PV_DB_PORT_FORWARD", "5435"))
+                if u.username and u.password:
+                    netloc = f"{u.username}:{u.password}@localhost:{host_port}"
+                elif u.username:
+                    netloc = f"{u.username}@localhost:{host_port}"
+                else:
+                    netloc = f"localhost:{host_port}"
+                return urlunparse(u._replace(netloc=netloc))
+        except Exception:
+            pass
+
+    return pv_db_url or local_db_url
+
+
+DB_URL = _resolve_db_url(None)
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 NAMDONG_START_DATE = os.getenv("NAMDONG_START_DATE")
@@ -68,6 +110,15 @@ def _month_end(d: date) -> date:
     else:
         next_month = date(d.year, d.month + 1, 1)
     return next_month - timedelta(days=1)
+
+
+def prev_month_range(ref_dt: Optional[date] = None) -> tuple[date, date]:
+    if ref_dt is None:
+        ref_dt = date.today()
+    first_of_this_month = date(ref_dt.year, ref_dt.month, 1)
+    prev_month_end = first_of_this_month - timedelta(days=1)
+    prev_month_start = date(prev_month_end.year, prev_month_end.month, 1)
+    return prev_month_start, prev_month_end
 
 
 def split_by_month(date_s: str, date_e: str) -> List[Tuple[str, str]]:
@@ -300,6 +351,82 @@ async def download_monthly_csvs(
     return saved_files
 
 
+def load_namdong_to_db(files: List[Path], start_dt: date, end_dt: date, db_url: Optional[str]) -> int:
+    resolved_url = _resolve_db_url(db_url)
+    if not resolved_url:
+        raise RuntimeError("DB_URL(또는 PV_DATABASE_URL/LOCAL_DB_URL)이 설정되어 있지 않습니다.")
+
+    engine = create_engine(resolved_url)
+
+    long_parts: List[pd.DataFrame] = []
+    for fp in files:
+        df = read_csv_flexible(fp)
+
+        if "발전소명" not in df.columns:
+            if "발전구분" in df.columns:
+                df["발전소명"] = df["발전구분"]
+            else:
+                raise ValueError(f"필수 컬럼(발전구분) 누락: {fp.name}")
+
+        if "호기" in df.columns:
+            df["호기"] = df["호기"].astype(str).str.strip()
+            hogi_counts = df.groupby("발전소명")["호기"].nunique()
+            multi_hogi_plants = hogi_counts[hogi_counts > 1].index.tolist()
+
+            def add_hogi_suffix(row):
+                if row["발전소명"] in multi_hogi_plants:
+                    return f"{row['발전소명']}_{row['호기']}"
+                return row["발전소명"]
+
+            df["발전소명"] = df.apply(add_hogi_suffix, axis=1)
+
+        if "일자" not in df.columns:
+            raise ValueError(f"필수 컬럼(일자) 누락: {fp.name}")
+
+        hcols = hour_columns(df)
+        if not hcols:
+            raise ValueError(f"시간별 발전량 컬럼을 못 찾음: {fp.name}")
+
+        df_long = pd.melt(
+            df,
+            id_vars=["일자", "발전소명"],
+            value_vars=hcols,
+            var_name="시간",
+            value_name="발전량",
+        )
+
+        df_long["hour"] = df_long["시간"].apply(extract_hour).astype("int64")
+        df_long["generation"] = pd.to_numeric(df_long["발전량"], errors="coerce").fillna(0)
+        df_long["date"] = pd.to_datetime(df_long["일자"], errors="coerce")
+        df_long["datetime"] = df_long["date"] + pd.to_timedelta(df_long["hour"] - 1, unit="h")
+        df_long["plant_name"] = df_long["발전소명"]
+
+        long_parts.append(
+            df_long[["datetime", "plant_name", "hour", "generation"]].dropna(subset=["datetime", "plant_name"])
+        )
+
+    if not long_parts:
+        return 0
+
+    merged = pd.concat(long_parts, ignore_index=True)
+    start_ts = datetime.combine(start_dt, datetime.min.time())
+    end_ts = datetime.combine(end_dt + timedelta(days=1), datetime.min.time())
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                DELETE FROM namdong_generation
+                WHERE datetime >= :start_dt AND datetime < :end_dt
+                """
+            ),
+            {"start_dt": start_ts, "end_dt": end_ts},
+        )
+        merged.to_sql("namdong_generation", con=conn, if_exists="append", index=False)
+
+    return len(merged)
+
+
 @task(name="남동발전 CSV 수집", retries=3, retry_delay_seconds=300)
 def collect_namdong_csv(
     page_index: str,
@@ -323,19 +450,45 @@ def collect_namdong_csv(
     )
 
 
-@flow(name="Daily Namdong PV Collection Flow", log_prints=True)
-def daily_namdong_collection_flow(
+def _collect_namdong_csv_sync(
+    page_index: str,
+    org_no: str,
+    hoki_s: str,
+    hoki_e: str,
+    start_dt: date,
+    end_dt: date,
+    sleep_sec: int,
+) -> List[Path]:
+    return asyncio.run(
+        download_monthly_csvs(
+            page_index=page_index,
+            org_no=org_no,
+            hoki_s=hoki_s,
+            hoki_e=hoki_e,
+            date_s=_to_yyyymmdd(start_dt),
+            date_e=_to_yyyymmdd(end_dt),
+            sleep_sec=sleep_sec,
+        )
+    )
+
+
+def run_namdong_collection(
     target_start: Optional[str] = None,
     target_end: Optional[str] = None,
     sleep_sec: int = 5,
+    db_url: Optional[str] = None,
 ) -> List[Path]:
     print(f"\n{'='*60}")
-    print("남동발전 PV 수집 플로우 시작")
+    print("남동발전 PV 수집 시작")
     print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
     try:
-        start_dt, end_dt = resolve_backfill_range(OUTPUT_DIR, target_start, target_end)
+        if target_start is None and target_end is None:
+            prev_start, prev_end = prev_month_range()
+            start_dt, end_dt = prev_start, prev_end
+        else:
+            start_dt, end_dt = resolve_backfill_range(OUTPUT_DIR, target_start, target_end)
         if start_dt > end_dt:
             print("수집 대상이 없습니다. 최신 상태입니다.")
             notify_slack_success.submit(
@@ -345,7 +498,7 @@ def daily_namdong_collection_flow(
             return []
 
         print(f"수집 기간: {start_dt} ~ {end_dt}")
-        saved_files = collect_namdong_csv.submit(
+        saved_files = _collect_namdong_csv_sync(
             NAMDONG_PAGE_INDEX,
             NAMDONG_ORG_NO,
             NAMDONG_HOKI_S,
@@ -353,12 +506,17 @@ def daily_namdong_collection_flow(
             start_dt,
             end_dt,
             sleep_sec,
-        ).result()
+        )
+        if saved_files:
+            inserted_rows = load_namdong_to_db(saved_files, start_dt, end_dt, db_url)
+        else:
+            inserted_rows = 0
 
-        notify_slack_success.submit(
-            "Namdong PV",
+        send_slack_message(
+            f"[Namdong PV 완료]\n"
             f"- 기간: {_to_yyyymmdd(start_dt)}~{_to_yyyymmdd(end_dt)}\n"
             f"- 저장 파일 수: {len(saved_files)}\n"
+            f"- 적재 행수: {inserted_rows}\n"
             f"- 저장 폴더: {OUTPUT_DIR}"
         )
 
@@ -366,9 +524,18 @@ def daily_namdong_collection_flow(
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
-        print(f"\n플로우 실행 중 에러 발생: {error_msg}")
-        notify_slack_failure.submit("Namdong PV", error_msg)
+        print(f"\n수집 중 에러 발생: {error_msg}")
+        send_slack_message(f"[Namdong PV 실패]\n- 에러: {error_msg}")
         raise
+
+
+@flow(name="Monthly Namdong PV Collection Flow", log_prints=True)
+def daily_namdong_collection_flow(
+    target_start: Optional[str] = None,
+    target_end: Optional[str] = None,
+    sleep_sec: int = 5,
+) -> List[Path]:
+    return run_namdong_collection(target_start, target_end, sleep_sec)
 
 
 def main():

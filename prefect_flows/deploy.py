@@ -197,24 +197,24 @@ async def deploy_namdong_flow() -> None:
 
     deployment = await Deployment.build_from_flow(
         flow=flow,
-        name="daily-namdong-pv-collection",
+        name="monthly-namdong-pv-collection",
         work_pool_name="pv-pool",
         path="/app",
         entrypoint="fetch_data/pv/namdong_collect_pv.py:daily_namdong_collection_flow",
         parameters={"target_start": None, "target_end": None, "sleep_sec": 5},
         schedules=[
             CronSchedule(
-                cron="0 10 * * *",  # 매일 오전 10시
+                cron="0 10 10 * *",  # 매월 10일 오전 10시
                 timezone="Asia/Seoul",
             )
         ],
-        tags=["pv", "namdong", "daily"],
-        description="매일 오전 10시에 남동발전 PV 데이터를 수집/백필",
+        tags=["pv", "namdong", "monthly"],
+        description="매월 10일 오전 10시에 전월 남동발전 PV 데이터를 수집/백필",
         infra_overrides=get_infra_overrides(),
     )
 
     await deployment.apply()
-    print("Deployment 완료: 'daily-namdong-pv-collection' (매일 10:00)")
+    print("Deployment 완료: 'monthly-namdong-pv-collection' (매월 10일 10:00)")
 
 
 async def deploy_nambu_flow() -> None:
@@ -275,8 +275,8 @@ async def create_all_deployments() -> None:
     print("배포된 Flow:")
     print("  1. daily-weather-collection    - 매일 09:00 (기상 데이터)")
     print("  2. full-etl                    - 수동 실행 (전체 ETL)")
-    print("  3. daily-namdong-pv-collection - 매일 10:00 (남동발전 PV)")
-    print("  4. daily-nambu-pv-collection   - 매일 09:30 (남부발전 PV)")
+    print("  3. monthly-namdong-pv-collection - 매월 10일 10:00 (남동발전 PV)")
+    print("  4. daily-nambu-pv-collection     - 매일 09:30 (남부발전 PV)")
     print("")
 
 
