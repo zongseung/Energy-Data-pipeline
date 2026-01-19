@@ -191,7 +191,8 @@
           },
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "kwatth"
+          "unit": "kwatth",
+          "unitScale": false
         },
         "overrides": []
       },
@@ -240,7 +241,8 @@
           },
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
-          "unit": "kwatth"
+          "unit": "kwatth",
+          "unitScale": false
         },
         "overrides": []
       },
@@ -270,7 +272,8 @@
           "color": { "mode": "thresholds" },
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
-          "unit": "kwatth"
+          "unit": "kwatth",
+          "unitScale": false
         },
         "overrides": []
       },
@@ -304,7 +307,8 @@
           "color": { "mode": "thresholds" },
           "mappings": [],
           "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
-          "unit": "kwatth"
+          "unit": "kwatth",
+          "unitScale": false
         },
         "overrides": []
       },
