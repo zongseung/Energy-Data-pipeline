@@ -34,7 +34,7 @@ deployments:
   - cron: 0 9 * * *
     timezone: null
     day_or: true
-- name: Daily-Namdong-Sync
+- name: Monthly-Namdong-Sync
   version: null
   tags: []
   concurrency_limit: null
@@ -46,7 +46,7 @@ deployments:
     work_queue_name: null
     job_variables: {}
   schedules:
-  - cron: 0 10 * * *
+  - cron: 0 10 10 * *
     timezone: null
     day_or: true
 - name: Daily-Nambu-Sync

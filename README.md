@@ -159,7 +159,7 @@ flowchart LR
   end
 
   subgraph Jobs[Flows & Scripts]
-    NamdongFlow["Daily Namdong PV Flow\n(10:00)"]
+    NamdongFlow["Monthly Namdong PV Flow\n(10th 10:00)"]
     NambuFlow["Daily Nambu PV Flow\n(09:30)"]
     NambuBackfill["Manual backfill\nnambu_backfill.py"]
   end
@@ -209,7 +209,7 @@ Prefect deployment 등록은 `pv-deploy`가 수행합니다.
 등록되는 주요 deployment(기본):
 - `daily-weather-collection` (09:00, KST) — 기상 CSV 수집 (옵션)
 - `daily-nambu-pv-collection` (09:30, KST) — 남부발전 PV 적재 + Slack 알림
-- `daily-namdong-pv-collection` (10:00, KST) — 남동발전 PV 적재 + Slack 알림
+- `monthly-namdong-pv-collection` (매월 10일 10:00, KST) — 전월 남동발전 PV 적재 + Slack 알림
 - `full-etl` — 수동 실행(필요 시)
 
 ## 수동 백필 (남부발전 2026~)
