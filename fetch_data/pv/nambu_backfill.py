@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import argparse
 import asyncio
 import os
@@ -106,6 +107,17 @@ def _extract_hour0(col: str) -> int:
     return int(m.group(1)) - 1
 
 
+def _log_debug(msg: str, debug: bool, debug_log: Optional[list[str]]) -> None:
+    if not debug:
+        return
+    print(msg)
+    if debug_log is None:
+        return
+    if len(debug_log) >= 50:
+        return
+    debug_log.append(msg)
+
+
 async def _fetch_api_days(
     session: aiohttp.ClientSession,
     api_key: str,
@@ -114,6 +126,7 @@ async def _fetch_api_days(
     gencd: str,
     hogi: int,
     debug: bool = False,
+    debug_log: Optional[list[str]] = None,
 ) -> list[dict]:
     params = {
         "pageNo": "1",
@@ -136,19 +149,28 @@ async def _fetch_api_days(
             text_body = await resp.text()
             if resp.status != 200:
                 if debug:
-                    if key_is_encoded:
-                        print("  - serviceKey: encoded (raw query)")
-                    else:
-                        print("  - serviceKey: plain (params)")
-                    print(f"  - HTTP {resp.status} for {start_str}~{end_str} {gencd}_{hogi}")
-                    print(f"  - body: {text_body[:300]}")
+                    _log_debug(
+                        f"  - serviceKey: {'encoded (raw query)' if key_is_encoded else 'plain (params)'}",
+                        debug,
+                        debug_log,
+                    )
+                    _log_debug(
+                        f"  - HTTP {resp.status} for {start_str}~{end_str} {gencd}_{hogi}",
+                        debug,
+                        debug_log,
+                    )
+                    _log_debug(f"  - body: {text_body[:300]}", debug, debug_log)
                 return []
             root = ET.fromstring(text_body)
             if debug:
                 result_code = root.findtext(".//resultCode")
                 result_msg = root.findtext(".//resultMsg")
                 if result_code or result_msg:
-                    print(f"  - API resultCode={result_code} resultMsg={result_msg}")
+                    _log_debug(
+                        f"  - API resultCode={result_code} resultMsg={result_msg}",
+                        debug,
+                        debug_log,
+                    )
             # 응답 포맷이 두 가지:
             # 1) <items><item>...</item></items>
             # 2) <items><ymd>...</ymd>...</items>
@@ -162,7 +184,11 @@ async def _fetch_api_days(
             return []
     except Exception:
         if debug:
-            print(f"  - API 예외: {start_str}~{end_str} {gencd}_{hogi}")
+            _log_debug(
+                f"  - API 예외: {start_str}~{end_str} {gencd}_{hogi}",
+                debug,
+                debug_log,
+            )
         return []
 
 
@@ -254,7 +280,16 @@ def _rows_from_api_payload(payloads: list[dict]) -> pd.DataFrame:
     ].dropna(subset=["datetime", "gencd", "hogi"])
 
 
-async def backfill(engine, api_key: str, targets: list[dict], start: date, end: date, sleep_sec: float, debug: bool) -> tuple[int, int]:
+async def backfill(
+    engine,
+    api_key: str,
+    targets: list[dict],
+    start: date,
+    end: date,
+    sleep_sec: float,
+    debug: bool,
+    debug_log: Optional[list[str]] = None,
+) -> tuple[int, int]:
     total_days = 0
     total_rows = 0
 
@@ -272,11 +307,29 @@ async def backfill(engine, api_key: str, targets: list[dict], start: date, end: 
             print(f"📡 {name}: 누락/미완성 {len(missing_days)}일 백필")
             for d in missing_days:
                 day_str = _to_yyyymmdd(d)
-                payloads = await _fetch_api_days(session, api_key, day_str, day_str, gencd, hogi, debug=debug)
+                payloads = await _fetch_api_days(
+                    session,
+                    api_key,
+                    day_str,
+                    day_str,
+                    gencd,
+                    hogi,
+                    debug=debug,
+                    debug_log=debug_log,
+                )
                 if not payloads:
                     # 일부 날짜는 end가 다음날이어야 응답되는 케이스 보정
                     next_day = _to_yyyymmdd(d + timedelta(days=1))
-                    payloads = await _fetch_api_days(session, api_key, day_str, next_day, gencd, hogi, debug=debug)
+                    payloads = await _fetch_api_days(
+                        session,
+                        api_key,
+                        day_str,
+                        next_day,
+                        gencd,
+                        hogi,
+                        debug=debug,
+                        debug_log=debug_log,
+                    )
                 payloads = [p for p in payloads if (p.get("ymd") or "").replace("-", "") == day_str]
 
                 if not payloads:
@@ -331,6 +384,7 @@ def main() -> None:
         help="DB 접속 문자열 직접 지정 (예: postgresql+psycopg2://user:pass@localhost:5435/pv_data)",
     )
     parser.add_argument("--debug", action="store_true", help="API 응답 디버그 로그 출력")
+    parser.add_argument("--debug-slack", action="store_true", help="디버그 로그를 Slack으로 전송 (최대 50줄)")
     args = parser.parse_args()
 
     load_dotenv(PROJECT_ROOT / ".env")
@@ -367,11 +421,17 @@ def main() -> None:
         send_slack_message(f"[Nambu PV 백필 시작]\n- 기간: {args.start}~{_to_yyyymmdd(end)}\n- 대상: {len(targets)}개")
 
     try:
-        days, rows = asyncio.run(backfill(engine, api_key, targets, start, end, args.sleep_sec, args.debug))
+        debug_log: Optional[list[str]] = [] if args.debug_slack else None
+        days, rows = asyncio.run(
+            backfill(engine, api_key, targets, start, end, args.sleep_sec, args.debug, debug_log)
+        )
         msg = f"{title}\n- 처리 일수: {days}\n- 적재 행수: {rows}"
         print(msg)
         if args.slack:
             send_slack_message(f"[Nambu PV 백필 완료]\n{msg}")
+        if args.slack and args.debug_slack and debug_log:
+            debug_msg = "\n".join(debug_log)
+            send_slack_message(f"[Nambu PV 디버그]\n{debug_msg}")
     except Exception as e:
         err = f"{title}\n- 에러: {type(e).__name__}: {e}"
         print(err)
