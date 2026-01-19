@@ -80,7 +80,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT p.plant_name, p.latitude, p.longitude, COALESCE(SUM(g.generation), 0) as generation FROM nambu_plants p LEFT JOIN nambu_generation g ON p.plant_name = g.plant_name AND g.datetime >= $__timeFrom() AND g.datetime <= $__timeTo() WHERE p.latitude IS NOT NULL GROUP BY p.plant_name, p.latitude, p.longitude ORDER BY generation DESC",
+          "rawSql": "SELECT p.plant_name, p.latitude, p.longitude, COALESCE(SUM(g.generation), 0) as generation FROM nambu_plants p LEFT JOIN nambu_generation g ON p.plant_name = g.plant_name AND (g.datetime AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (g.datetime AT TIME ZONE 'Asia/Seoul') <= $__timeTo() WHERE p.latitude IS NOT NULL GROUP BY p.plant_name, p.latitude, p.longitude ORDER BY generation DESC",
           "refId": "A"
         }
       ],
@@ -208,7 +208,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('hour', datetime) as time, plant_name, SUM(generation) as generation FROM nambu_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo() GROUP BY date_trunc('hour', datetime), plant_name ORDER BY time",
+          "rawSql": "SELECT date_trunc('hour', datetime AT TIME ZONE 'Asia/Seoul') as time, plant_name, SUM(generation) as generation FROM nambu_generation WHERE (datetime AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (datetime AT TIME ZONE 'Asia/Seoul') <= $__timeTo() GROUP BY date_trunc('hour', datetime AT TIME ZONE 'Asia/Seoul'), plant_name ORDER BY time",
           "refId": "A"
         }
       ],
@@ -293,7 +293,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(generation) as total FROM nambu_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo()",
+          "rawSql": "SELECT SUM(generation) as total FROM nambu_generation WHERE (datetime AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (datetime AT TIME ZONE 'Asia/Seoul') <= $__timeTo()",
           "refId": "A"
         }
       ],
