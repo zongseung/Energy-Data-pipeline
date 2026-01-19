@@ -220,6 +220,15 @@ uv run python fetch_data/pv/nambu_backfill.py \
   --db-url "postgresql+psycopg2://<DB_USER>:<DB_PASS>@localhost:5432/<DB_NAME>"
 ```
 
+### Grafana(3006)에서 바로 보이게 백필하기
+현재 `http://localhost:3006`의 Grafana는 별도 스택(`docker/docker-compose.yml`)의 DB(`pv-data-postgres`, `localhost:5436`, `pv/pv`)를 기본 데이터소스로 사용합니다.
+
+그래서 Grafana(3006) 대시보드에서 “No data”가 뜬다면, 아래처럼 **Grafana가 바라보는 DB로 백필**해야 즉시 반영됩니다.
+```bash
+uv run python fetch_data/pv/nambu_backfill.py \
+  --db-url "postgresql+psycopg2://pv:pv@localhost:5436/pv"
+```
+
 옵션:
 - `--start`, `--end`: 없으면 실행 중 입력으로 받음
 - `--gencd`, `--hogi`: 특정 발전소/호기만
