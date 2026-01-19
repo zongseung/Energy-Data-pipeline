@@ -1,6 +1,6 @@
-# Energy PV Data Pipeline
+# Energy-Data-pipeline
 
-남부발전/남동발전 태양광(PV) 발전 데이터 및 기상 데이터를 수집, 전처리하여 PostgreSQL에 저장하고 Grafana를 활용하ㅕ 지도 시각화를 제공하는 파이프라인입니다.
+남부발전/남동발전 태양광(PV) 발전 데이터 및 기상 데이터를 수집, 전처리하여 PostgreSQL에 저장하고 Grafana 지도 시각화를 제공하는 파이프라인입니다.
 
 ## 시스템 아키텍처
 
@@ -120,88 +120,120 @@ Energy-Data-pipeline/
 
 `.env` 파일:
 ```bash
-# API Keys
-SERVICE_KEY=your_kma_api_key           # 기상청 API
-NAMBU_API_KEY=your_nambu_api_key       # 남부발전 API
-
-# Database (호스트에서 접속 시)
-PV_DATABASE_URL=postgresql+psycopg2://pv:pv@localhost:5434/pv
-
-# Slack 알림 (선택)
-SLACK_WEBHOOK_URL=https://hooks.slack.com/...
+docker compose up -d --build
 ```
 
-## 실행 방법
+실행 시 동작:
+- `pv-db`, `pv-grafana`, `pv-worker`가 상시 실행됩니다.
+- `pv-deploy`가 1회 실행되어 Prefect에 deployment/schedule을 등록한 뒤 종료됩니다.
 
-### 1. Docker 환경 시작
+## 서비스 & 포트
+
+| 구성요소 | 컨테이너 | 기본 포트 | 비고 |
+|---|---|---:|---|
+| Postgres | `pv-main-db` | `5432` | PV 데이터 저장소 |
+| Grafana | `pv-main-grafana` | `3002` | `http://localhost:3002` |
+| Prefect Worker | `pv-worker` | - | Prefect work pool(`pv-pool`) 구독 |
+| Deployer(1회) | `pv-deploy` | - | `prefect_flows/deploy.py` 실행 |
+
+## 아키텍처 (Mermaid)
+
+### 전체 구성
+```mermaid
+flowchart LR
+  subgraph Sources[Data Sources]
+    NambuAPI["남부발전 API\n(B552520)"]
+    NamdongCSV["남동발전 CSV\n(koenergy.kr)"]
+    ASOS["기상 ASOS API\n(선택)"]
+  end
+
+  subgraph Prefect[Prefect 2]
+    Server["Prefect Server\n(외부 컨테이너/서비스)"]
+    Worker["pv-worker\nPrefect Worker"]
+  end
+
+  subgraph Compose["This repo: docker compose"]
+    DB[(pv-db\nPostgres)]
+    Grafana["pv-grafana\nGrafana"]
+    Deployer["pv-deploy\n(1회 실행)\nregister deployments"]
+  end
+
+  subgraph Jobs[Flows & Scripts]
+    NamdongFlow["Daily Namdong PV Flow\n(10:00)"]
+    NambuFlow["Daily Nambu PV Flow\n(09:30)"]
+    NambuBackfill["Manual backfill\nnambu_backfill.py"]
+  end
+
+  Deployer --> Server
+  Server --> Worker
+
+  NamdongCSV --> NamdongFlow --> DB
+  NambuAPI --> NambuFlow --> DB
+  NambuAPI --> NambuBackfill --> DB
+  DB --> Grafana
+```
+
+### 스케줄 실행 흐름
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Cron as Cron (Deployment Schedule)
+  participant Prefect as Prefect Server
+  participant Worker as Prefect Worker (pv-worker)
+  participant Job as Flow Run Container
+  participant DB as Postgres (pv-db)
+  participant Slack as Slack Webhook (optional)
+
+  Cron->>Prefect: time reached (cron)
+  Prefect->>Worker: create flow run
+  Worker->>Job: start container & run flow
+  Job->>DB: upsert/append PV rows
+  Job-->>Slack: success/failure message
+  Job-->>Worker: completed/failed
+  Worker-->>Prefect: report state/logs
+```
+
+## 데이터 모델(핵심 테이블)
+현재 수집/적재 스크립트 기준으로 아래 테이블을 사용합니다.
+
+- `nambu_generation`: 남부발전 시간별 발전량(24행/일 목표)
+  - 주요 컬럼: `datetime`, `gencd`, `hogi`, `plant_name`, `generation`, `daily_total`, `daily_avg`, `daily_max`, `daily_min`
+- `namdong_generation`: 남동발전 시간별 발전량(스키마는 환경에 따라 다를 수 있음)
+- `nambu_plants`, `namdong_plants`: 발전소 메타(선택/환경에 따라)
+
+## Prefect Flows & 스케줄
+
+Prefect deployment 등록은 `pv-deploy`가 수행합니다.
+- 등록 스크립트: `prefect_flows/deploy.py`
+
+등록되는 주요 deployment(기본):
+- `daily-weather-collection` (09:00, KST) — 기상 CSV 수집 (옵션)
+- `daily-nambu-pv-collection` (09:30, KST) — 남부발전 PV 적재 + Slack 알림
+- `daily-namdong-pv-collection` (10:00, KST) — 남동발전 PV 적재 + Slack 알림
+- `full-etl` — 수동 실행(필요 시)
+
+## 수동 백필 (남부발전 2026~)
+
+`nambu_generation`에 “원하는 기간”을 백필하려면:
 ```bash
-cd docker
-docker-compose up -d
+uv run python fetch_data/pv/nambu_backfill.py \
+  --db-url "postgresql+psycopg2://<DB_USER>:<DB_PASS>@localhost:5432/<DB_NAME>"
 ```
 
-### 2. 접속 정보
-| 서비스 | URL | 계정 |
-|--------|-----|------|
-| Grafana | http://localhost:3003 | admin / admin |
-| Prefect UI | http://localhost:4300 | - |
-| PostgreSQL | localhost:5434 | pv / pv |
-
-### 3. 수동 플로우 실행 (Prefect UI)
-1. http://localhost:4300 접속
-2. Deployments → `daily-weather-collection` 선택
-3. Run → Quick Run
-
-### 4. 로컬 스크립트 실행
-```bash
-# 남부발전 시작일 탐색
-python fetch_data/pv/nambu_probe_date.py
-
-# 남부발전 데이터 수집
-python fetch_data/pv/nambu_bulk_sync.py
-
-# 남부발전 전처리
-python fetch_data/pv/nambu_merge_pv_data.py
-
-# DB 적재
-python initial_db_ingestion.py
-```
-
-## 스케줄
-
-| 플로우 | 스케줄 | 설명 |
-|--------|--------|------|
-| daily-weather-collection | 매일 09:00 | 전날 기상 데이터 수집 |
-| full-etl | 수동 | 전체 ETL (기상 + PV) |
-
-## Grafana 대시보드
-
-- **PV Dashboard**: 발전소별 발전량 시계열, 지도 시각화
-- 데이터소스: `PV-PostgreSQL` (pv-postgres 연결)
-
-## 로그 확인
-
-```bash
-# 전체 로그
-docker-compose logs -f
-
-# 특정 컨테이너
-docker-compose logs -f pv-worker
-docker-compose logs -f prefect-server-new
-```
+옵션:
+- `--start`, `--end`: 없으면 실행 중 입력으로 받음
+- `--gencd`, `--hogi`: 특정 발전소/호기만
+- `--slack`: Slack 알림 전송
+- `--debug`: API 응답/코드 출력
 
 ## 트러블슈팅
 
-### Prefect Worker가 플로우를 실행하지 않음
-```bash
-# Worker 상태 확인
-docker-compose logs pv-worker
+### 1) `pv-db` 도커 DNS(`pv-db`)를 호스트에서 못 찾음
+호스트에서 스크립트를 실행할 땐 `--db-url`을 `localhost:<port>`로 지정하세요.
 
-# Work Pool 확인 (Prefect UI)
-http://localhost:4300/work-pools
-```
+### 2) 남부발전 API 인증 실패(401)
+`NAMBU_API_KEY`가 URL-encoded 형태로 제공되는 경우가 있어서, 본 스크립트는 **encoded 키도 그대로 요청에 넣는 모드**를 지원합니다. 브라우저에서 동작하는 URL을 기준으로 `.env` 값을 맞추세요.
 
-### DB 연결 오류
-```bash
-# PostgreSQL 상태 확인
-docker-compose exec pv-postgres pg_isready -U pv
-```
+### 3) Prefect 배포는 되었는데 실행이 안 됨
+- Prefect Server가 실제로 실행 중인지 확인 (`PREFECT_API_URL`)
+- Worker가 `pv-pool`을 구독하고 있는지 확인: `docker logs -f pv-worker`

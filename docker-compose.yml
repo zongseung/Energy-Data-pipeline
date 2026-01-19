@@ -45,6 +45,20 @@ services:
     networks:
       - pv-net
       - prefect-network
+  pv-deploy:
+    build: .
+    container_name: pv-deploy
+    restart: "no"
+    env_file: .env
+    environment:
+      - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
+      - PREFECT_API_URL=${PREFECT_API_URL}
+    command: ["uv", "run", "python", "/app/prefect_flows/deploy.py"]
+    depends_on:
+      - pv-db
+    networks:
+      - pv-net
+      - prefect-network
 
 volumes:
   postgres_data:

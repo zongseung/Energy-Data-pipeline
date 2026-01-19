@@ -1,10 +1,14 @@
 import asyncio
+import os
 import re
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import aiohttp
+import requests
+from dotenv import load_dotenv
+from prefect import flow, task
 
 BASE = "https://www.koenergy.kr"
 MENU_CD = "FN0912020217"
@@ -13,7 +17,17 @@ CSV_URL = f"{BASE}/kosep/gv/nf/dt/nfdt21/csvDown.do"
 MAIN_URL = f"{BASE}/kosep/gv/nf/dt/nfdt21/main.do"
 
 # 저장 폴더 (원하면 바꾸기)
-OUTPUT_DIR = Path.cwd() / "pv_data_raw"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
+_output_dir_env = os.getenv("NAMDONG_OUTPUT_DIR")
+OUTPUT_DIR = Path(_output_dir_env) if _output_dir_env else (PROJECT_ROOT / "pv_data_raw")
+
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
+NAMDONG_START_DATE = os.getenv("NAMDONG_START_DATE")
+NAMDONG_ORG_NO = os.getenv("NAMDONG_ORG_NO", "").strip()
+NAMDONG_HOKI_S = os.getenv("NAMDONG_HOKI_S", "").strip()
+NAMDONG_HOKI_E = os.getenv("NAMDONG_HOKI_E", "").strip()
+NAMDONG_PAGE_INDEX = os.getenv("NAMDONG_PAGE_INDEX", "1").strip() or "1"
 
 
 # -------------------------
@@ -118,6 +132,88 @@ def is_probably_csv(body: bytes) -> bool:
 
 
 # -------------------------
+# Slack notify
+# -------------------------
+def send_slack_message(text: str, webhook_url: Optional[str] = None) -> None:
+    if webhook_url is None:
+        webhook_url = SLACK_WEBHOOK_URL
+    if not webhook_url:
+        print("SLACK_WEBHOOK_URL이 설정되어 있지 않습니다. Slack 전송 스킵.")
+        return
+
+    try:
+        resp = requests.post(webhook_url, json={"text": text}, timeout=5)
+        if resp.status_code != 200:
+            print(f"Slack 전송 실패: {resp.status_code}, {resp.text}")
+    except Exception as e:
+        print(f"Slack 전송 중 예외 발생: {e}")
+
+
+@task(name="Slack 성공 알림", retries=0)
+def notify_slack_success(flow_name: str, details: str) -> None:
+    msg = f"[{flow_name} 완료]\n{details}"
+    send_slack_message(msg)
+
+
+@task(name="Slack 실패 알림", retries=0)
+def notify_slack_failure(flow_name: str, error_msg: str) -> None:
+    msg = f"[{flow_name} 실패]\n- 에러: {error_msg}"
+    send_slack_message(msg)
+
+
+# -------------------------
+# Backfill helpers
+# -------------------------
+def _parse_date_range_from_filename(name: str) -> Optional[Tuple[str, str]]:
+    m = re.search(r"_(\d{8})-(\d{8})\.csv$", name)
+    if not m:
+        return None
+    return m.group(1), m.group(2)
+
+
+def get_latest_collected_date(output_dir: Path) -> Optional[date]:
+    if not output_dir.exists():
+        return None
+    latest: Optional[date] = None
+    for fp in output_dir.glob("south_pv_*.csv"):
+        parsed = _parse_date_range_from_filename(fp.name)
+        if not parsed:
+            continue
+        _, end_str = parsed
+        try:
+            end_dt = _to_date_yyyymmdd(end_str)
+        except Exception:
+            continue
+        if latest is None or end_dt > latest:
+            latest = end_dt
+    return latest
+
+
+def resolve_backfill_range(
+    output_dir: Path,
+    target_start: Optional[str],
+    target_end: Optional[str],
+) -> Tuple[date, date]:
+    if target_start:
+        start_dt = _to_date_yyyymmdd(_validate_yyyymmdd(target_start))
+    else:
+        latest = get_latest_collected_date(output_dir)
+        if latest:
+            start_dt = latest + timedelta(days=1)
+        elif NAMDONG_START_DATE:
+            start_dt = _to_date_yyyymmdd(_validate_yyyymmdd(NAMDONG_START_DATE))
+        else:
+            start_dt = date.today() - timedelta(days=365)
+
+    if target_end:
+        end_dt = _to_date_yyyymmdd(_validate_yyyymmdd(target_end))
+    else:
+        end_dt = date.today() - timedelta(days=1)
+
+    return start_dt, end_dt
+
+
+# -------------------------
 # Main downloader
 # -------------------------
 async def download_monthly_csvs(
@@ -202,6 +298,77 @@ async def download_monthly_csvs(
                 await asyncio.sleep(sleep_sec)
 
     return saved_files
+
+
+@task(name="남동발전 CSV 수집", retries=3, retry_delay_seconds=300)
+def collect_namdong_csv(
+    page_index: str,
+    org_no: str,
+    hoki_s: str,
+    hoki_e: str,
+    start_dt: date,
+    end_dt: date,
+    sleep_sec: int = 5,
+) -> List[Path]:
+    return asyncio.run(
+        download_monthly_csvs(
+            page_index=page_index,
+            org_no=org_no,
+            hoki_s=hoki_s,
+            hoki_e=hoki_e,
+            date_s=_to_yyyymmdd(start_dt),
+            date_e=_to_yyyymmdd(end_dt),
+            sleep_sec=sleep_sec,
+        )
+    )
+
+
+@flow(name="Daily Namdong PV Collection Flow", log_prints=True)
+def daily_namdong_collection_flow(
+    target_start: Optional[str] = None,
+    target_end: Optional[str] = None,
+    sleep_sec: int = 5,
+) -> List[Path]:
+    print(f"\n{'='*60}")
+    print("남동발전 PV 수집 플로우 시작")
+    print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"{'='*60}\n")
+
+    try:
+        start_dt, end_dt = resolve_backfill_range(OUTPUT_DIR, target_start, target_end)
+        if start_dt > end_dt:
+            print("수집 대상이 없습니다. 최신 상태입니다.")
+            notify_slack_success.submit(
+                "Namdong PV",
+                "- 수집 대상 없음 (최신 상태)"
+            )
+            return []
+
+        print(f"수집 기간: {start_dt} ~ {end_dt}")
+        saved_files = collect_namdong_csv.submit(
+            NAMDONG_PAGE_INDEX,
+            NAMDONG_ORG_NO,
+            NAMDONG_HOKI_S,
+            NAMDONG_HOKI_E,
+            start_dt,
+            end_dt,
+            sleep_sec,
+        ).result()
+
+        notify_slack_success.submit(
+            "Namdong PV",
+            f"- 기간: {_to_yyyymmdd(start_dt)}~{_to_yyyymmdd(end_dt)}\n"
+            f"- 저장 파일 수: {len(saved_files)}\n"
+            f"- 저장 폴더: {OUTPUT_DIR}"
+        )
+
+        return saved_files
+
+    except Exception as e:
+        error_msg = f"{type(e).__name__}: {e}"
+        print(f"\n플로우 실행 중 에러 발생: {error_msg}")
+        notify_slack_failure.submit("Namdong PV", error_msg)
+        raise
 
 
 def main():

@@ -34,3 +34,33 @@ deployments:
   - cron: 0 9 * * *
     timezone: null
     day_or: true
+- name: Daily-Namdong-Sync
+  version: null
+  tags: []
+  concurrency_limit: null
+  description: null
+  entrypoint: ./fetch_data/pv/namdong_collect_pv.py:daily_namdong_collection_flow
+  parameters: {}
+  work_pool:
+    name: default-agent-pool
+    work_queue_name: null
+    job_variables: {}
+  schedules:
+  - cron: 0 10 * * *
+    timezone: null
+    day_or: true
+- name: Daily-Nambu-Sync
+  version: null
+  tags: []
+  concurrency_limit: null
+  description: null
+  entrypoint: ./prefect_flows/nambu_pv_flow.py:daily_nambu_collection_flow
+  parameters: {}
+  work_pool:
+    name: default-agent-pool
+    work_queue_name: null
+    job_variables: {}
+  schedules:
+  - cron: 30 9 * * *
+    timezone: null
+    day_or: true
