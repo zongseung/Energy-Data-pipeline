@@ -25,6 +25,10 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - pv-db
     networks:
@@ -38,6 +42,7 @@ services:
     environment:
       - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
       - PREFECT_API_URL=${PREFECT_API_URL}
+      - NAMDONG_WIND_KEY=${NAMDONG_WIND_KEY}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -53,12 +58,26 @@ services:
     environment:
       - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
       - PREFECT_API_URL=${PREFECT_API_URL}
+      - NAMDONG_WIND_KEY=${NAMDONG_WIND_KEY}
     command: ["uv", "run", "python", "/app/prefect_flows/deploy.py"]
     depends_on:
       - pv-db
     networks:
       - pv-net
       - prefect-network
+
+  wind-init:
+    build: .
+    container_name: wind-init
+    restart: "no"
+    env_file: .env
+    environment:
+      - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
+    command: ["uv", "run", "python", "/app/scripts/init_wind_tables.py"]
+    depends_on:
+      - pv-db
+    networks:
+      - pv-net
 
 volumes:
   postgres_data:
