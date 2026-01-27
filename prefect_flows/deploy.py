@@ -33,6 +33,7 @@ if not SERVICE_KEY:
     print("[WARN] SERVICE_KEY가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생할 수 있습니다.")
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+NAMDONG_WIND_KEY = os.getenv("NAMDONG_WIND_KEY", "")
 NAMDONG_START_DATE = os.getenv("NAMDONG_START_DATE", "")
 NAMDONG_ORG_NO = os.getenv("NAMDONG_ORG_NO", "")
 NAMDONG_HOKI_S = os.getenv("NAMDONG_HOKI_S", "")
@@ -59,6 +60,7 @@ def get_infra_overrides():
             "PV_DATABASE_URL": PV_DATABASE_URL,
             "DB_URL": PV_DATABASE_URL,
             "SLACK_WEBHOOK_URL": SLACK_WEBHOOK_URL,
+            "NAMDONG_WIND_KEY": NAMDONG_WIND_KEY,
             "NAMDONG_START_DATE": NAMDONG_START_DATE,
             "NAMDONG_ORG_NO": NAMDONG_ORG_NO,
             "NAMDONG_HOKI_S": NAMDONG_HOKI_S,
@@ -245,6 +247,34 @@ async def deploy_nambu_flow() -> None:
     print("Deployment 완료: 'daily-nambu-pv-collection' (매일 09:30)")
 
 
+async def deploy_namdong_wind_flow() -> None:
+    """남동발전 풍력 수집 플로우 배포"""
+    flow = import_object(
+        "prefect_flows.namdong_wind_flow.monthly_namdong_wind_flow"
+    )
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="monthly-namdong-wind-collection",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/namdong_wind_flow.py:monthly_namdong_wind_flow",
+        parameters={"target_start": None, "target_end": None},
+        schedules=[
+            CronSchedule(
+                cron="0 11 10 * *",  # 매월 10일 오전 11시
+                timezone="Asia/Seoul",
+            )
+        ],
+        tags=["wind", "namdong", "monthly"],
+        description="매월 10일 오전 11시에 전월 남동발전 풍력 데이터를 수집",
+        infra_overrides=get_infra_overrides(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'monthly-namdong-wind-collection' (매월 10일 11:00)")
+
+
 # =======================================================================
 # 메인 실행
 # =======================================================================
@@ -266,6 +296,7 @@ async def create_all_deployments() -> None:
     await deploy_full_etl_flow()
     await deploy_namdong_flow()
     await deploy_nambu_flow()
+    await deploy_namdong_wind_flow()
 
     print("\n" + "=" * 60)
     print("모든 Deployment 완료!")
@@ -273,10 +304,11 @@ async def create_all_deployments() -> None:
 
     # 배포 요약
     print("배포된 Flow:")
-    print("  1. daily-weather-collection    - 매일 09:00 (기상 데이터)")
-    print("  2. full-etl                    - 수동 실행 (전체 ETL)")
-    print("  3. monthly-namdong-pv-collection - 매월 10일 10:00 (남동발전 PV)")
-    print("  4. daily-nambu-pv-collection     - 매일 09:30 (남부발전 PV)")
+    print("  1. daily-weather-collection       - 매일 09:00 (기상 데이터)")
+    print("  2. full-etl                       - 수동 실행 (전체 ETL)")
+    print("  3. monthly-namdong-pv-collection  - 매월 10일 10:00 (남동발전 PV)")
+    print("  4. daily-nambu-pv-collection      - 매일 09:30 (남부발전 PV)")
+    print("  5. monthly-namdong-wind-collection - 매월 10일 11:00 (남동발전 풍력)")
     print("")
 
 
