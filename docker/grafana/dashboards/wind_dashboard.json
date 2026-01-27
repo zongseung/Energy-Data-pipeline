@@ -1,0 +1,671 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 10,
+      "title": "남동발전 풍력",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "pv-postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "발전량 (kWh)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 19,
+        "x": 0,
+        "y": 1
+      },
+      "hideTimeOverride": false,
+      "id": 1,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "남동발전 풍력 시간별 발전량",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "pv-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  timestamp AS time,\n  plant_name,\n  generation\nFROM wind_namdong\nWHERE timestamp >= '${namdong_start}'::timestamp\n  AND timestamp <= '${namdong_end}'::timestamp\nORDER BY timestamp",
+          "refId": "A",
+          "timeFrom": "0s",
+          "timeShift": null
+        }
+      ],
+      "timeFrom": "${namdong_start}",
+      "timeTo": "${namdong_end}"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "pv-postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "blue",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "총 발전량",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "pv-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  SUM(generation) AS total_generation\nFROM wind_namdong\nWHERE timestamp >= '${namdong_start}'::timestamp\n  AND timestamp <= '${namdong_end}'::timestamp",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": "${namdong_start}",
+      "timeTo": "${namdong_end}",
+      "hideTimeOverride": false
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 11,
+      "title": "서부발전 풍력",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "pv-postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "발전량 (kWh)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 19,
+        "x": 0,
+        "y": 12
+      },
+      "hideTimeOverride": false,
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "서부발전 풍력 시간별 발전량",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "pv-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  timestamp AS time,\n  plant_name,\n  generation\nFROM wind_seobu\nWHERE timestamp >= '${seobu_start}'::timestamp\n  AND timestamp <= '${seobu_end}'::timestamp\nORDER BY timestamp",
+          "refId": "A",
+          "timeFrom": "0s",
+          "timeShift": null
+        }
+      ],
+      "timeFrom": "${seobu_start}",
+      "timeTo": "${seobu_end}"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "pv-postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "green",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 5,
+        "x": 19,
+        "y": 12
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "총 발전량",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "pv-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  SUM(generation) AS total_generation\nFROM wind_seobu\nWHERE timestamp >= '${seobu_start}'::timestamp\n  AND timestamp <= '${seobu_end}'::timestamp",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": "${seobu_start}",
+      "timeTo": "${seobu_end}",
+      "hideTimeOverride": false
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 12,
+      "title": "한경풍력",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "pv-postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "발전량 (kWh)",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 19,
+        "x": 0,
+        "y": 23
+      },
+      "hideTimeOverride": false,
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "한경풍력 시간별 발전량",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "pv-postgres"
+          },
+          "editorMode": "code",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  timestamp AS time,\n  SUM(generation) AS generation\nFROM wind_hangyoung\nWHERE timestamp >= '${hangyoung_start}'::timestamp\n  AND timestamp <= '${hangyoung_end}'::timestamp\nGROUP BY timestamp\nORDER BY timestamp",
+          "refId": "A",
+          "timeFrom": "0s",
+          "timeShift": null
+        }
+      ],
+      "timeFrom": "${hangyoung_start}",
+      "timeTo": "${hangyoung_end}"
+    },
+    {
+      "datasource": {
+        "type": "postgres",
+        "uid": "pv-postgres"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "purple",
+            "mode": "fixed"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "purple",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 5,
+        "x": 19,
+        "y": 23
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "sum"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "총 발전량",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "postgres",
+            "uid": "pv-postgres"
+          },
+          "editorMode": "code",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT\n  SUM(generation) AS total_generation\nFROM wind_hangyoung\nWHERE timestamp >= '${hangyoung_start}'::timestamp\n  AND timestamp <= '${hangyoung_end}'::timestamp",
+          "refId": "A"
+        }
+      ],
+      "timeFrom": "${hangyoung_start}",
+      "timeTo": "${hangyoung_end}",
+      "hideTimeOverride": false
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "wind",
+    "energy"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "2025-01-01",
+          "value": "2025-01-01"
+        },
+        "description": "남동발전 조회 시작일",
+        "label": "남동 시작일",
+        "name": "namdong_start",
+        "options": [
+          {
+            "selected": true,
+            "text": "2025-01-01",
+            "value": "2025-01-01"
+          }
+        ],
+        "query": "2025-01-01",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "2026-01-01",
+          "value": "2026-01-01"
+        },
+        "description": "남동발전 조회 종료일",
+        "label": "남동 종료일",
+        "name": "namdong_end",
+        "options": [
+          {
+            "selected": true,
+            "text": "2026-01-01",
+            "value": "2026-01-01"
+          }
+        ],
+        "query": "2026-01-01",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "2022-01-01",
+          "value": "2022-01-01"
+        },
+        "description": "서부발전 조회 시작일",
+        "label": "서부 시작일",
+        "name": "seobu_start",
+        "options": [
+          {
+            "selected": true,
+            "text": "2022-01-01",
+            "value": "2022-01-01"
+          }
+        ],
+        "query": "2022-01-01",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "2023-06-30",
+          "value": "2023-06-30"
+        },
+        "description": "서부발전 조회 종료일",
+        "label": "서부 종료일",
+        "name": "seobu_end",
+        "options": [
+          {
+            "selected": true,
+            "text": "2023-06-30",
+            "value": "2023-06-30"
+          }
+        ],
+        "query": "2023-06-30",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "2024-01-01",
+          "value": "2024-01-01"
+        },
+        "description": "한경풍력 조회 시작일",
+        "label": "한경 시작일",
+        "name": "hangyoung_start",
+        "options": [
+          {
+            "selected": true,
+            "text": "2024-01-01",
+            "value": "2024-01-01"
+          }
+        ],
+        "query": "2024-01-01",
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "2025-03-01",
+          "value": "2025-03-01"
+        },
+        "description": "한경풍력 조회 종료일",
+        "label": "한경 종료일",
+        "name": "hangyoung_end",
+        "options": [
+          {
+            "selected": true,
+            "text": "2025-03-01",
+            "value": "2025-03-01"
+          }
+        ],
+        "query": "2025-03-01",
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "2021-01-01",
+    "to": "2026-12-31"
+  },
+  "timepicker": {
+    "hidden": true
+  },
+  "timezone": "Asia/Seoul",
+  "title": "Wind Power Generation Dashboard",
+  "uid": "wind-power-dashboard",
+  "version": 3,
+  "weekStart": ""
+}
