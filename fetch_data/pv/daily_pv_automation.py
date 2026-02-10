@@ -1,5 +1,6 @@
 import asyncio
 import aiohttp
+import json
 import pandas as pd
 import xml.etree.ElementTree as ET
 import os
@@ -15,6 +16,14 @@ load_dotenv()
 current_file = Path(__file__).resolve()
 PROJECT_ROOT = current_file.parent.parent.parent # 폴더 구조에 맞춰 상위 폴더 지정
 load_dotenv(PROJECT_ROOT / ".env")
+
+# plant.json에서 gencd -> plant_name 매핑 로드
+_PLANT_JSON = PROJECT_ROOT / "plant.json"
+GENCD_TO_NAME: dict[str, str] = {}
+if _PLANT_JSON.exists():
+    with open(_PLANT_JSON, "r", encoding="utf-8") as _f:
+        for _p in json.load(_f):
+            GENCD_TO_NAME.setdefault(_p["plant_code"], _p["plant_name"])
 
 API_KEY = os.getenv("NAMBU_API_KEY")
 ENDPOINT = "https://apis.data.go.kr/B552520/PwrSunLightInfo/getDataService"
@@ -166,6 +175,10 @@ async def collect_and_save(engine_, targets):
                 df_long["daily_max"] = pd.to_numeric(df_long["qvodmax"], errors="coerce")
                 df_long["daily_min"] = pd.to_numeric(df_long["qvodmin"], errors="coerce")
                 df_long["plant_name"] = df_long["ipptnm"]
+                # API 응답에 ipptnm이 없는 경우 plant.json 매핑으로 대체
+                if GENCD_TO_NAME:
+                    mask_na = df_long["plant_name"].isna() | (df_long["plant_name"].astype(str) == "None")
+                    df_long.loc[mask_na, "plant_name"] = df_long.loc[mask_na, "gencd"].map(GENCD_TO_NAME)
                 df_long["hogi"] = pd.to_numeric(df_long["hogi"], errors="coerce").astype("Int64")
 
                 final_df = df_long[
