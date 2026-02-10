@@ -30,7 +30,7 @@ services:
       - POSTGRES_PASSWORD=pv
       - POSTGRES_DB=pv
     volumes:
-      - pv_data_postgres:/var/lib/postgresql/data
+      - /mnt/iscsi-renewable/postgres/pv-data-postgres:/var/lib/postgresql/data
     ports:
       - "5436:5432"  # 호스트에서 localhost:5436으로 접속
     healthcheck:

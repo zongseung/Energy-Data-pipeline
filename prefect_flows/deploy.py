@@ -40,6 +40,9 @@ NAMDONG_HOKI_S = os.getenv("NAMDONG_HOKI_S", "")
 NAMDONG_HOKI_E = os.getenv("NAMDONG_HOKI_E", "")
 NAMDONG_PAGE_INDEX = os.getenv("NAMDONG_PAGE_INDEX", "")
 NAMDONG_OUTPUT_DIR = os.getenv("NAMDONG_OUTPUT_DIR", "")
+NAMBU_API_KEY = os.getenv("NAMBU_API_KEY", "")
+if not NAMBU_API_KEY:
+    print("[WARN] NAMBU_API_KEY가 설정되지 않았습니다. 남부발전 PV 수집 시 오류가 발생할 수 있습니다.")
 
 os.environ.setdefault("PREFECT_API_URL", PREFECT_API_URL)
 
@@ -67,6 +70,7 @@ def get_infra_overrides():
             "NAMDONG_HOKI_E": NAMDONG_HOKI_E,
             "NAMDONG_PAGE_INDEX": NAMDONG_PAGE_INDEX,
             "NAMDONG_OUTPUT_DIR": NAMDONG_OUTPUT_DIR,
+            "NAMBU_API_KEY": NAMBU_API_KEY,
             "TZ": "Asia/Seoul",
         },
         "networks": [DOCKER_NETWORK],
