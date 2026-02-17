@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -122,7 +123,8 @@ def transform_wide_to_long(df_wide: pd.DataFrame) -> pd.DataFrame:
     df_long["hour_num"] = df_long["hour_col"].str.extract(r"(\d+)").astype(int)
 
     # timestamp 생성: hour 24 -> 다음 날 00시
-    df_long["temp_hour"] = df_long["hour_num"].apply(lambda h: "00" if h == 24 else f"{h:02d}")
+    hour_num = df_long["hour_num"]
+    df_long["temp_hour"] = np.where(hour_num == 24, "00", hour_num.map("{:02d}".format))
     df_long["timestamp"] = pd.to_datetime(
         df_long["dgenYmd"].astype(str) + " " + df_long["temp_hour"] + ":00:00",
         format="%Y%m%d %H:%M:%S",
