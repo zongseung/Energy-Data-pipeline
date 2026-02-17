@@ -1,3 +1,10 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fetch_data*", "prefect_flows*", "notify*"]
+
 [project]
 name = "weather-pipeline"
 version = "0.2.0"
