@@ -150,14 +150,14 @@ def _get_targets(engine, gencd: Optional[str], hogi: Optional[int]) -> list[dict
     """
     df = pd.read_sql(text(q), engine.connect())
     targets = []
-    for _, row in df.iterrows():
-        tgencd = str(row["gencd"]).strip()
-        thogi = int(row["hogi"])
+    for row in df.itertuples(index=False):
+        tgencd = str(row.gencd).strip()
+        thogi = int(row.hogi)
         if gencd and tgencd != gencd:
             continue
         if hogi is not None and thogi != hogi:
             continue
-        targets.append({"gencd": tgencd, "hogi": thogi, "plant_name": row.get("plant_name")})
+        targets.append({"gencd": tgencd, "hogi": thogi, "plant_name": getattr(row, "plant_name", None)})
     return targets
 
 

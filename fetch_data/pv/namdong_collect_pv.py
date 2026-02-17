@@ -298,14 +298,10 @@ def load_namdong_to_db(files: List[Path], start_dt: date, end_dt: date, db_url: 
         if "호기" in df.columns:
             df["호기"] = df["호기"].astype(str).str.strip()
             hogi_counts = df.groupby("발전소명")["호기"].nunique()
-            multi_hogi_plants = hogi_counts[hogi_counts > 1].index.tolist()
+            multi_hogi_plants = set(hogi_counts[hogi_counts > 1].index)
 
-            def add_hogi_suffix(row):
-                if row["발전소명"] in multi_hogi_plants:
-                    return f"{row['발전소명']}_{row['호기']}"
-                return row["발전소명"]
-
-            df["발전소명"] = df.apply(add_hogi_suffix, axis=1)
+            mask = df["발전소명"].isin(multi_hogi_plants)
+            df.loc[mask, "발전소명"] = df.loc[mask, "발전소명"] + "_" + df.loc[mask, "호기"]
 
         if "일자" not in df.columns:
             raise ValueError(f"필수 컬럼(일자) 누락: {fp.name}")

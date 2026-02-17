@@ -90,11 +90,11 @@ def get_active_targets(engine_):
     active_targets = []
     yesterday = datetime.now() - timedelta(days=1)
 
-    for _, row in df.iterrows():
-        gencd = str(row["gencd"]).strip()
-        hogi = int(row["hogi"])
-        plant_name = row.get("plant_name")
-        last_dt = row["last_dt"]
+    for row in df.itertuples(index=False):
+        gencd = str(row.gencd).strip()
+        hogi = int(row.hogi)
+        plant_name = getattr(row, "plant_name", None)
+        last_dt = row.last_dt
         
         # 필터링: 마지막 기록이 2025년 이전이면 발전 중단으로 간주하여 스킵
         if last_dt and last_dt.year < 2025:
@@ -201,27 +201,27 @@ async def collect_and_save(engine_, targets):
                 ].dropna(subset=["datetime", "gencd", "hogi"])
 
                 with engine_.begin() as conn:
-                    # 같은 날짜 데이터가 이미 있으면 replace(특히 마지막 날짜가 미완성인 케이스)
-                    for day in sorted(final_df["datetime"].dt.date.unique()):
-                        day_start = datetime.combine(day, datetime.min.time())
-                        day_end = day_start + timedelta(days=1)
-                        conn.execute(
-                            text(
-                                """
-                                DELETE FROM nambu_generation
-                                WHERE gencd = :gencd
-                                  AND hogi = :hogi
-                                  AND datetime >= :day_start
-                                  AND datetime < :day_end
-                                """
-                            ),
-                            {
-                                "gencd": target["gencd"],
-                                "hogi": int(target["hogi"]),
-                                "day_start": day_start,
-                                "day_end": day_end,
-                            },
-                        )
+                    # 전체 날짜 범위를 한 번의 DELETE로 처리
+                    unique_days = sorted(final_df["datetime"].dt.date.unique())
+                    range_start = datetime.combine(unique_days[0], datetime.min.time())
+                    range_end = datetime.combine(unique_days[-1] + timedelta(days=1), datetime.min.time())
+                    conn.execute(
+                        text(
+                            """
+                            DELETE FROM nambu_generation
+                            WHERE gencd = :gencd
+                              AND hogi = :hogi
+                              AND datetime >= :range_start
+                              AND datetime < :range_end
+                            """
+                        ),
+                        {
+                            "gencd": target["gencd"],
+                            "hogi": int(target["hogi"]),
+                            "range_start": range_start,
+                            "range_end": range_end,
+                        },
+                    )
 
                     final_df.to_sql("nambu_generation", con=conn, if_exists="append", index=False)
                 
