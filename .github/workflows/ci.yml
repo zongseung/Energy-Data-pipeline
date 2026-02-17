@@ -25,9 +25,9 @@ jobs:
       - name: Sync deps
         run: |
           if [ -f uv.lock ]; then
-            uv sync --frozen
+            uv sync --frozen --no-install-project
           else
-            uv sync
+            uv sync --no-install-project
           fi
 
       - name: Smoke import
