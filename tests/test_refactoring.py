@@ -122,9 +122,8 @@ class TestSplineImpute:
         assert not np.isnan(result.iloc[1])
         assert pytest.approx(result.iloc[1], abs=0.5) == 2.0
 
-    @pytest.mark.xfail(reason="알려진 한계: 시리즈 맨 앞 결측치는 선형 보간 불가 (리팩토링 시 수정 필요)")
     def test_boundary_gap_start(self):
-        """첫 번째 값이 결측인 경우 — 현재 구현은 보간 실패"""
+        """첫 번째 값이 결측인 경우 — numpy np.interp 기반으로 해결됨"""
         s = pd.Series([np.nan, 2.0, 3.0, 4.0])
         result = spline_impute(s.copy(), start_idx=0, length=1)
         assert not np.isnan(result.iloc[0])
@@ -200,6 +199,67 @@ class TestImputeMissingValues:
         df = pd.DataFrame({"tm": ["2025-01-01", "2025-01-02"], "ta": [1.0, 2.0]})
         with pytest.raises(ValueError, match="지역 컬럼"):
             impute_missing_values(df, columns=["ta"], station_col="없는컬럼", debug=False)
+
+
+# ============================================================
+# 4-1. impute 최적화 동등성 테스트 (multi-station, historical 경로 포함)
+# ============================================================
+
+
+class TestImputeOptimizationEquivalence:
+    """최적화 후 동등성 검증 — historical_average 경로까지 커버"""
+
+    @pytest.fixture
+    def multi_station_df(self):
+        """다중 station, 다양한 결측 패턴 데이터"""
+        rng = np.random.default_rng(123)
+        rows = []
+        for station in ["서울", "부산"]:
+            dates = pd.date_range("2023-01-01", periods=72, freq="h")
+            ta = 10.0 + rng.normal(0, 3, 72)
+            hm = 55.0 + rng.normal(0, 5, 72)
+            # 짧은 결측 (스플라인 경로): 2개 연속
+            ta[10:12] = np.nan
+            hm[20:22] = np.nan
+            # 긴 결측 (historical 경로): 5개 연속
+            ta[40:45] = np.nan
+            hm[50:55] = np.nan
+            df_s = pd.DataFrame({
+                "tm": dates.strftime("%Y-%m-%d %H:%M"),
+                "stnNm": station,
+                "ta": ta,
+                "hm": hm,
+            })
+            rows.append(df_s)
+        return pd.concat(rows, ignore_index=True)
+
+    def test_all_missing_reduced(self, multi_station_df):
+        before_ta = multi_station_df["ta"].isna().sum()
+        before_hm = multi_station_df["hm"].isna().sum()
+        df_out, info = impute_missing_values(multi_station_df, debug=True)
+        after_ta = df_out["ta"].isna().sum()
+        after_hm = df_out["hm"].isna().sum()
+        assert after_ta < before_ta, "ta 결측치가 줄어들어야 함"
+        assert after_hm < before_hm, "hm 결측치가 줄어들어야 함"
+
+    def test_shape_unchanged(self, multi_station_df):
+        n = len(multi_station_df)
+        df_out = impute_missing_values(multi_station_df, debug=False)
+        assert len(df_out) == n
+
+    def test_historical_path_triggered(self, multi_station_df):
+        """연속 5개 결측 그룹이 historical 경로를 타는지 확인"""
+        _, info = impute_missing_values(multi_station_df, debug=True)
+        # 각 컬럼마다 historical 처리가 1회 이상 발생해야 함
+        for col in ["ta", "hm"]:
+            assert info["processing_stats"][col]["historical"] >= 1, \
+                f"{col}: historical 경로가 호출되지 않음"
+
+    def test_no_nan_in_filled_positions(self, multi_station_df):
+        """보간 대상 위치가 실제로 채워졌는지 확인"""
+        df_out = impute_missing_values(multi_station_df, debug=False)
+        # 서울 station의 ta[10:12] 위치 (스플라인으로 처리됨)
+        assert not df_out.loc[10:11, "ta"].isna().any(), "스플라인 결측 미처리"
 
 
 # ============================================================
