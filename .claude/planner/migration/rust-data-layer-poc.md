@@ -1,9 +1,16 @@
-# Data Layer Rust 도입 PoC 기획서 (v2 — 프로파일링 반영판)
+# Data Layer Rust 도입 PoC 기획서 (v3 — 수집기 Rust 재작성 반영)
 
 기준일: 2026-02-17
-최종 수정: 2026-02-17 (코드 리뷰 및 병목 분석 반영)
+최종 수정: 2026-02-17 (Phase 2: Rust 수집기 재작성 방향 추가)
 대상 저장소: `Energy-Data-pipeline`
-운영 전제: Python 오케스트레이션(Prefect) 유지 + **Python 최적화 선행** + 병목 구간만 Rust로 점진 치환
+운영 전제: Python 오케스트레이션(Prefect) 유지 + **수집기(Collector)를 Rust + Polars로 재작성**
+
+> **v3 변경 이력**
+> - Phase 0 완료 (No-Go → 성능 최적화 관점 Rust 불필요 확인)
+> - Phase 1 미진행 (성능 기반 조건부 치환은 보류)
+> - **Phase 2 신설**: 수집기 자체를 Rust로 재작성 (성능이 아닌 구조/안정성/배포 관점)
+> - melt 사이트 전수 조사: 2곳 → **6곳** 업데이트
+> - 리팩토링 반영: `date_utils.py`, `notify_tasks.py`, `db_utils.py` 통합 완료 상태
 
 ---
 
@@ -149,27 +156,28 @@
 
 ```
 Energy-Data-pipeline/
-  fetch_data/
-  prefect_flows/
-  notify/
-  docker/
-  scripts/
-  configs/
-    test.toml
-    prod.toml
-
-  rust/                     # 신규 (Phase 1 진입 시 생성)
-    Cargo.toml              # workspace
-    crates/
-      data_layer/           # pyo3 모듈 (python import용)
-      transforms/           # 순수 변환 라이브러리 (polars/arrow)
-      ingest/               # (선택) bulk ingest CLI
-    pyproject.toml          # (선택) maturin 설정을 rust/ 아래로 분리
-
+  fetch_data/               # Python 수집기 (유지, fallback)
+    common/                 # db_utils, date_utils, impute_missing
+    pv/                     # PV 수집기
+    wind/                   # 풍력 수집기
+  prefect_flows/            # Prefect 오케스트레이션 (유지)
+  notify/                   # Slack 알림 (유지)
+  docker/                   # Docker 설정
   tests/
     equivalence/            # 동등성 스냅샷 기반 테스트
-    benchmark/              # 고정 입력셋 벤치 (Phase 0부터 사용)
+    benchmark/              # 고정 입력셋 벤치
+
+  rust/                     # Phase 2: Rust 수집기 workspace
+    Cargo.toml              # workspace 루트
+    crates/
+      common/               # config, DB pool, error types
+      transforms/           # Polars 변환 (melt/unpivot)
+      collector-nambu/      # 남부발전 수집기 CLI
+      collector-namdong-pv/ # 남동 PV 수집기 CLI
+      collector-namdong-wind/ # 남동 풍력 수집기 CLI
 ```
+
+> 참고: `configs/` 디렉토리는 현재 존재하지 않음. 환경변수(`.env`)로 설정 관리 중.
 
 ### 4.2 Python 측 호출 지점(예시)
 - 기존 함수는 유지하되, 옵션 플래그로 Rust 우회 경로를 둡니다.
@@ -436,3 +444,493 @@ jobs:
 | **대규모 수치 연산** | numpy/scipy 활용, Rust fallback | 10만행+ 행렬 연산 | Rust 적합 (고) |
 | **네트워크 I/O** | 비동기 병렬화, 배치 요청 | API 호출, DB round-trip | Rust 무관 (해당없음) |
 | **직렬화/역직렬화** | Arrow IPC, zero-copy | Python↔Rust 데이터 전달 | 데이터 규모에 의존 |
+
+---
+
+# Phase 2: Rust 수집기(Collector) 재작성
+
+> Phase 0의 No-Go 판정은 "성능 최적화를 위한 함수 단위 치환"에 대한 것입니다.
+> Phase 2는 **수집기 전체를 Rust로 재작성**하는 별도 트랙으로, 목적이 다릅니다.
+
+## P2-0. 목적 및 동기
+
+### 왜 수집기를 Rust로 재작성하는가?
+
+| 관점 | Python 현재 | Rust 기대 |
+|------|-----------|----------|
+| **타입 안정성** | 런타임 타입 에러 (API 스키마 변경 시) | 컴파일 타임에 스키마 불일치 탐지 |
+| **배포** | Python 환경 + 의존성 관리 필요 | **단일 바이너리** (cross-compile 가능) |
+| **리소스** | pandas + aiohttp + sqlalchemy 메모리 | 최소 메모리 풋프린트 |
+| **동시성** | GIL 제약 (asyncio로 I/O만 병렬) | tokio 기반 완전 비동기 |
+| **데이터 처리** | pandas (Cython) | **Polars (Rust native)** — 동일 에코시스템 |
+| **에러 처리** | `try/except` 런타임 | `Result<T, E>` 컴파일 타임 강제 |
+
+### Phase 2 범위
+
+- **포함**: 4개 주요 수집기의 Rust 재작성
+  - API 호출 (reqwest/tokio)
+  - 데이터 변환 (Polars)
+  - DB 적재 (sqlx/tokio-postgres)
+- **유지**: Prefect 오케스트레이션 (Python) — subprocess로 Rust 바이너리 호출
+- **제외**: impute_missing (Python 유지), Prefect flow 로직, Slack 알림
+
+---
+
+## P2-1. 현행 수집기 인벤토리
+
+### 주요 수집기 (Rust 재작성 대상)
+
+| # | 수집기 | 파일 | 라인 | 데이터 소스 | 대상 테이블 | DB 방식 |
+|---|--------|------|------|-----------|-----------|---------|
+| 1 | 남부발전 일일 자동수집 | `fetch_data/pv/daily_pv_automation.py` | 245 | 공공API (XML) | `nambu_generation` | DELETE+INSERT |
+| 2 | 남부발전 백필 | `fetch_data/pv/nambu_backfill.py` | 383 | 공공API (XML) | `nambu_generation` | DELETE+INSERT |
+| 3 | 남동발전 PV 수집 | `fetch_data/pv/namdong_collect_pv.py` | 502 | 웹 CSV 다운로드 | `namdong_generation` | DELETE+INSERT |
+| 4 | 남동발전 풍력 수집 | `fetch_data/wind/namdong_wind_collect.py` | 314 | 공공API (JSON) | `wind_namdong` | ON CONFLICT UPSERT |
+
+### 보조 수집기 (2차 대상 또는 유지)
+
+| # | 수집기 | 파일 | 비고 |
+|---|--------|------|------|
+| 5 | 남부발전 일괄수집 | `fetch_data/pv/nambu_bulk_sync.py` | CSV 출력만 (DB 미사용) |
+| 6 | 남동 CSV 병합 | `fetch_data/pv/namdong_merge_pv_data.py` | 오프라인 병합 유틸 |
+| 7 | 한경풍력 로더 | `fetch_data/wind/hangyoung_wind_load.py` | 1회성 CSV 로드 |
+| 8 | 서부풍력 로더 | `fetch_data/wind/seobu_wind_load.py` | 1회성 CSV 로드 |
+
+### 공통 모듈 (리팩토링 완료 상태)
+
+| 모듈 | 파일 | Rust 대응 |
+|------|------|----------|
+| DB 유틸 | `fetch_data/common/db_utils.py` | Rust config 모듈로 통합 |
+| 날짜 유틸 | `fetch_data/common/date_utils.py` | Rust chrono 유틸로 통합 |
+| 결측치 보간 | `fetch_data/common/impute_missing.py` | **Python 유지** (scipy 의존) |
+| Slack 알림 | `notify/slack_notifier.py` | Python 유지 (Prefect task) |
+| Prefect 알림 | `prefect_flows/notify_tasks.py` | Python 유지 |
+
+---
+
+## P2-2. Melt/Unpivot 전수 조사 (6곳)
+
+> Polars `unpivot()` 으로 전환해야 하는 모든 사이트입니다.
+> Polars 레퍼런스: `.claude/planner/polars/10-Reshaping.md`
+
+### Site 1: daily_pv_automation.py:172 (남부 PV 자동수집)
+
+```python
+# 현행 (pandas)
+v_vars = [c for c in df_raw.columns if c.startswith("qhorgen")]
+df_long = df_raw.melt(
+    id_vars=["ymd", "hogi", "gencd", "ipptnm", "qvodgen", "qvodavg", "qvodmax", "qvodmin"],
+    value_vars=v_vars, var_name='h_str', value_name='generation'
+)
+df_long["hour0"] = df_long["h_str"].apply(_extract_hour0).astype(int)
+df_long["datetime"] = pd.to_datetime(df_long["ymd"]) + pd.to_timedelta(df_long["hour0"], unit="h")
+df_long["generation"] = pd.to_numeric(df_long["generation"], errors="coerce").fillna(0)
+```
+
+```rust
+// Polars 대응 (Rust)
+let df_long = df_raw
+    .unpivot(v_vars, id_vars)
+    .unwrap()
+    .lazy()
+    .with_columns([
+        col("variable").str().extract(r"(\d+)", 1)
+            .cast(DataType::Int32).unwrap() - lit(1)  // 0-based hour
+            .alias("hour0"),
+        col("generation").cast(DataType::Float64).alias("generation"),
+    ])
+    .with_columns([
+        (col("ymd").str().to_date(StrptimeOptions::default())
+         + duration(hours=col("hour0")))
+        .alias("datetime"),
+    ])
+    .collect()?;
+```
+
+### Site 2: nambu_backfill.py:191 (남부 PV 백필)
+
+```python
+# 현행 — Site 1과 동일 패턴
+df_long = df_raw.melt(
+    id_vars=["ymd", "hogi", "gencd", "ipptnm", "qvodgen", "qvodavg", "qvodmax", "qvodmin"],
+    value_vars=v_vars, var_name="h_str", value_name="generation"
+)
+```
+
+> **Site 1과 동일 변환 로직** → Rust에서 공통 함수로 추출 가능
+
+### Site 3: namdong_collect_pv.py:313 (남동 PV)
+
+```python
+# 현행
+hcols = hour_columns(df)  # "1시 발전량(KWh)", ..., "24시 발전량(KWh)"
+df_long = pd.melt(df, id_vars=["일자", "발전소명"], value_vars=hcols,
+                  var_name="시간", value_name="발전량")
+df_long["hour"] = df_long["시간"].apply(extract_hour).astype("int64")  # 한글 파싱
+df_long["datetime"] = df_long["date"] + pd.to_timedelta(df_long["hour"] - 1, unit="h")
+```
+
+> **한글 컬럼명** 파싱 필요 → Polars `str.extract(r"(\d+)시")` 패턴
+
+### Site 4: namdong_wind_collect.py:114 (남동 풍력)
+
+```python
+# 현행
+df_long = pd.melt(df_wide, id_vars=id_cols, value_vars=value_cols,
+                  var_name="hour_col", value_name="generation")
+df_long["hour_num"] = df_long["hour_col"].str.extract(r"(\d+)").astype(int)
+# 특수 처리: hour=24 → 다음날 00:00
+mask_24 = df_long["hour_num"] == 24
+df_long.loc[mask_24, "timestamp"] += pd.Timedelta(days=1)
+```
+
+> **24시 → 다음날 00:00** 특수 로직 주의
+
+### Site 5: namdong_merge_pv_data.py:117 (남동 CSV 병합)
+
+```python
+# 현행 — Site 3과 동일 패턴
+df_long = pd.melt(df, id_vars=["일자", "발전소명"], value_vars=hcols,
+                  var_name="시간", value_name="발전량")
+```
+
+### Site 6: nambu_merge_pv_data.py:74 (남부 CSV 전처리)
+
+```python
+# 현행 — Site 1과 유사 패턴
+df_long = merged_df.melt(
+    id_vars=id_vars, value_vars=value_vars,
+    var_name='hour_str', value_name='generation'
+)
+df_long['hour'] = df_long['hour_str'].str.extract(r'(\d+)').astype(int)
+df_long['timestamp'] = df_long['ymd'] + pd.to_timedelta(df_long['hour'], unit='h')
+```
+
+### Melt 패턴 요약
+
+| 패턴 | 사이트 | id_vars | hour 추출 | 특수 처리 |
+|------|--------|---------|----------|----------|
+| **남부 API** | 1, 2, 6 | ymd, hogi, gencd, ipptnm + 일별통계 | `qhorgen(\d+)` → 0-based | - |
+| **남동 CSV** | 3, 5 | 일자, 발전소명 | `(\d+)시` (한글) | hour-1 offset |
+| **남동 풍력** | 4 | dgenYmd, ippt, hogi, ipptNam | `qhorGen(\d+)` | hour=24 → 다음날 |
+
+---
+
+## P2-3. 데이터베이스 인터페이스
+
+### 테이블 & 스키마
+
+| 테이블 | 컬럼 | PK/Unique | DB 방식 |
+|--------|------|-----------|---------|
+| `nambu_generation` | datetime, gencd, plant_name, hogi, generation, daily_total/avg/max/min | (datetime, gencd, hogi) | DELETE range + INSERT |
+| `namdong_generation` | datetime, plant_name, hour, generation | (datetime, plant_name) | DELETE range + INSERT |
+| `wind_namdong` | timestamp, plant_name, generation | `UNIQUE(timestamp, plant_name)` | ON CONFLICT UPSERT |
+
+### Rust DB 전략
+
+```rust
+// sqlx 기반 비동기 PostgreSQL
+use sqlx::PgPool;
+
+// DELETE + INSERT 패턴 (nambu, namdong PV)
+async fn upsert_delete_insert(pool: &PgPool, table: &str, start: NaiveDate, end: NaiveDate, rows: &[Row]) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(&format!("DELETE FROM {} WHERE datetime >= $1 AND datetime < $2", table))
+        .bind(start).bind(end)
+        .execute(&mut *tx).await?;
+    // COPY 또는 batch INSERT
+    tx.commit().await?;
+    Ok(())
+}
+
+// ON CONFLICT 패턴 (wind)
+async fn upsert_on_conflict(pool: &PgPool, rows: &[WindRow]) -> Result<()> {
+    sqlx::query(r#"
+        INSERT INTO wind_namdong (timestamp, plant_name, generation)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (timestamp, plant_name)
+        DO UPDATE SET generation = EXCLUDED.generation
+    "#)
+    .bind(&row.timestamp).bind(&row.plant_name).bind(&row.generation)
+    .execute(pool).await?;
+    Ok(())
+}
+```
+
+### 환경변수
+
+| 변수 | 용도 | 현행 |
+|------|------|------|
+| `DB_URL` | PostgreSQL 접속 URL | `postgresql+psycopg2://...` → Rust: `postgres://...` (드라이버 접두사 변경) |
+| `NAMBU_API_KEY` | 남부발전 공공API | 그대로 사용 |
+| `NAMDONG_WIND_KEY` | 남동풍력 공공API | 그대로 사용 |
+| `NAMDONG_ORG_NO` 등 | 남동PV 웹 수집 파라미터 | 그대로 사용 |
+
+---
+
+## P2-4. Rust 수집기 아키텍처
+
+### 디렉토리 레이아웃
+
+```
+Energy-Data-pipeline/
+  fetch_data/            # Python 수집기 (유지, fallback)
+  prefect_flows/         # Python 오케스트레이션 (유지)
+  notify/                # Python 알림 (유지)
+  tests/                 # Python 테스트 (유지)
+
+  rust/                  # Rust 수집기 workspace
+    Cargo.toml           # workspace 루트
+    crates/
+      common/            # 공통 유틸리티
+        src/lib.rs       # config, db, date_utils, error types
+      transforms/        # Polars 변환 로직
+        src/lib.rs       # melt_nambu(), melt_namdong_pv(), melt_wind()
+      collector-nambu/   # 남부발전 수집기 (CLI)
+        src/main.rs      # --mode daily|backfill --start --end
+      collector-namdong-pv/  # 남동발전 PV 수집기 (CLI)
+        src/main.rs
+      collector-namdong-wind/ # 남동발전 풍력 수집기 (CLI)
+        src/main.rs
+```
+
+### Cargo.toml (workspace)
+
+```toml
+[workspace]
+resolver = "2"
+members = [
+    "crates/common",
+    "crates/transforms",
+    "crates/collector-nambu",
+    "crates/collector-namdong-pv",
+    "crates/collector-namdong-wind",
+]
+
+[workspace.dependencies]
+polars = { version = "0.53", features = [
+    "lazy", "csv", "json", "temporal", "strings",
+    "dtype-date", "dtype-datetime", "dtype-duration",
+    "performant",
+] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "cookies"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono"] }
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quick-xml = "0.37"       # XML API 응답 파싱 (남부발전)
+dotenvy = "0.15"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+```
+
+### Prefect 연동 (subprocess)
+
+```python
+# prefect_flows/nambu_pv_flow.py (수정 후)
+from prefect import flow, task
+import subprocess
+
+@task(name="Rust 남부발전 수집")
+def collect_nambu_rust(mode: str, start: str, end: str):
+    result = subprocess.run(
+        ["./rust/target/release/collector-nambu",
+         "--mode", mode, "--start", start, "--end", end],
+        capture_output=True, text=True, timeout=600,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Rust collector failed: {result.stderr}")
+    return result.stdout
+```
+
+---
+
+## P2-5. 수집기별 구현 계획
+
+### Collector 1: 남부발전 (daily + backfill 통합)
+
+**현행 Python**: `daily_pv_automation.py` (245L) + `nambu_backfill.py` (383L) = 628L
+
+**Rust 구현 범위**:
+1. CLI: `--mode daily|backfill --start YYYYMMDD --end YYYYMMDD [--gencd] [--hogi]`
+2. API 호출: `reqwest` + `quick-xml` (XML 파싱)
+3. 변환: Polars `unpivot()` + hour 추출 + datetime 생성 (공통 함수)
+4. DB: `sqlx` DELETE+INSERT (트랜잭션)
+5. 로깅: `tracing` (stdout JSON → Prefect가 수집)
+
+**핵심 변환 (Polars)**:
+```rust
+fn melt_nambu_api(df: DataFrame) -> Result<DataFrame> {
+    let v_vars: Vec<&str> = df.get_column_names().iter()
+        .filter(|c| c.starts_with("qhorgen"))
+        .cloned().collect();
+
+    df.unpivot(v_vars, ["ymd", "hogi", "gencd", "ipptnm", "qvodgen", "qvodavg", "qvodmax", "qvodmin"])?
+        .lazy()
+        .with_columns([
+            col("variable").str().extract(r"(\d+)", 1)
+                .cast(DataType::Int32)? - lit(1)
+                .alias("hour0"),
+            col("value").cast(DataType::Float64).fill_null(lit(0.0))
+                .alias("generation"),
+        ])
+        .with_columns([
+            (col("ymd").str().to_date(StrptimeOptions::default())
+             + duration(hours=col("hour0")))
+            .alias("datetime"),
+        ])
+        .collect()
+}
+```
+
+### Collector 2: 남동발전 PV
+
+**현행 Python**: `namdong_collect_pv.py` (502L)
+
+**Rust 구현 범위**:
+1. CLI: `--start YYYYMMDD --end YYYYMMDD [--output-dir]`
+2. HTTP: `reqwest` + cookie jar (세션 관리, 웹 스크래핑 특성)
+3. CSV 파싱: Polars `read_csv()` + 인코딩 처리 (cp949 → utf-8)
+4. 변환: 한글 컬럼 파싱 (`"N시 발전량"` → hour), Polars `unpivot()`
+5. DB: `sqlx` DELETE+INSERT
+
+**인코딩 처리 (주의)**:
+```rust
+// cp949 → UTF-8 변환 필요
+use encoding_rs::EUC_KR;  // cp949 호환
+let (decoded, _, _) = EUC_KR.decode(&raw_bytes);
+let csv_content = decoded.into_owned();
+```
+
+### Collector 3: 남동발전 풍력
+
+**현행 Python**: `namdong_wind_collect.py` (314L)
+
+**Rust 구현 범위**:
+1. CLI: `--start YYYYMMDD --end YYYYMMDD`
+2. API 호출: `reqwest` JSON 페이지네이션
+3. 변환: Polars `unpivot()` + hour=24→다음날 00:00 특수 로직
+4. DB: `sqlx` ON CONFLICT UPSERT (batch 5000)
+
+**24시 특수 처리 (Polars)**:
+```rust
+// hour=24 → 다음날 00:00 변환
+.with_columns([
+    when(col("hour_num").eq(lit(24)))
+        .then(
+            col("date") + duration(days=lit(1))  // 다음날 00:00
+        )
+        .otherwise(
+            col("date") + duration(hours=col("hour_num"))
+        )
+        .alias("timestamp"),
+])
+```
+
+---
+
+## P2-6. 구현 로드맵
+
+### Week 1-2: 공통 기반 + Collector 1 (남부발전)
+
+1. `rust/` workspace 스캐폴딩
+2. `crates/common`: config 로딩, DB pool, error types, tracing 설정
+3. `crates/transforms`: `melt_nambu_api()` 구현 (Polars unpivot)
+4. `crates/collector-nambu`: CLI + API 호출 + DB 적재
+5. Python 결과와 동등성 테스트 (스냅샷 기반)
+
+**산출물**: `collector-nambu` 바이너리 + 동등성 테스트
+
+### Week 3: Collector 2 (남동 PV)
+
+1. `crates/transforms`: `melt_namdong_pv()` 추가 (한글 파싱)
+2. `crates/collector-namdong-pv`: CLI + 웹 CSV 다운로드 + 인코딩 처리
+3. 동등성 테스트
+
+**산출물**: `collector-namdong-pv` 바이너리 + 동등성 테스트
+
+### Week 4: Collector 3 (남동 풍력) + CI
+
+1. `crates/transforms`: `melt_wind()` 추가 (24시 처리)
+2. `crates/collector-namdong-wind`: CLI + JSON API 페이지네이션
+3. CI job 추가 (cargo fmt/clippy/test)
+4. Prefect flow 연동 테스트
+
+**산출물**: `collector-namdong-wind` 바이너리 + CI 통합
+
+### Week 5: 통합 테스트 + 배포 준비
+
+1. 전체 수집기 동등성 테스트 일괄 실행
+2. Docker 빌드 (multi-stage: Rust build → slim runtime)
+3. Prefect flow에서 Rust 바이너리 호출 경로 통합
+4. fallback 경로 검증 (`USE_RUST=0` → Python 경로 유지)
+
+---
+
+## P2-7. 성공 기준
+
+### 정확성
+- 각 수집기의 Python 버전과 **동일한 DB 결과** 생성
+- 동등성 테스트: 행 수, 컬럼, 타입, 값 (float 허용 오차 `1e-9`), NA 위치
+
+### 운영성
+- 단일 바이너리 배포 (Docker에서 COPY만으로 설치)
+- 환경변수 호환 (기존 `.env` 그대로 사용)
+- Prefect에서 subprocess로 호출 가능
+- `USE_RUST=0`으로 즉시 Python fallback
+
+### 품질
+- `cargo fmt --check` + `cargo clippy -- -D warnings` CI 통과
+- 각 crate에 단위 테스트 존재
+- tracing 기반 구조화된 로그
+
+---
+
+## P2-8. 리스크 및 대응
+
+| # | 리스크 | 영향 | 대응 |
+|---|--------|------|------|
+| 1 | **cp949 인코딩 처리** | 남동 PV CSV 파싱 실패 | `encoding_rs` crate, 다중 인코딩 fallback chain |
+| 2 | **웹 스크래핑 세션 관리** | 남동 PV 쿠키/세션 유실 | reqwest cookie jar + retry |
+| 3 | **API 스키마 변경** | 런타임 파싱 실패 | serde `#[serde(default)]` + drift 로그 |
+| 4 | **Polars unpivot 동작 차이** | pandas melt와 미묘한 차이 | 동등성 테스트로 커버 |
+| 5 | **DB URL 호환** | `postgresql+psycopg2://` vs `postgres://` | common crate에서 URL 정규화 |
+| 6 | **팀 Rust 숙련도** | 유지보수 어려움 | 코어 로직을 transforms에 집중, CLI는 얇게 |
+
+---
+
+## 부록 C. Polars 레퍼런스 (Obsidian)
+
+수집기 Rust 재작성에 필요한 Polars 문서가 `.claude/planner/polars/`에 정리되어 있습니다.
+
+| 문서 | 내용 | 수집기 관련도 |
+|------|------|------------|
+| `10-Reshaping.md` | **unpivot/melt** 패턴 + 프로젝트 맞춤 예시 | **핵심** |
+| `16-Rust-Crate.md` | Cargo.toml feature flags, 환경변수 | **핵심** |
+| `17-Pandas-Migration.md` | pandas → Polars 연산 매핑 | **핵심** |
+| `05-String-Operations.md` | str.extract, 정규식 패턴 | 높음 |
+| `11-Time-Series.md` | 날짜/시간 연산, duration | 높음 |
+| `14-Casting.md` | 타입 변환 (strict=False 등) | 높음 |
+| `13-Lazy-API.md` | LazyFrame 최적화 | 중간 |
+| `12-IO.md` | CSV/JSON 읽기 | 중간 |
+
+---
+
+## 부록 D. 현행 Python 수집기 의존성 매핑
+
+| Python 의존성 | 용도 | Rust 대응 |
+|---------------|------|----------|
+| `aiohttp` | 비동기 HTTP | `reqwest` + `tokio` |
+| `requests` | 동기 HTTP | `reqwest` (blocking) |
+| `pandas` | DataFrame 변환 | `polars` |
+| `numpy` | 배열 연산 | Polars expression 또는 직접 구현 |
+| `sqlalchemy` | DB ORM/연결 | `sqlx` |
+| `xml.etree` | XML 파싱 | `quick-xml` |
+| `re` | 정규식 | `regex` (std) |
+| `dotenv` | 환경변수 | `dotenvy` |
+| `argparse` | CLI | `clap` |
+| `pathlib` | 파일경로 | `std::path` |
+| `encoding (cp949)` | 인코딩 변환 | `encoding_rs` |
