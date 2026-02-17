@@ -43,12 +43,7 @@ def _to_yyyymmdd(d: date) -> str:
     return d.strftime("%Y%m%d")
 
 
-def _extract_hour0(col: str) -> int:
-    # qhorgen01 -> 0, qhorgen24 -> 23
-    m = re.search(r"(\d+)$", col)
-    if not m:
-        raise ValueError(f"시간 컬럼 파싱 실패: {col}")
-    return int(m.group(1)) - 1
+from fetch_data.common.date_utils import extract_hour0 as _extract_hour0
 
 
 def _log_debug(msg: str, debug: bool, debug_log: Optional[list[str]]) -> None:

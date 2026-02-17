@@ -225,14 +225,7 @@ def upsert_wind_namdong(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
 # 수집 실행 함수
 # =========================================================
 
-def prev_month_range(ref_dt: Optional[date] = None) -> tuple:
-    """전월 시작일~종료일 반환"""
-    if ref_dt is None:
-        ref_dt = date.today()
-    first_of_this_month = date(ref_dt.year, ref_dt.month, 1)
-    prev_end = first_of_this_month - timedelta(days=1)
-    prev_start = date(prev_end.year, prev_end.month, 1)
-    return prev_start, prev_end
+from fetch_data.common.date_utils import prev_month_range
 
 
 def run_namdong_wind_collection(

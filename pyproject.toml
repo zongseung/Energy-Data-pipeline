@@ -9,11 +9,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp>=3.13.2",
-    "async>=0.6.2",
-    "asyncio>=4.0.0",
     "asyncpg>=0.29.0",
-    "docker>=7.1.0",
-    "git-filter-repo>=2.47.0",
     "ipykernel>=7.1.0",
     "pandas>=2.3.3",
     "prefect>=2.14.0,<3.0.0",

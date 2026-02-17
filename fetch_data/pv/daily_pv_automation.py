@@ -142,13 +142,7 @@ async def fetch_api_data(session, date_str, gencd, hogi):
     except Exception:
         return None
 
-def _extract_hour0(col: str) -> int:
-    # qhorgen01 -> 0, qhorgen24 -> 23
-    m = re.search(r"(\d+)$", col)
-    if not m:
-        raise ValueError(f"시간 컬럼 파싱 실패: {col}")
-    hour_index = int(m.group(1))
-    return hour_index - 1
+from fetch_data.common.date_utils import extract_hour0 as _extract_hour0
 
 
 async def collect_and_save(engine_, targets):

@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, text
 from fetch_data.common.db_utils import resolve_db_url
 from fetch_data.pv.namdong_merge_pv_data import read_csv_flexible, hour_columns, extract_hour
 from notify.slack_notifier import send_slack_message
+from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
 BASE = "https://www.koenergy.kr"
 MENU_CD = "FN0912020217"
@@ -74,13 +75,7 @@ def _month_end(d: date) -> date:
     return next_month - timedelta(days=1)
 
 
-def prev_month_range(ref_dt: Optional[date] = None) -> tuple[date, date]:
-    if ref_dt is None:
-        ref_dt = date.today()
-    first_of_this_month = date(ref_dt.year, ref_dt.month, 1)
-    prev_month_end = first_of_this_month - timedelta(days=1)
-    prev_month_start = date(prev_month_end.year, prev_month_end.month, 1)
-    return prev_month_start, prev_month_end
+from fetch_data.common.date_utils import prev_month_range
 
 
 def split_by_month(date_s: str, date_e: str) -> List[Tuple[str, str]]:
@@ -142,19 +137,6 @@ def is_probably_csv(body: bytes) -> bool:
     if body[:2000].count(b",") < 5:
         return False
     return True
-
-
-# -------------------------
-# Prefect Slack task wrappers
-# -------------------------
-@task(name="Slack 성공 알림", retries=0)
-def notify_slack_success(flow_name: str, details: str) -> None:
-    send_slack_message(f"[{flow_name} 완료]\n{details}")
-
-
-@task(name="Slack 실패 알림", retries=0)
-def notify_slack_failure(flow_name: str, error_msg: str) -> None:
-    send_slack_message(f"[{flow_name} 실패]\n- 에러: {error_msg}")
 
 
 # -------------------------

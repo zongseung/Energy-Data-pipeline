@@ -243,8 +243,7 @@ class TestSendSlackMessage:
 # 6. 중복 코드 존재 검증 (리팩토링 후 삭제 확인용)
 # ============================================================
 class TestDuplicateCodeDetection:
-    """리팩토링 후 중복이 제거되었는지 확인하는 테스트.
-    현재는 중복이 존재하므로 XFAIL (리팩토링 완료 후 xfail 제거)."""
+    """리팩토링 후 중복이 제거되었는지 확인하는 테스트."""
 
     @staticmethod
     def _count_pattern_in_file(filepath: str, pattern: str) -> int:
@@ -253,7 +252,6 @@ class TestDuplicateCodeDetection:
             return 0
         return p.read_text(encoding="utf-8").count(pattern)
 
-    @pytest.mark.xfail(reason="리팩토링 전: 중복 존재 예상")
     def test_resolve_db_url_only_in_common(self):
         """_resolve_db_url은 fetch_data/common/db_utils.py에만 존재해야 함"""
         duplicated_files = [
@@ -267,7 +265,6 @@ class TestDuplicateCodeDetection:
             count = self._count_pattern_in_file(f, "def _resolve_db_url")
             assert count == 0, f"{f}에 _resolve_db_url 정의가 남아있음"
 
-    @pytest.mark.xfail(reason="리팩토링 전: 중복 존재 예상")
     def test_send_slack_only_in_notify(self):
         """send_slack_message는 notify/slack_notifier.py에만 정의되어야 함"""
         duplicated_files = [
@@ -279,7 +276,6 @@ class TestDuplicateCodeDetection:
             count = self._count_pattern_in_file(f, "def send_slack_message")
             assert count == 0, f"{f}에 send_slack_message 정의가 남아있음"
 
-    @pytest.mark.xfail(reason="리팩토링 전: 중복 import os 존재")
     def test_no_duplicate_import_os_in_slack_notifier(self):
         """notify/slack_notifier.py에서 import os 중복 없어야 함"""
         count = self._count_pattern_in_file("notify/slack_notifier.py", "import os")
@@ -290,13 +286,10 @@ class TestDuplicateCodeDetection:
 # 7. 레거시 파일 존재 검증 (리팩토링 후 삭제 확인용)
 # ============================================================
 class TestLegacyFileCleanup:
-    """리팩토링 후 삭제 대상 파일이 제거되었는지 확인.
-    현재는 존재하므로 XFAIL."""
+    """리팩토링 후 삭제 대상 파일이 제거되었는지 확인."""
 
-    @pytest.mark.xfail(reason="리팩토링 전: 파일 존재 예상")
     def test_main_py_removed(self):
         assert not (PROJECT_ROOT / "main.py").exists(), "main.py가 아직 존재함"
 
-    @pytest.mark.xfail(reason="리팩토링 전: 파일 존재 예상")
     def test_readme1md_removed(self):
         assert not (PROJECT_ROOT / "readme.1md").exists(), "readme.1md가 아직 존재함"

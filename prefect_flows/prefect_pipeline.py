@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 
 from prefect import task, flow
 import pandas as pd
-import requests
 
 # 상위 디렉토리를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -19,114 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fetch_data.weather.collect_asos import select_data_async, station_ids
 from fetch_data.common.impute_missing import impute_missing_values
 from prefect_flows.merge_to_all import merge_to_all_csv
-
-
-# ==============================
-# Slack 알림 유틸리티
-# ==============================
-
-def send_slack_message(text: str, webhook_url: str | None = None):
-    """Slack Incoming Webhook으로 메시지 전송"""
-    if webhook_url is None:
-        webhook_url = os.getenv("SLACK_WEBHOOK_URL")
-
-    if not webhook_url:
-        print("SLACK_WEBHOOK_URL이 설정되어 있지 않습니다. Slack 전송 스킵.")
-        return
-
-    try:
-        resp = requests.post(webhook_url, json={"text": text}, timeout=5)
-        if resp.status_code != 200:
-            print(f"Slack 전송 실패: {resp.status_code}, {resp.text}")
-    except Exception as e:
-        print(f"Slack 전송 중 예외 발생: {e}")
-
-
-def send_slack_rich_message(
-    title: str,
-    status: str,
-    details: dict,
-    webhook_url: str | None = None
-):
-    """
-    Slack Block Kit 형식의 리치 메시지 전송
-    status: "success", "warning", "error"
-    """
-    if webhook_url is None:
-        webhook_url = os.getenv("SLACK_WEBHOOK_URL")
-
-    if not webhook_url:
-        print("SLACK_WEBHOOK_URL이 설정되어 있지 않습니다.")
-        return
-
-    # 상태별 이모지
-    emoji_map = {
-        "success": ":white_check_mark:",
-        "warning": ":warning:",
-        "error": ":x:",
-        "info": ":information_source:",
-    }
-    emoji = emoji_map.get(status, ":bell:")
-
-    # 상세 정보 포맷팅
-    detail_lines = [f"• *{k}*: {v}" for k, v in details.items()]
-    detail_text = "\n".join(detail_lines)
-
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    payload = {
-        "blocks": [
-            {
-                "type": "header",
-                "text": {
-                    "type": "plain_text",
-                    "text": f"{emoji} {title}",
-                    "emoji": True
-                }
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": detail_text
-                }
-            },
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f":clock1: {timestamp} KST"
-                    }
-                ]
-            },
-            {"type": "divider"}
-        ]
-    }
-
-    try:
-        resp = requests.post(webhook_url, json=payload, timeout=5)
-        if resp.status_code != 200:
-            print(f"Slack 전송 실패: {resp.status_code}")
-    except Exception as e:
-        print(f"Slack 전송 예외: {e}")
-
-
-@task(name="Slack 성공 알림", retries=0)
-def notify_slack_success(flow_name: str, details: str):
-    msg = f"[{flow_name} 완료]\n{details}"
-    send_slack_message(msg)
-
-
-@task(name="Slack 실패 알림", retries=0)
-def notify_slack_failure(flow_name: str, error_msg: str):
-    msg = f"[{flow_name} 실패]\n- 에러: {error_msg}"
-    send_slack_message(msg)
-
-
-@task(name="Slack 리치 알림", retries=0)
-def notify_slack_rich(title: str, status: str, details: dict):
-    send_slack_rich_message(title, status, details)
+from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure, notify_slack_rich
 
 
 # ==============================

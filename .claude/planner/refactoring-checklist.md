@@ -14,14 +14,15 @@
 
 ## Step 2: 중복 유틸 통합 (P1)
 
-- [ ] `fetch_data/common/db_utils.py` 신설
-  - [ ] `running_in_docker()` 통합 (5곳 중복 제거)
-  - [ ] `resolve_db_url()` 통합 (5곳 중복 제거)
-- [ ] `send_slack_message()` 단일화 → `notify/slack_notifier.py` 만 유지
-  - [ ] `fetch_data/pv/namdong_collect_pv.py` — import로 교체
-  - [ ] `fetch_data/wind/namdong_wind_collect.py` — import로 교체
-  - [ ] `prefect_flows/prefect_pipeline.py` — import로 교체
-- [ ] `notify/slack_notifier.py` — 중복 `import os` 제거
+- [x] `fetch_data/common/db_utils.py` 신설
+  - [x] `running_in_docker()` 통합 (5곳 중복 제거)
+  - [x] `resolve_db_url()` 통합 (5곳 중복 제거)
+  - [x] `redact_db_url()` 통합 (`nambu_backfill.py`에서 이동)
+- [x] `send_slack_message()` 단일화 → `notify/slack_notifier.py` 만 유지
+  - [x] `fetch_data/pv/namdong_collect_pv.py` — import로 교체
+  - [x] `fetch_data/wind/namdong_wind_collect.py` — import로 교체
+  - [x] `prefect_flows/prefect_pipeline.py` — import로 교체
+- [x] `notify/slack_notifier.py` — 중복 `import os` 제거, `send_slack_rich_message` 통합
 
 ## Step 3: `__init__.py` 경량화 (P1)
 
@@ -31,30 +32,30 @@
 
 ## Step 4: 레거시/불필요 파일 정리 (P2)
 
-- [ ] `main.py` 삭제 (placeholder)
-- [ ] `readme.1md` 삭제 (`README.md`와 중복)
-- [ ] `weather_pipeline.egg-info/` 삭제 (빌드 아티팩트)
-- [ ] `inspect_both_table.py` — 삭제 또는 현재 스키마 기준 재작성
-- [ ] Docker 스택 정리
-  - [ ] `docker/` 하위 Docker 설정 — 삭제 또는 역할 문서화
-  - [ ] `pv_test/` 하위 Docker 설정 — 삭제 또는 역할 문서화
+- [x] `main.py` 삭제 (placeholder)
+- [x] `readme.1md` 삭제 (`README.md`와 중복)
+- [x] `weather_pipeline.egg-info/` 삭제 (빌드 아티팩트)
+- [x] `inspect_both_table.py` — 삭제 또는 현재 스키마 기준 재작성 (삭제 선택)
+- [x] Docker 스택 정리
+  - [x] `docker/` 하위 Docker 설정 — 삭제 또는 역할 문서화 (역할 문서화: `.claude/planner/docker-stack-roles.md`)
+  - [x] `pv_test/` 하위 Docker 설정 — 삭제 또는 역할 문서화 (역할 문서화: `.claude/planner/docker-stack-roles.md`)
 
 ## Step 5: 의존성 정리 (P3)
 
-- [ ] `pyproject.toml`에서 불필요 의존성 제거
-  - [ ] `async>=0.6.2`
-  - [ ] `asyncio>=4.0.0`
-  - [ ] `docker>=7.1.0`
-  - [ ] `git-filter-repo>=2.47.0`
+- [x] `pyproject.toml`에서 불필요 의존성 제거
+  - [x] `async>=0.6.2`
+  - [x] `asyncio>=4.0.0`
+  - [x] `docker>=7.1.0`
+  - [x] `git-filter-repo>=2.47.0`
 
 ## Step 6: 추가 코드 품질 (P3)
 
-- [ ] `_extract_hour0()` 통합 (`daily_pv_automation.py`, `nambu_backfill.py` 중복)
-- [ ] `prev_month_range()` 통합 (`namdong_collect_pv.py`, `namdong_wind_collect.py` 중복)
-- [ ] Prefect 알림 task를 `notify/` 모듈 활용으로 통합
+- [x] `_extract_hour0()` 통합 → `fetch_data/common/date_utils.py`로 이동 (`daily_pv_automation.py`, `nambu_backfill.py` import 교체)
+- [x] `prev_month_range()` 통합 → `fetch_data/common/date_utils.py`로 이동 (`namdong_collect_pv.py`, `namdong_wind_collect.py` import 교체)
+- [x] Prefect 알림 task 통합 → `prefect_flows/notify_tasks.py` 신설 (3개 flow 파일 import 교체)
 
 ## 테스트
 
 - [x] `tests/test_refactoring.py` — 리팩토링 전/후 동작 검증 테스트 파일 존재
-- [ ] `tests/test_refactoring.py` — 테스트 실행 및 통과 확인
+- [x] `tests/test_refactoring.py` — 테스트 실행 및 통과 확인
 - [ ] CI에 `pytest` 실행 단계 추가
