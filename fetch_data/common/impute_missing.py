@@ -1,161 +1,213 @@
 import pandas as pd
 import numpy as np
+import polars as pl
 from scipy.interpolate import interp1d
 from pathlib import Path
 import time
 from collections import defaultdict
 
-def find_consecutive_missing_groups(series):
+
+# ──────────────────────────────────────────────
+# 내부 함수 (numpy / polars 기반)
+# ──────────────────────────────────────────────
+
+def find_consecutive_missing_groups(series_or_arr):
     """
-    연속된 결측치 그룹을 찾아서 (시작 인덱스, 길이) 튜플 리스트로 반환
+    연속된 결측치 그룹을 찾아서 (시작 인덱스, 길이) 튜플 리스트로 반환.
+    pd.Series 또는 numpy 배열 모두 허용.
     """
-    is_missing = series.isna()
+    if isinstance(series_or_arr, (pd.Series, pl.Series)):
+        is_missing = series_or_arr.is_null().to_numpy() if isinstance(series_or_arr, pl.Series) else series_or_arr.isna().values
+    else:
+        is_missing = np.isnan(series_or_arr)
+
     groups = []
-    
+    n = len(is_missing)
     i = 0
-    while i < len(is_missing):
-        if is_missing.iloc[i]:
+    while i < n:
+        if is_missing[i]:
             start_idx = i
             length = 1
             i += 1
-            while i < len(is_missing) and is_missing.iloc[i]:
+            while i < n and is_missing[i]:
                 length += 1
                 i += 1
             groups.append((start_idx, length))
         else:
             i += 1
-    
     return groups
 
-def spline_impute(series, start_idx, length):
+
+def _spline_impute(values, start_idx, length):
     """
-    스플라인 보간을 사용하여 결측치를 채움
+    numpy 배열 기반 스플라인 보간. 결측 구간의 보간된 값 배열을 반환.
+    values를 in-place로 수정한다.
     """
-    # 결측치 전후의 유효한 값들의 인덱스와 값
-    valid_before = series.iloc[:start_idx].dropna()
-    valid_after = series.iloc[start_idx + length:].dropna()
-    
-    if len(valid_before) == 0 or len(valid_after) == 0:
-        # 전후 유효값이 없으면 선형 보간 사용
-        series.iloc[start_idx:start_idx + length] = series.interpolate(method='linear').iloc[start_idx:start_idx + length]
-        return series
-    
-    # 전후 유효값들을 합쳐서 스플라인 보간
-    x_before = valid_before.index.values
-    y_before = valid_before.values
-    x_after = valid_after.index.values
-    y_after = valid_after.values
-    
+    gap = slice(start_idx, start_idx + length)
+    before = values[:start_idx]
+    after = values[start_idx + length:]
+
+    valid_before_mask = ~np.isnan(before)
+    valid_after_mask = ~np.isnan(after)
+
+    has_before = valid_before_mask.any()
+    has_after = valid_after_mask.any()
+
+    if not has_before or not has_after:
+        # 전후 유효값 없으면 선형 보간 (np.interp)
+        all_vals = values.copy()
+        valid_mask = ~np.isnan(all_vals)
+        if valid_mask.sum() >= 2:
+            xp = np.where(valid_mask)[0]
+            fp = all_vals[valid_mask]
+            x_missing = np.arange(start_idx, start_idx + length)
+            values[gap] = np.interp(x_missing, xp, fp)
+        return
+
+    x_before = np.where(valid_before_mask)[0]
+    y_before = before[valid_before_mask]
+    x_after = np.where(valid_after_mask)[0] + start_idx + length
+    y_after = after[valid_after_mask]
+
     x_all = np.concatenate([x_before, x_after])
     y_all = np.concatenate([y_before, y_after])
-    
-    # 인덱스 순서대로 정렬
+
     sort_idx = np.argsort(x_all)
     x_all = x_all[sort_idx]
     y_all = y_all[sort_idx]
-    
-    # 최소 2개의 점이 필요
+
     if len(x_all) < 2:
-        series.iloc[start_idx:start_idx + length] = series.interpolate(method='linear').iloc[start_idx:start_idx + length]
-        return series
-    
+        valid_mask = ~np.isnan(values)
+        if valid_mask.sum() >= 2:
+            xp = np.where(valid_mask)[0]
+            fp = values[valid_mask]
+            x_missing = np.arange(start_idx, start_idx + length)
+            values[gap] = np.interp(x_missing, xp, fp)
+        return
+
     try:
-        # 스플라인 보간 (cubic)
         f = interp1d(x_all, y_all, kind='cubic', fill_value='extrapolate')
-        x_missing = series.iloc[start_idx:start_idx + length].index.values
-        y_imputed = f(x_missing)
-        series.iloc[start_idx:start_idx + length] = y_imputed
-    except:
-        # 스플라인 실패 시 선형 보간
-        series.iloc[start_idx:start_idx + length] = series.interpolate(method='linear').iloc[start_idx:start_idx + length]
-    
+        x_missing = np.arange(start_idx, start_idx + length)
+        values[gap] = f(x_missing)
+    except Exception:
+        valid_mask = ~np.isnan(values)
+        if valid_mask.sum() >= 2:
+            xp = np.where(valid_mask)[0]
+            fp = values[valid_mask]
+            x_missing = np.arange(start_idx, start_idx + length)
+            values[gap] = np.interp(x_missing, xp, fp)
+
+
+def _build_historical_lookup(plf_station, column):
+    """
+    polars DataFrame으로 (month, day, hour) → mean 룩업 dict를 생성.
+    """
+    if "_parsed_date" not in plf_station.columns:
+        return {}, None
+
+    agg = (
+        plf_station
+        .select([
+            pl.col("_parsed_date").dt.month().alias("_m"),
+            pl.col("_parsed_date").dt.day().alias("_d"),
+            pl.col("_parsed_date").dt.hour().alias("_h"),
+            pl.col(column).alias("_val"),
+        ])
+        .group_by(["_m", "_d", "_h"])
+        .agg(pl.col("_val").mean())
+    )
+    rows = agg.to_numpy()  # shape: (n, 4) — _m, _d, _h, _val
+    lookup = {}
+    for row in rows:
+        m, d, h, v = int(row[0]), int(row[1]), int(row[2]), row[3]
+        if v is not None and not np.isnan(v):
+            lookup[(m, d, h)] = v
+
+    # station 전체 평균
+    station_mean = plf_station[column].mean()
+
+    return lookup, station_mean
+
+
+# ──────────────────────────────────────────────
+# 외부 호환 래퍼 (테스트에서 직접 import)
+# ──────────────────────────────────────────────
+
+def spline_impute(series, start_idx, length):
+    """
+    하위 호환 래퍼 — 테스트에서 pd.Series로 호출.
+    내부적으로 _spline_impute(numpy) 사용.
+    """
+    arr = series.values.copy()
+    _spline_impute(arr, start_idx, length)
+    series.iloc[start_idx:start_idx + length] = arr[start_idx:start_idx + length]
     return series
+
 
 def historical_average_impute(df, station_name, column, start_idx, length, date_col='tm', station_col='stnNm'):
     """
-    같은 지역의 다른 연도 동일 월-일-시의 평균값으로 결측치를 채움
+    하위 호환 래퍼 — 기존 시그니처 유지.
+    내부적으로 polars groupby + numpy 대입 사용.
     """
-    # 결측치가 있는 날짜들 추출
-    missing_dates = df.iloc[start_idx:start_idx + length][date_col]
-    
-    # 날짜 파싱 (tm 컬럼 형식에 따라 다를 수 있음)
-    if isinstance(missing_dates.iloc[0], str):
-        missing_dates_parsed = pd.to_datetime(missing_dates)
+    plf = pl.from_pandas(df)
+
+    # 날짜 파싱
+    if plf[date_col].dtype == pl.Utf8:
+        plf = plf.with_columns(pl.col(date_col).str.to_datetime().alias("_parsed_date"))
     else:
-        missing_dates_parsed = missing_dates
-    
-    # 같은 지역의 다른 데이터 찾기
-    station_data = df[df[station_col] == station_name].copy()
-    
-    if len(station_data) == 0:
+        plf = plf.with_columns(pl.col(date_col).alias("_parsed_date"))
+
+    plf_station = plf.filter(pl.col(station_col) == station_name)
+    if len(plf_station) == 0:
         return df
-    
-    # 날짜 컬럼 파싱
-    if date_col in station_data.columns:
-        if isinstance(station_data[date_col].iloc[0], str):
-            station_data['_parsed_date'] = pd.to_datetime(station_data[date_col])
-        else:
-            station_data['_parsed_date'] = station_data[date_col]
+
+    lookup, station_mean = _build_historical_lookup(plf_station, column)
+    all_mean = plf[column].mean()
+
+    # 결측 날짜 추출
+    missing_dates_raw = df.iloc[start_idx:start_idx + length][date_col]
+    if isinstance(missing_dates_raw.iloc[0], str):
+        missing_dates_parsed = pd.to_datetime(missing_dates_raw)
     else:
-        # date 컬럼 시도
-        date_col_alt = 'date' if 'date' in station_data.columns else station_data.columns[0]
-        if isinstance(station_data[date_col_alt].iloc[0], str):
-            station_data['_parsed_date'] = pd.to_datetime(station_data[date_col_alt])
-        else:
-            station_data['_parsed_date'] = station_data[date_col_alt]
-    
-    # 각 결측치에 대해 같은 월-일-시의 평균값 계산
-    for idx, missing_date in zip(range(start_idx, start_idx + length), missing_dates_parsed):
-        month = missing_date.month
-        day = missing_date.day
-        hour = missing_date.hour
-        
-        # 같은 월-일-시의 다른 연도 데이터 찾기
-        same_time_data = station_data[
-            (station_data['_parsed_date'].dt.month == month) &
-            (station_data['_parsed_date'].dt.day == day) &
-            (station_data['_parsed_date'].dt.hour == hour) &
-            (station_data['_parsed_date'] != missing_date)  # 같은 날짜 제외
-        ]
-        
-        if column in same_time_data.columns:
-            valid_values = same_time_data[column].dropna()
-            if len(valid_values) > 0:
-                df.iloc[idx, df.columns.get_loc(column)] = valid_values.mean()
-            else:
-                # 유효한 값이 없으면 해당 지역의 전체 평균 또는 선형 보간 사용
-                station_all_values = station_data[column].dropna()
-                if len(station_all_values) > 0:
-                    df.iloc[idx, df.columns.get_loc(column)] = station_all_values.mean()
-                else:
-                    # 그래도 없으면 전체 데이터의 평균 사용
-                    all_values = df[column].dropna()
-                    if len(all_values) > 0:
-                        df.iloc[idx, df.columns.get_loc(column)] = all_values.mean()
-    
+        missing_dates_parsed = missing_dates_raw
+
+    col_loc = df.columns.get_loc(column)
+    for idx, dt in zip(range(start_idx, start_idx + length), missing_dates_parsed):
+        key = (dt.month, dt.day, dt.hour)
+        if key in lookup:
+            df.iloc[idx, col_loc] = lookup[key]
+        elif station_mean is not None and not np.isnan(station_mean):
+            df.iloc[idx, col_loc] = station_mean
+        elif all_mean is not None and not np.isnan(all_mean):
+            df.iloc[idx, col_loc] = all_mean
+
     return df
+
+
+# ──────────────────────────────────────────────
+# 메인 함수 (polars 전처리 + numpy 코어)
+# ──────────────────────────────────────────────
 
 def impute_missing_values(df, columns=['ta', 'hm'], date_col='tm', station_col='stnNm', debug=True):
     """
     결측치를 처리하는 메인 함수
     - 연속 3개 이하: 스플라인 보간
     - 연속 4개 이상: 같은 지역의 다른 연도 동일 월-일-시 평균값
-    
+
     Parameters:
     -----------
     debug : bool
         True일 경우 상세한 디버깅 정보를 출력하고 반환합니다.
-    
+
     Returns:
     --------
-    df : DataFrame
+    df : DataFrame (pandas)
         결측치가 처리된 데이터프레임
     debug_info : dict (debug=True일 때만)
         디버깅 정보 딕셔너리
     """
     start_time = time.time()
-    df = df.copy()
-    
+
     # 디버깅 정보 초기화
     debug_info = {
         'before': {},
@@ -165,177 +217,217 @@ def impute_missing_values(df, columns=['ta', 'hm'], date_col='tm', station_col='
         'missing_groups_by_length': defaultdict(int),
         'processing_time': 0
     }
-    
+
+    # ── pandas → polars 변환 ──
+    plf = pl.from_pandas(df)
+
     # 컬럼 타입 확인 및 숫자 변환
     for col in columns:
-        if col in df.columns:
-            # 문자열 타입이면 숫자로 변환 시도
-            if df[col].dtype == 'object':
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+        if col in plf.columns:
+            if plf[col].dtype == pl.Utf8:
+                plf = plf.with_columns(pl.col(col).cast(pl.Float64, strict=False))
                 if debug:
                     print(f"경고: {col} 컬럼이 문자열이었습니다. 숫자로 변환했습니다.")
-    
+
     # 처리 전 통계 수집
     if debug:
         print("\n" + "="*80)
         print("결측치 처리 전 통계")
         print("="*80)
-        print(f"전체 데이터 shape: {df.shape}")
-        print(f"전체 행 수: {len(df)}")
-        
+        print(f"전체 데이터 shape: {plf.shape}")
+        print(f"전체 행 수: {len(plf)}")
+
         for col in columns:
-            if col in df.columns:
-                missing_count = df[col].isna().sum()
-                missing_pct = (missing_count / len(df)) * 100
+            if col in plf.columns:
+                s = plf[col]
+                missing_count = s.null_count()
+                missing_pct = (missing_count / len(plf)) * 100
+                col_mean = s.mean() if missing_count < len(plf) else None
+                col_std = s.std() if missing_count < len(plf) else None
                 debug_info['before'][col] = {
                     'missing_count': missing_count,
                     'missing_pct': missing_pct,
-                    'mean': df[col].mean() if not df[col].isna().all() else None,
-                    'std': df[col].std() if not df[col].isna().all() else None
+                    'mean': col_mean,
+                    'std': col_std,
                 }
                 print(f"\n{col} 컬럼:")
                 print(f"  결측치 개수: {missing_count} ({missing_pct:.2f}%)")
-                if debug_info['before'][col]['mean'] is not None:
-                    print(f"  평균: {debug_info['before'][col]['mean']:.2f}")
-                    print(f"  표준편차: {debug_info['before'][col]['std']:.2f}")
-    
-    # 날짜 컬럼 확인 및 파싱
-    if date_col not in df.columns:
-        # date 컬럼 시도
-        if 'date' in df.columns:
+                if col_mean is not None:
+                    print(f"  평균: {col_mean:.2f}")
+                    print(f"  표준편차: {col_std:.2f}")
+
+    # 날짜 컬럼 확인
+    if date_col not in plf.columns:
+        if 'date' in plf.columns:
             date_col = 'date'
         else:
             raise ValueError(f"날짜 컬럼을 찾을 수 없습니다. {date_col} 또는 'date' 컬럼이 필요합니다.")
-    
-    # 날짜 파싱
-    if isinstance(df[date_col].iloc[0], str):
-        df['_parsed_date'] = pd.to_datetime(df[date_col])
+
+    # 날짜 파싱 (polars — 5~10x faster)
+    if plf[date_col].dtype == pl.Utf8:
+        plf = plf.with_columns(pl.col(date_col).str.to_datetime().alias("_parsed_date"))
     else:
-        df['_parsed_date'] = df[date_col]
-    
-    # 시간 정보 추출 (hour 컬럼이 있으면 사용, 없으면 날짜에서 추출)
-    if 'hour' in df.columns:
-        df['_hour'] = df['hour']
-    else:
-        df['_hour'] = df['_parsed_date'].dt.hour
-    
+        plf = plf.with_columns(pl.col(date_col).alias("_parsed_date"))
+
     # 지역 컬럼 확인
-    if station_col not in df.columns:
-        if 'station_name' in df.columns:
+    if station_col not in plf.columns:
+        if 'station_name' in plf.columns:
             station_col = 'station_name'
         else:
             raise ValueError(f"지역 컬럼을 찾을 수 없습니다. {station_col} 또는 'station_name' 컬럼이 필요합니다.")
-    
+
+    stations = plf[station_col].unique().to_list()
+
     if debug:
-        print(f"\n지역 수: {df[station_col].nunique()}")
-        print(f"지역 목록: {sorted(df[station_col].unique())}")
+        print(f"\n지역 수: {len(stations)}")
+        print(f"지역 목록: {sorted(stations)}")
         print("\n" + "="*80)
         print("결측치 처리 시작")
         print("="*80)
-    
-    # 각 지역별로 처리
+
+    # ── numpy 배열 추출 (mutable copy) ──
+    col_arrays = {}
+    for col in columns:
+        if col in plf.columns:
+            col_arrays[col] = plf[col].to_numpy(allow_copy=True).astype(np.float64)
+
+    station_arr = plf[station_col].to_numpy()
+    parsed_dates = plf["_parsed_date"].to_numpy()  # datetime64 array
+    date_col_arr = plf[date_col].to_numpy()
+
+    # 전체 평균 사전 계산
+    all_means = {col: np.nanmean(col_arrays[col]) if not np.all(np.isnan(col_arrays[col])) else np.nan
+                 for col in col_arrays}
+
+    # ── 지역별 처리 루프 (numpy 코어) ──
     total_groups_processed = 0
-    for station_idx, station in enumerate(df[station_col].unique(), 1):
-        station_mask = df[station_col] == station
-        station_indices = df[station_mask].index
-        
+
+    for station_idx, station in enumerate(sorted(stations), 1):
+        station_mask = (station_arr == station)
+        indices = np.where(station_mask)[0]
+
         if debug:
-            print(f"\n[{station_idx}/{df[station_col].nunique()}] 지역: {station} (데이터 {len(station_indices)}개)")
-        
+            print(f"\n[{station_idx}/{len(stations)}] 지역: {station} (데이터 {len(indices)}개)")
+
+        # station polars subset (historical lookup용)
+        plf_station = plf.filter(pl.col(station_col) == station)
+
         for col in columns:
-            if col not in df.columns:
+            if col not in col_arrays:
                 if debug:
                     print(f"  경고: {col} 컬럼이 없습니다. 건너뜁니다.")
                 continue
-            
-            # 해당 지역의 해당 컬럼만 추출
-            station_series = df.loc[station_indices, col].copy()
-            initial_missing = station_series.isna().sum()
-            
+
+            arr = col_arrays[col]
+            station_vals = arr[indices].copy()
+            initial_missing = int(np.isnan(station_vals).sum())
+
             if initial_missing == 0:
                 if debug:
                     print(f"  {col}: 결측치 없음")
                 continue
-            
-            # 연속 결측치 그룹 찾기
-            missing_groups = find_consecutive_missing_groups(station_series)
-            
+
+            missing_groups = find_consecutive_missing_groups(station_vals)
+
             if debug:
                 print(f"  {col}: 결측치 {initial_missing}개, 연속 그룹 {len(missing_groups)}개")
-            
+
+            # historical lookup 사전 계산 (이 station+column에 대해 1회)
+            lookup, station_mean = _build_historical_lookup(plf_station, col)
+
             for group_idx, (start_idx, length) in enumerate(missing_groups, 1):
                 total_groups_processed += 1
                 debug_info['missing_groups_by_length'][length] += 1
                 debug_info['station_stats'][station][f'{col}_missing_groups'] += 1
                 debug_info['station_stats'][station][f'{col}_missing_values'] += length
-                
-                # 실제 데이터프레임의 인덱스로 변환
-                actual_start_idx = station_indices[start_idx]
-                
-                # 결측치가 있는 날짜 정보
-                if date_col in df.columns:
-                    missing_date = df.iloc[actual_start_idx][date_col]
-                    if debug:
-                        print(f"    그룹 {group_idx}: 연속 {length}개 결측치 (시작: {missing_date})")
-                
+
+                if debug:
+                    actual_global_idx = indices[start_idx]
+                    missing_date = date_col_arr[actual_global_idx]
+                    print(f"    그룹 {group_idx}: 연속 {length}개 결측치 (시작: {missing_date})")
+
                 if length <= 3:
-                    # 스플라인 보간
+                    # 스플라인 보간 (numpy/scipy)
                     debug_info['processing_stats'][col]['spline'] += 1
                     debug_info['processing_stats'][col]['total_missing'] += length
                     if debug:
                         print(f"      → 스플라인 보간 적용")
-                    station_series = spline_impute(station_series, start_idx, length)
-                    # 원본 데이터프레임에 반영
-                    df.loc[station_indices, col] = station_series.values
+                    _spline_impute(station_vals, start_idx, length)
                 else:
-                    # 역사적 평균값 사용
+                    # 역사적 평균값 (polars lookup)
                     debug_info['processing_stats'][col]['historical'] += 1
                     debug_info['processing_stats'][col]['total_missing'] += length
                     if debug:
                         print(f"      → 역사적 평균값 사용")
-                    df = historical_average_impute(df, station, col, actual_start_idx, length, date_col, station_col)
-            
-            # 처리 후 검증
-            final_missing = df.loc[station_indices, col].isna().sum()
+
+                    for k in range(start_idx, start_idx + length):
+                        global_idx = indices[k]
+                        dt = parsed_dates[global_idx]
+                        dt_ts = pd.Timestamp(dt)
+                        key = (dt_ts.month, dt_ts.day, dt_ts.hour)
+
+                        if key in lookup:
+                            station_vals[k] = lookup[key]
+                        elif station_mean is not None and not np.isnan(station_mean):
+                            station_vals[k] = station_mean
+                        elif not np.isnan(all_means.get(col, np.nan)):
+                            station_vals[k] = all_means[col]
+
+            # station 결과를 전체 배열에 반영
+            arr[indices] = station_vals
+
+            final_missing = int(np.isnan(arr[indices]).sum())
             if debug and final_missing < initial_missing:
                 print(f"  {col}: {initial_missing}개 → {final_missing}개 결측치 (처리 완료)")
             elif debug and final_missing > 0:
                 print(f"  {col}: 경고 - 여전히 {final_missing}개 결측치 남음")
-    
+
+    # ── numpy → polars → pandas 변환 ──
+    for col in col_arrays:
+        plf = plf.with_columns(pl.Series(col, col_arrays[col]))
+
+    # 임시 컬럼 제거
+    temp_cols = [c for c in plf.columns if c.startswith('_')]
+    if temp_cols:
+        plf = plf.drop(temp_cols)
+
+    result_df = plf.to_pandas()
+
     # 처리 후 통계 수집
     processing_time = time.time() - start_time
     debug_info['processing_time'] = processing_time
-    
+
     if debug:
         print("\n" + "="*80)
         print("결측치 처리 후 통계")
         print("="*80)
-        print(f"전체 데이터 shape: {df.shape}")
-        
+        print(f"전체 데이터 shape: {result_df.shape}")
+
         for col in columns:
-            if col in df.columns:
-                missing_count = df[col].isna().sum()
-                missing_pct = (missing_count / len(df)) * 100
+            if col in result_df.columns:
+                missing_count = int(result_df[col].isna().sum())
+                missing_pct = (missing_count / len(result_df)) * 100
+                col_mean = result_df[col].mean() if not result_df[col].isna().all() else None
+                col_std = result_df[col].std() if not result_df[col].isna().all() else None
                 debug_info['after'][col] = {
                     'missing_count': missing_count,
                     'missing_pct': missing_pct,
-                    'mean': df[col].mean() if not df[col].isna().all() else None,
-                    'std': df[col].std() if not df[col].isna().all() else None
+                    'mean': col_mean,
+                    'std': col_std,
                 }
                 print(f"\n{col} 컬럼:")
                 print(f"  결측치 개수: {missing_count} ({missing_pct:.2f}%)")
-                if debug_info['after'][col]['mean'] is not None:
-                    print(f"  평균: {debug_info['after'][col]['mean']:.2f}")
-                    print(f"  표준편차: {debug_info['after'][col]['std']:.2f}")
-                
-                # 처리 전후 비교
+                if col_mean is not None:
+                    print(f"  평균: {col_mean:.2f}")
+                    print(f"  표준편차: {col_std:.2f}")
+
                 if col in debug_info['before']:
                     before_count = debug_info['before'][col]['missing_count']
-                    after_count = debug_info['after'][col]['missing_count']
+                    after_count = missing_count
                     reduced = before_count - after_count
                     reduction_pct = (reduced / before_count * 100) if before_count > 0 else 0
                     print(f"  처리 전: {before_count}개 → 처리 후: {after_count}개 (감소: {reduced}개, {reduction_pct:.1f}%)")
-        
+
         print("\n" + "="*80)
         print("처리 방법별 통계")
         print("="*80)
@@ -346,58 +438,53 @@ def impute_missing_values(df, columns=['ta', 'hm'], date_col='tm', station_col='
                 print(f"  스플라인 보간: {stats['spline']}개 그룹")
                 print(f"  역사적 평균: {stats['historical']}개 그룹")
                 print(f"  총 처리된 결측치: {stats['total_missing']}개")
-        
+
         print("\n" + "="*80)
         print("연속 결측치 그룹 길이별 분포")
         print("="*80)
         for length in sorted(debug_info['missing_groups_by_length'].keys()):
             count = debug_info['missing_groups_by_length'][length]
             print(f"  길이 {length}: {count}개 그룹")
-        
+
         print("\n" + "="*80)
         print(f"총 처리 시간: {processing_time:.2f}초")
         print(f"처리된 그룹 수: {total_groups_processed}개")
         print("="*80 + "\n")
-    
-    # 임시 컬럼 제거
-    df = df.drop(columns=[col for col in df.columns if col.startswith('_')], errors='ignore')
-    
+
     if debug:
-        return df, debug_info
+        return result_df, debug_info
     else:
-        return df
+        return result_df
+
 
 def main():
     """
     메인 실행 함수
     """
-    # CSV 파일 경로 입력
     csv_path = input("CSV 파일 경로를 입력하세요: ").strip()
-    
+
     if not Path(csv_path).exists():
         print(f"오류: 파일을 찾을 수 없습니다: {csv_path}")
         return
-    
-    # CSV 읽기
+
     print(f"CSV 파일 읽는 중: {csv_path}")
     df = pd.read_csv(csv_path, encoding='utf-8-sig')
-    
+
     print(f"원본 데이터 shape: {df.shape}")
     print(f"ta 결측치: {df['ta'].isna().sum()}")
     print(f"hm 결측치: {df['hm'].isna().sum()}")
-    
-    # 결측치 처리
+
     print("\n결측치 처리 중...")
     df_imputed, debug_info = impute_missing_values(df, columns=['ta', 'hm'], debug=True)
-    
+
     print(f"\n처리 후 데이터 shape: {df_imputed.shape}")
     print(f"ta 결측치: {df_imputed['ta'].isna().sum()}")
     print(f"hm 결측치: {df_imputed['hm'].isna().sum()}")
-    
-    # 결과 저장
+
     output_path = csv_path.replace('.csv', '_imputed.csv')
     df_imputed.to_csv(output_path, index=False, encoding='utf-8-sig')
     print(f"\n결과 저장 완료: {output_path}")
+
 
 if __name__ == "__main__":
     main()

@@ -11,14 +11,20 @@ PROCESSED_DIR = PROJECT_ROOT / "pv_data_processed"
 SPECS_FILE = PROJECT_ROOT / "한국남부발전(주)_태양광발전기 사양정보_20250630.csv"
 
 # 2. 발전소 명칭 정규화 함수 (유지)
+_NORM_PATTERNS = [
+    re.compile(r"한국남부발전\(주\)_"),
+    re.compile(r"태양광발전실적"),
+    re.compile(r"태양광발전소"),
+    re.compile(r"태양광"),
+    re.compile(r"발전소"),
+    re.compile(r"\(주\)"),
+]
+
+
 def normalize_name(name):
     if not isinstance(name, str): return ""
-    name = re.sub(r"한국남부발전\(주\)_", "", name)
-    name = re.sub(r"태양광발전실적", "", name)
-    name = re.sub(r"태양광발전소", "", name)
-    name = re.sub(r"태양광", "", name)
-    name = re.sub(r"발전소", "", name)
-    name = re.sub(r"\(주\)", "", name)
+    for pat in _NORM_PATTERNS:
+        name = pat.sub("", name)
     name = name.replace(" ", "").strip()
     return name
 
@@ -28,7 +34,7 @@ def preprocess_nambu():
     # 사양 정보 로드
     try:
         specs_df = pd.read_csv(SPECS_FILE, encoding='utf-8-sig')
-    except:
+    except Exception:
         specs_df = pd.read_csv(SPECS_FILE, encoding='cp949')
     
     specs_df['norm_name'] = specs_df['발전소명'].apply(normalize_name)

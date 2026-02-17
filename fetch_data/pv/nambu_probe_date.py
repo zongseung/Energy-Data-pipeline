@@ -37,7 +37,7 @@ async def check_data_exists(session, target_date, org_cd, hoki):
             root = ET.fromstring(text)
             ymd = root.find('.//ymd')
             return ymd is not None and ymd.text is not None
-    except:
+    except Exception:
         return False
 
 async def find_start_date(session, org_cd, hoki):
