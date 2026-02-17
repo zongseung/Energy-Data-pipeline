@@ -9,66 +9,63 @@ def find_consecutive_missing_groups(series):
     """
     연속된 결측치 그룹을 찾아서 (시작 인덱스, 길이) 튜플 리스트로 반환
     """
-    is_missing = series.isna()
+    is_missing = series.isna().values  # numpy 배열로 변환하여 .iloc 오버헤드 제거
     groups = []
-    
+    n = len(is_missing)
+
     i = 0
-    while i < len(is_missing):
-        if is_missing.iloc[i]:
+    while i < n:
+        if is_missing[i]:
             start_idx = i
             length = 1
             i += 1
-            while i < len(is_missing) and is_missing.iloc[i]:
+            while i < n and is_missing[i]:
                 length += 1
                 i += 1
             groups.append((start_idx, length))
         else:
             i += 1
-    
+
     return groups
 
 def spline_impute(series, start_idx, length):
     """
     스플라인 보간을 사용하여 결측치를 채움
     """
+    gap = slice(start_idx, start_idx + length)
+
     # 결측치 전후의 유효한 값들의 인덱스와 값
     valid_before = series.iloc[:start_idx].dropna()
     valid_after = series.iloc[start_idx + length:].dropna()
-    
+
     if len(valid_before) == 0 or len(valid_after) == 0:
         # 전후 유효값이 없으면 선형 보간 사용
-        series.iloc[start_idx:start_idx + length] = series.interpolate(method='linear').iloc[start_idx:start_idx + length]
+        series.iloc[gap] = series.interpolate(method='linear').iloc[gap]
         return series
-    
+
     # 전후 유효값들을 합쳐서 스플라인 보간
-    x_before = valid_before.index.values
-    y_before = valid_before.values
-    x_after = valid_after.index.values
-    y_after = valid_after.values
-    
-    x_all = np.concatenate([x_before, x_after])
-    y_all = np.concatenate([y_before, y_after])
-    
+    x_all = np.concatenate([valid_before.index.values, valid_after.index.values])
+    y_all = np.concatenate([valid_before.values, valid_after.values])
+
     # 인덱스 순서대로 정렬
     sort_idx = np.argsort(x_all)
     x_all = x_all[sort_idx]
     y_all = y_all[sort_idx]
-    
+
     # 최소 2개의 점이 필요
     if len(x_all) < 2:
-        series.iloc[start_idx:start_idx + length] = series.interpolate(method='linear').iloc[start_idx:start_idx + length]
+        series.iloc[gap] = series.interpolate(method='linear').iloc[gap]
         return series
-    
+
     try:
         # 스플라인 보간 (cubic)
         f = interp1d(x_all, y_all, kind='cubic', fill_value='extrapolate')
-        x_missing = series.iloc[start_idx:start_idx + length].index.values
-        y_imputed = f(x_missing)
-        series.iloc[start_idx:start_idx + length] = y_imputed
+        x_missing = series.iloc[gap].index.values
+        series.iloc[gap] = f(x_missing)
     except Exception:
         # 스플라인 실패 시 선형 보간
-        series.iloc[start_idx:start_idx + length] = series.interpolate(method='linear').iloc[start_idx:start_idx + length]
-    
+        series.iloc[gap] = series.interpolate(method='linear').iloc[gap]
+
     return series
 
 def historical_average_impute(df, station_name, column, start_idx, length, date_col='tm', station_col='stnNm'):
@@ -77,62 +74,59 @@ def historical_average_impute(df, station_name, column, start_idx, length, date_
     """
     # 결측치가 있는 날짜들 추출
     missing_dates = df.iloc[start_idx:start_idx + length][date_col]
-    
+
     # 날짜 파싱 (tm 컬럼 형식에 따라 다를 수 있음)
     if isinstance(missing_dates.iloc[0], str):
         missing_dates_parsed = pd.to_datetime(missing_dates)
     else:
         missing_dates_parsed = missing_dates
-    
+
     # 같은 지역의 다른 데이터 찾기
-    station_data = df[df[station_col] == station_name].copy()
-    
+    station_data = df[df[station_col] == station_name]
+
     if len(station_data) == 0:
         return df
-    
+
     # 날짜 컬럼 파싱
     if date_col in station_data.columns:
-        if isinstance(station_data[date_col].iloc[0], str):
-            station_data['_parsed_date'] = pd.to_datetime(station_data[date_col])
-        else:
-            station_data['_parsed_date'] = station_data[date_col]
+        src_col = date_col
+    elif 'date' in station_data.columns:
+        src_col = 'date'
     else:
-        # date 컬럼 시도
-        date_col_alt = 'date' if 'date' in station_data.columns else station_data.columns[0]
-        if isinstance(station_data[date_col_alt].iloc[0], str):
-            station_data['_parsed_date'] = pd.to_datetime(station_data[date_col_alt])
-        else:
-            station_data['_parsed_date'] = station_data[date_col_alt]
-    
-    # 각 결측치에 대해 같은 월-일-시의 평균값 계산
+        src_col = station_data.columns[0]
+
+    parsed_dates = pd.to_datetime(station_data[src_col])
+
+    # (month, day, hour) 룩업 테이블 사전 계산 — 루프 내 반복 필터링 제거
+    lookup_df = pd.DataFrame({
+        '_month': parsed_dates.dt.month.values,
+        '_day': parsed_dates.dt.day.values,
+        '_hour': parsed_dates.dt.hour.values,
+        '_val': station_data[column].values,
+    })
+    lookup = lookup_df.groupby(['_month', '_day', '_hour'])['_val'].mean()
+
+    # fallback 값 사전 계산
+    col_loc = df.columns.get_loc(column)
+    station_all_mean = station_data[column].mean()  # skipna=True by default
+    all_mean = df[column].mean()
+
+    # 각 결측치에 대해 룩업 테이블에서 조회
     for idx, missing_date in zip(range(start_idx, start_idx + length), missing_dates_parsed):
-        month = missing_date.month
-        day = missing_date.day
-        hour = missing_date.hour
-        
-        # 같은 월-일-시의 다른 연도 데이터 찾기
-        same_time_data = station_data[
-            (station_data['_parsed_date'].dt.month == month) &
-            (station_data['_parsed_date'].dt.day == day) &
-            (station_data['_parsed_date'].dt.hour == hour) &
-            (station_data['_parsed_date'] != missing_date)  # 같은 날짜 제외
-        ]
-        
-        if column in same_time_data.columns:
-            valid_values = same_time_data[column].dropna()
-            if len(valid_values) > 0:
-                df.iloc[idx, df.columns.get_loc(column)] = valid_values.mean()
-            else:
-                # 유효한 값이 없으면 해당 지역의 전체 평균 또는 선형 보간 사용
-                station_all_values = station_data[column].dropna()
-                if len(station_all_values) > 0:
-                    df.iloc[idx, df.columns.get_loc(column)] = station_all_values.mean()
-                else:
-                    # 그래도 없으면 전체 데이터의 평균 사용
-                    all_values = df[column].dropna()
-                    if len(all_values) > 0:
-                        df.iloc[idx, df.columns.get_loc(column)] = all_values.mean()
-    
+        key = (missing_date.month, missing_date.day, missing_date.hour)
+
+        if key in lookup.index:
+            value = lookup[key]
+            if not pd.isna(value):
+                df.iloc[idx, col_loc] = value
+                continue
+
+        # fallback: 지역 전체 평균 → 전체 데이터 평균
+        if not pd.isna(station_all_mean):
+            df.iloc[idx, col_loc] = station_all_mean
+        elif not pd.isna(all_mean):
+            df.iloc[idx, col_loc] = all_mean
+
     return df
 
 def impute_missing_values(df, columns=['ta', 'hm'], date_col='tm', station_col='stnNm', debug=True):
