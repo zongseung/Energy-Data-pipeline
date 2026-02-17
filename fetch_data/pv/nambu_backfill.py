@@ -6,7 +6,6 @@ import asyncio
 import os
 import re
 import sys
-from urllib.parse import urlparse, urlunparse
 import xml.etree.ElementTree as ET
 from urllib.parse import urlencode
 from datetime import date, datetime, timedelta
@@ -22,66 +21,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from fetch_data.common.db_utils import resolve_db_url, redact_db_url  # noqa: E402
 from notify.slack_notifier import send_slack_message  # noqa: E402
 
 
 ENDPOINT = "https://apis.data.go.kr/B552520/PwrSunLightInfo/getDataService"
-
-def _running_in_docker() -> bool:
-    return Path("/.dockerenv").exists() or os.getenv("RUNNING_IN_DOCKER") == "1"
-
-
-def _redact_db_url(db_url: str) -> str:
-    try:
-        u = urlparse(db_url)
-        if not u.password:
-            return db_url
-        netloc = u.netloc.replace(f":{u.password}@", ":****@")
-        return urlunparse(u._replace(netloc=netloc))
-    except Exception:
-        return "<unparseable db url>"
-
-
-def _resolve_db_url(cli_db_url: Optional[str]) -> str:
-    """
-    실행 환경에 따라 DB URL을 결정합니다.
-
-    우선순위:
-      1) CLI --db-url
-      2) DB_URL
-      3) (호스트 실행) PV_DATABASE_URL이 pv-db(도커 DNS)이면 LOCAL_DB_URL 우선
-      4) (호스트 실행) 그래도 pv-db면 localhost:5435로 자동 치환 시도
-      5) PV_DATABASE_URL
-      6) LOCAL_DB_URL
-    """
-    if cli_db_url:
-        return cli_db_url
-
-    db_url = os.getenv("DB_URL")
-    if db_url:
-        return db_url
-
-    pv_db_url = os.getenv("PV_DATABASE_URL") or ""
-    local_db_url = os.getenv("LOCAL_DB_URL") or ""
-
-    if not _running_in_docker() and pv_db_url:
-        try:
-            u = urlparse(pv_db_url)
-            if u.hostname == "pv-db" and local_db_url:
-                return local_db_url
-            if u.hostname == "pv-db":
-                host_port = int(os.getenv("PV_DB_PORT_FORWARD", "5435"))
-                if u.username and u.password:
-                    netloc = f"{u.username}:{u.password}@localhost:{host_port}"
-                elif u.username:
-                    netloc = f"{u.username}@localhost:{host_port}"
-                else:
-                    netloc = f"localhost:{host_port}"
-                return urlunparse(u._replace(netloc=netloc))
-        except Exception:
-            pass
-
-    return pv_db_url or local_db_url
 
 
 def _validate_yyyymmdd(s: str) -> str:
@@ -390,7 +334,7 @@ def main() -> None:
     load_dotenv(PROJECT_ROOT / ".env")
 
     api_key = os.getenv("NAMBU_API_KEY")
-    db_url = _resolve_db_url(args.db_url)
+    db_url = resolve_db_url(args.db_url)
     if not api_key:
         raise RuntimeError("NAMBU_API_KEY가 설정되어 있지 않습니다.")
     if not db_url:
@@ -410,7 +354,7 @@ def main() -> None:
     if end < start:
         raise ValueError("end가 start보다 빠릅니다.")
 
-    print(f"DB_URL: {_redact_db_url(db_url)}")
+    print(f"DB_URL: {redact_db_url(db_url)}")
     engine = create_engine(db_url)
     targets = _get_targets(engine, args.gencd, args.hogi)
     if not targets:

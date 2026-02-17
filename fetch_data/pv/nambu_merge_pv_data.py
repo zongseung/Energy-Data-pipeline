@@ -28,7 +28,7 @@ def preprocess_nambu():
     # 사양 정보 로드
     try:
         specs_df = pd.read_csv(SPECS_FILE, encoding='utf-8-sig')
-    except:
+    except Exception:
         specs_df = pd.read_csv(SPECS_FILE, encoding='cp949')
     
     specs_df['norm_name'] = specs_df['발전소명'].apply(normalize_name)

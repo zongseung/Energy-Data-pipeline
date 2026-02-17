@@ -1,6 +1,5 @@
 import asyncio
 import os
-from urllib.parse import urlparse, urlunparse
 import re
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -13,7 +12,9 @@ from dotenv import load_dotenv
 from prefect import flow, task
 from sqlalchemy import create_engine, text
 
+from fetch_data.common.db_utils import resolve_db_url
 from fetch_data.pv.namdong_merge_pv_data import read_csv_flexible, hour_columns, extract_hour
+from notify.slack_notifier import send_slack_message
 
 BASE = "https://www.koenergy.kr"
 MENU_CD = "FN0912020217"
@@ -26,45 +27,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
 _output_dir_env = os.getenv("NAMDONG_OUTPUT_DIR")
 OUTPUT_DIR = Path(_output_dir_env) if _output_dir_env else (PROJECT_ROOT / "pv_data_raw")
-
-def _running_in_docker() -> bool:
-    return Path("/.dockerenv").exists() or os.getenv("RUNNING_IN_DOCKER") == "1"
-
-
-def _resolve_db_url(cli_db_url: Optional[str]) -> str:
-    if cli_db_url:
-        return cli_db_url
-
-    db_url = os.getenv("DB_URL")
-    if db_url:
-        return db_url
-
-    pv_db_url = os.getenv("PV_DATABASE_URL") or ""
-    local_db_url = os.getenv("LOCAL_DB_URL") or ""
-
-    if not _running_in_docker() and pv_db_url:
-        try:
-            u = urlparse(pv_db_url)
-            if u.hostname == "pv-db" and local_db_url:
-                return local_db_url
-            if u.hostname == "pv-db":
-                host_port = int(os.getenv("PV_DB_PORT_FORWARD", "5435"))
-                if u.username and u.password:
-                    netloc = f"{u.username}:{u.password}@localhost:{host_port}"
-                elif u.username:
-                    netloc = f"{u.username}@localhost:{host_port}"
-                else:
-                    netloc = f"localhost:{host_port}"
-                return urlunparse(u._replace(netloc=netloc))
-        except Exception:
-            pass
-
-    return pv_db_url or local_db_url
-
-
-DB_URL = _resolve_db_url(None)
-
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 NAMDONG_START_DATE = os.getenv("NAMDONG_START_DATE")
 NAMDONG_ORG_NO = os.getenv("NAMDONG_ORG_NO", "").strip()
 NAMDONG_HOKI_S = os.getenv("NAMDONG_HOKI_S", "").strip()
@@ -183,33 +145,16 @@ def is_probably_csv(body: bytes) -> bool:
 
 
 # -------------------------
-# Slack notify
+# Prefect Slack task wrappers
 # -------------------------
-def send_slack_message(text: str, webhook_url: Optional[str] = None) -> None:
-    if webhook_url is None:
-        webhook_url = SLACK_WEBHOOK_URL
-    if not webhook_url:
-        print("SLACK_WEBHOOK_URL이 설정되어 있지 않습니다. Slack 전송 스킵.")
-        return
-
-    try:
-        resp = requests.post(webhook_url, json={"text": text}, timeout=5)
-        if resp.status_code != 200:
-            print(f"Slack 전송 실패: {resp.status_code}, {resp.text}")
-    except Exception as e:
-        print(f"Slack 전송 중 예외 발생: {e}")
-
-
 @task(name="Slack 성공 알림", retries=0)
 def notify_slack_success(flow_name: str, details: str) -> None:
-    msg = f"[{flow_name} 완료]\n{details}"
-    send_slack_message(msg)
+    send_slack_message(f"[{flow_name} 완료]\n{details}")
 
 
 @task(name="Slack 실패 알림", retries=0)
 def notify_slack_failure(flow_name: str, error_msg: str) -> None:
-    msg = f"[{flow_name} 실패]\n- 에러: {error_msg}"
-    send_slack_message(msg)
+    send_slack_message(f"[{flow_name} 실패]\n- 에러: {error_msg}")
 
 
 # -------------------------
@@ -352,7 +297,7 @@ async def download_monthly_csvs(
 
 
 def load_namdong_to_db(files: List[Path], start_dt: date, end_dt: date, db_url: Optional[str]) -> int:
-    resolved_url = _resolve_db_url(db_url)
+    resolved_url = resolve_db_url(db_url)
     if not resolved_url:
         raise RuntimeError("DB_URL(또는 PV_DATABASE_URL/LOCAL_DB_URL)이 설정되어 있지 않습니다.")
 

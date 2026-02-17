@@ -26,3 +26,8 @@ dependencies = [
     "tqdm>=4.67.1",
     "workalendar>=17.0.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

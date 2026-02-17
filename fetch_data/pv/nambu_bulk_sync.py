@@ -53,7 +53,7 @@ async def fetch_nambu_data(session, date_str, org_cd, hoki):
             item = root.find('.//items')
             if item is not None:
                 return {child.tag: child.text for child in item}
-    except: return None
+    except Exception: return None
     return None
 
 async def process_plant(session, org_cd, hoki, start_date_str):

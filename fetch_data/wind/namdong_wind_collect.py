@@ -11,12 +11,14 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse, urlunparse
 
 import pandas as pd
 import requests
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+
+from fetch_data.common.db_utils import resolve_db_url
+from notify.slack_notifier import send_slack_message
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
@@ -25,58 +27,6 @@ load_dotenv(PROJECT_ROOT / ".env")
 API_BASE = "https://apis.data.go.kr/B551893/wind-power-by-hour/list"
 NAMDONG_WIND_KEY = os.getenv("NAMDONG_WIND_KEY", "")
 PAGE_SIZE = 100
-
-
-def _running_in_docker() -> bool:
-    return Path("/.dockerenv").exists() or os.getenv("RUNNING_IN_DOCKER") == "1"
-
-
-def _resolve_db_url(cli_db_url: Optional[str] = None) -> str:
-    if cli_db_url:
-        return cli_db_url
-
-    db_url = os.getenv("DB_URL")
-    if db_url:
-        return db_url
-
-    pv_db_url = os.getenv("PV_DATABASE_URL") or ""
-    local_db_url = os.getenv("LOCAL_DB_URL") or ""
-
-    if not _running_in_docker() and pv_db_url:
-        try:
-            u = urlparse(pv_db_url)
-            if u.hostname == "pv-db" and local_db_url:
-                return local_db_url
-            if u.hostname == "pv-db":
-                host_port = int(os.getenv("PV_DB_PORT_FORWARD", "5435"))
-                if u.username and u.password:
-                    netloc = f"{u.username}:{u.password}@localhost:{host_port}"
-                elif u.username:
-                    netloc = f"{u.username}@localhost:{host_port}"
-                else:
-                    netloc = f"localhost:{host_port}"
-                return urlunparse(u._replace(netloc=netloc))
-        except Exception:
-            pass
-
-    return pv_db_url or local_db_url
-
-
-DB_URL = _resolve_db_url()
-
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
-
-
-def send_slack_message(msg: str) -> None:
-    if not SLACK_WEBHOOK_URL:
-        print("SLACK_WEBHOOK_URL 미설정. Slack 전송 스킵.")
-        return
-    try:
-        resp = requests.post(SLACK_WEBHOOK_URL, json={"text": msg}, timeout=5)
-        if resp.status_code != 200:
-            print(f"Slack 전송 실패: {resp.status_code}, {resp.text}")
-    except Exception as e:
-        print(f"Slack 전송 중 예외: {e}")
 
 
 # =========================================================
@@ -243,7 +193,7 @@ def upsert_wind_namdong(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
         print("[DB] 적재할 데이터가 없습니다.")
         return 0
 
-    resolved_url = _resolve_db_url(db_url)
+    resolved_url = resolve_db_url(db_url)
     if not resolved_url:
         raise RuntimeError("DB_URL이 설정되지 않았습니다.")
 

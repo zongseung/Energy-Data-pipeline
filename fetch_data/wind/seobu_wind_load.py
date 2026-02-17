@@ -8,49 +8,15 @@ CSV 컬럼: 발전기명, capacity (MW), generation, datetime
 import os
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse, urlunparse
 
 import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
+from fetch_data.common.db_utils import resolve_db_url
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
-
-
-def _running_in_docker() -> bool:
-    return Path("/.dockerenv").exists() or os.getenv("RUNNING_IN_DOCKER") == "1"
-
-
-def _resolve_db_url(cli_db_url: Optional[str] = None) -> str:
-    if cli_db_url:
-        return cli_db_url
-
-    db_url = os.getenv("DB_URL")
-    if db_url:
-        return db_url
-
-    pv_db_url = os.getenv("PV_DATABASE_URL") or ""
-    local_db_url = os.getenv("LOCAL_DB_URL") or ""
-
-    if not _running_in_docker() and pv_db_url:
-        try:
-            u = urlparse(pv_db_url)
-            if u.hostname == "pv-db" and local_db_url:
-                return local_db_url
-            if u.hostname == "pv-db":
-                host_port = int(os.getenv("PV_DB_PORT_FORWARD", "5435"))
-                if u.username and u.password:
-                    netloc = f"{u.username}:{u.password}@localhost:{host_port}"
-                elif u.username:
-                    netloc = f"{u.username}@localhost:{host_port}"
-                else:
-                    netloc = f"localhost:{host_port}"
-                return urlunparse(u._replace(netloc=netloc))
-        except Exception:
-            pass
-
-    return pv_db_url or local_db_url
 
 
 def load_seobu_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
@@ -89,7 +55,7 @@ def upsert_wind_seobu(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
         print("[DB] 적재할 데이터가 없습니다.")
         return 0
 
-    resolved_url = _resolve_db_url(db_url)
+    resolved_url = resolve_db_url(db_url)
     if not resolved_url:
         raise RuntimeError("DB_URL이 설정되지 않았습니다.")
 

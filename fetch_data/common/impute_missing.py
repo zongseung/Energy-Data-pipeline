@@ -65,7 +65,7 @@ def spline_impute(series, start_idx, length):
         x_missing = series.iloc[start_idx:start_idx + length].index.values
         y_imputed = f(x_missing)
         series.iloc[start_idx:start_idx + length] = y_imputed
-    except:
+    except Exception:
         # 스플라인 실패 시 선형 보간
         series.iloc[start_idx:start_idx + length] = series.interpolate(method='linear').iloc[start_idx:start_idx + length]
     
