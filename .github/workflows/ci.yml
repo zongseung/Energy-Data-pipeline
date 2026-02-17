@@ -37,3 +37,8 @@ jobs:
           uv run python -c "import fetch_data; print('ok: fetch_data')"
           uv run python -c "import prefect_flows; print('ok: prefect_flows')"
           uv run python -c "import notify; print('ok: notify')"
+
+      - name: Run tests
+        env:
+          PYTHONPATH: .
+        run: uv run pytest tests/ -v
