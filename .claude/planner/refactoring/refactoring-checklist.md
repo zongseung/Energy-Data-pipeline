@@ -58,4 +58,4 @@
 
 - [x] `tests/test_refactoring.py` — 리팩토링 전/후 동작 검증 테스트 파일 존재
 - [x] `tests/test_refactoring.py` — 테스트 실행 및 통과 확인
-- [ ] CI에 `pytest` 실행 단계 추가
+- [x] CI에 `pytest` 실행 단계 추가 (`.github/workflows/ci.yml` — `Run tests` step)
