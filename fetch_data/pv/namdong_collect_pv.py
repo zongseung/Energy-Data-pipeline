@@ -7,25 +7,26 @@ from typing import List, Optional, Tuple
 
 import aiohttp
 import pandas as pd
-import requests
-from dotenv import load_dotenv
 from prefect import flow, task
 from sqlalchemy import create_engine, text
 
 from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.logger import get_logger
+from fetch_data.common.utils import now_kst
+from fetch_data.constants import NamdongAPI
 from fetch_data.pv.namdong_merge_pv_data import read_csv_flexible, hour_columns, extract_hour
 from notify.slack_notifier import send_slack_message
-from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
-BASE = "https://www.koenergy.kr"
-MENU_CD = "FN0912020217"
+logger = get_logger(__name__)
 
-CSV_URL = f"{BASE}/kosep/gv/nf/dt/nfdt21/csvDown.do"
+BASE = NamdongAPI.BASE_URL
+MENU_CD = NamdongAPI.MENU_CD
+
+CSV_URL = NamdongAPI.CSV_URL
 MAIN_URL = f"{BASE}/kosep/gv/nf/dt/nfdt21/main.do"
 
-# 저장 폴더 (원하면 바꾸기)
+# 저장 폴더
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
 _output_dir_env = os.getenv("NAMDONG_OUTPUT_DIR")
 OUTPUT_DIR = Path(_output_dir_env) if _output_dir_env else (PROJECT_ROOT / "pv_data_raw")
 NAMDONG_START_DATE = os.getenv("NAMDONG_START_DATE")
@@ -43,13 +44,6 @@ def _sanitize_filename(s: str) -> str:
     s = re.sub(r"[^\w\-.가-힣 ]+", "_", s)
     s = re.sub(r"\s+", "_", s)
     return s[:180]
-
-
-def _prompt(msg: str, default: Optional[str] = None) -> str:
-    if default is not None:
-        s = input(f"{msg} [{default}]: ").strip()
-        return s or default
-    return input(f"{msg}: ").strip()
 
 
 def _validate_yyyymmdd(date_str: str) -> str:
@@ -92,16 +86,6 @@ def split_by_month(date_s: str, date_e: str) -> List[Tuple[str, str]]:
         ranges.append((_to_yyyymmdd(cur), _to_yyyymmdd(chunk_end)))
         cur = chunk_end + timedelta(days=1)
     return ranges
-
-
-def prompt_page_index(default: str = "1") -> str:
-    raw = input(f"pageIndex [{default}]: ").strip()
-    if not raw:
-        return default
-    if not raw.isdigit():
-        print(f"⚠️ pageIndex가 숫자가 아님({raw!r}) -> {default}로 처리")
-        return default
-    return raw
 
 
 def build_main_url(page_index: str, org_no: str, hoki_s: str, hoki_e: str, date_s: str, date_e: str) -> str:
@@ -401,10 +385,10 @@ def run_namdong_collection(
     sleep_sec: int = 5,
     db_url: Optional[str] = None,
 ) -> List[Path]:
-    print(f"\n{'='*60}")
-    print("남동발전 PV 수집 시작")
-    print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}\n")
+    logger.info("=" * 60)
+    logger.info("남동발전 PV 수집 시작")
+    logger.info(f"실행 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
 
     try:
         if target_start is None and target_end is None:
@@ -413,14 +397,13 @@ def run_namdong_collection(
         else:
             start_dt, end_dt = resolve_backfill_range(OUTPUT_DIR, target_start, target_end)
         if start_dt > end_dt:
-            print("수집 대상이 없습니다. 최신 상태입니다.")
-            notify_slack_success.submit(
-                "Namdong PV",
-                "- 수집 대상 없음 (최신 상태)"
+            logger.info("수집 대상이 없습니다. 최신 상태입니다.")
+            send_slack_message(
+                "[Namdong PV 완료]\n- 수집 대상 없음 (최신 상태)"
             )
             return []
 
-        print(f"수집 기간: {start_dt} ~ {end_dt}")
+        logger.info(f"수집 기간: {start_dt} ~ {end_dt}")
         saved_files = _collect_namdong_csv_sync(
             NAMDONG_PAGE_INDEX,
             NAMDONG_ORG_NO,
@@ -447,7 +430,7 @@ def run_namdong_collection(
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
-        print(f"\n수집 중 에러 발생: {error_msg}")
+        logger.error(f"수집 중 에러 발생: {error_msg}")
         send_slack_message(f"[Namdong PV 실패]\n- 에러: {error_msg}")
         raise
 
@@ -462,40 +445,19 @@ def daily_namdong_collection_flow(
 
 
 def main():
-    page_index = prompt_page_index("1")
+    """환경변수 또는 CLI 인수 기반으로 실행합니다."""
+    import argparse
+    parser = argparse.ArgumentParser(description="남동발전 PV 수집")
+    parser.add_argument("--start", default=None, help="시작일 (YYYYMMDD)")
+    parser.add_argument("--end", default=None, help="종료일 (YYYYMMDD)")
+    parser.add_argument("--sleep", default=5, type=int, help="월별 다운로드 간 대기(초)")
+    args = parser.parse_args()
 
-    org_no = _prompt("발전소 코드(strOrgNo) - 전체는 엔터", "").strip()
-    hoki_s = _prompt("호기 시작(strHokiS) - 전체는 엔터", "").strip()
-    hoki_e = _prompt("호기 종료(strHokiE) - 전체는 엔터", "").strip()
-
-    while True:
-        try:
-            date_s = _validate_yyyymmdd(_prompt("시작일(YYYYMMDD)", "20220101"))
-            date_e = _validate_yyyymmdd(_prompt("종료일(YYYYMMDD)", "20221231"))
-            if _to_date_yyyymmdd(date_e) < _to_date_yyyymmdd(date_s):
-                raise ValueError("종료일이 시작일보다 빠릅니다.")
-            break
-        except Exception as e:
-            print(f"입력 오류: {e}")
-
-    sleep_sec_raw = _prompt("월별 다운로드 간 대기(초)", "5")
-    sleep_sec = 5 if not sleep_sec_raw.isdigit() else int(sleep_sec_raw)
-
-    saved = asyncio.run(
-        download_monthly_csvs(
-            page_index=page_index,
-            org_no=org_no,
-            hoki_s=hoki_s,
-            hoki_e=hoki_e,
-            date_s=date_s,
-            date_e=date_e,
-            sleep_sec=sleep_sec,
-        )
+    run_namdong_collection(
+        target_start=args.start,
+        target_end=args.end,
+        sleep_sec=args.sleep,
     )
-
-    print("\n완료.")
-    print(f"- 저장 폴더: {OUTPUT_DIR}")
-    print(f"- 저장 파일 수: {len(saved)}")
 
 
 if __name__ == "__main__":

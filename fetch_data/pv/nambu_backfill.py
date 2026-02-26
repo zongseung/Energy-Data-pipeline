@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import re
-import sys
 import xml.etree.ElementTree as ET
 from urllib.parse import urlencode
 from datetime import date, datetime, timedelta
@@ -14,18 +12,20 @@ from typing import Iterable, Optional
 
 import aiohttp
 import pandas as pd
-from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
+from fetch_data.common.config import get_nambu_api_key
+from fetch_data.common.db_utils import resolve_db_url, redact_db_url
+from fetch_data.common.logger import get_logger
+from fetch_data.common.utils import parse_hour_column
+from fetch_data.constants import NamebuAPI
+from notify.slack_notifier import send_slack_message
+
+logger = get_logger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
-from fetch_data.common.db_utils import resolve_db_url, redact_db_url  # noqa: E402
-from notify.slack_notifier import send_slack_message  # noqa: E402
-
-
-ENDPOINT = "https://apis.data.go.kr/B552520/PwrSunLightInfo/getDataService"
+ENDPOINT = NamebuAPI.ENDPOINT
 
 
 def _validate_yyyymmdd(s: str) -> str:
@@ -41,9 +41,6 @@ def _to_date(s: str) -> date:
 
 def _to_yyyymmdd(d: date) -> str:
     return d.strftime("%Y%m%d")
-
-
-from fetch_data.common.date_utils import extract_hour0 as _extract_hour0
 
 
 def _log_debug(msg: str, debug: bool, debug_log: Optional[list[str]]) -> None:
@@ -194,7 +191,7 @@ def _rows_from_api_payload(payloads: list[dict]) -> pd.DataFrame:
         var_name="h_str",
         value_name="generation",
     )
-    df_long["hour0"] = df_long["h_str"].apply(_extract_hour0).astype(int)
+    df_long["hour0"] = df_long["h_str"].apply(parse_hour_column).astype(int)
     df_long["datetime"] = pd.to_datetime(df_long["ymd"]) + pd.to_timedelta(df_long["hour0"], unit="h")
     df_long["generation"] = pd.to_numeric(df_long["generation"], errors="coerce").fillna(0)
     df_long["daily_total"] = pd.to_numeric(df_long["qvodgen"], errors="coerce")
@@ -311,8 +308,8 @@ async def backfill(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--start", default=None, help="백필 시작일(YYYYMMDD), 미지정 시 입력 요청")
-    parser.add_argument("--end", default=None, help="백필 종료일(YYYYMMDD), 미지정 시 입력 요청(기본: 어제)")
+    parser.add_argument("--start", default=None, help="백필 시작일(YYYYMMDD), 기본값: 20260101")
+    parser.add_argument("--end", default=None, help="백필 종료일(YYYYMMDD), 기본값: 어제")
     parser.add_argument("--gencd", default=None, help="특정 발전소 코드만")
     parser.add_argument("--hogi", default=None, type=int, help="특정 호기만")
     parser.add_argument("--sleep-sec", default=0.05, type=float, help="API 호출 간 대기(초)")
@@ -326,9 +323,7 @@ def main() -> None:
     parser.add_argument("--debug-slack", action="store_true", help="디버그 로그를 Slack으로 전송 (최대 50줄)")
     args = parser.parse_args()
 
-    load_dotenv(PROJECT_ROOT / ".env")
-
-    api_key = os.getenv("NAMBU_API_KEY")
+    api_key = get_nambu_api_key()
     db_url = resolve_db_url(args.db_url)
     if not api_key:
         raise RuntimeError("NAMBU_API_KEY가 설정되어 있지 않습니다.")
@@ -337,27 +332,23 @@ def main() -> None:
 
     default_start = "20260101"
     default_end = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
-    if not args.start:
-        raw = input(f"백필 시작일(YYYYMMDD) [{default_start}]: ").strip()
-        args.start = raw or default_start
-    if not args.end:
-        raw = input(f"백필 종료일(YYYYMMDD) [{default_end}]: ").strip()
-        args.end = raw or default_end
+    start_str = args.start or default_start
+    end_str = args.end or default_end
 
-    start = _to_date(args.start)
-    end = _to_date(args.end)
+    start = _to_date(start_str)
+    end = _to_date(end_str)
     if end < start:
         raise ValueError("end가 start보다 빠릅니다.")
 
-    print(f"DB_URL: {redact_db_url(db_url)}")
+    logger.info(f"DB_URL: {redact_db_url(db_url)}")
     engine = create_engine(db_url)
     targets = _get_targets(engine, args.gencd, args.hogi)
     if not targets:
         raise RuntimeError("대상 발전소(gencd/hogi)를 찾지 못했습니다. (nambu_generation에 기존 데이터가 있어야 합니다.)")
 
-    title = f"Nambu backfill {args.start}~{_to_yyyymmdd(end)}"
+    title = f"Nambu backfill {start_str}~{_to_yyyymmdd(end)}"
     if args.slack:
-        send_slack_message(f"[Nambu PV 백필 시작]\n- 기간: {args.start}~{_to_yyyymmdd(end)}\n- 대상: {len(targets)}개")
+        send_slack_message(f"[Nambu PV 백필 시작]\n- 기간: {start_str}~{_to_yyyymmdd(end)}\n- 대상: {len(targets)}개")
 
     try:
         debug_log: Optional[list[str]] = [] if args.debug_slack else None
@@ -365,7 +356,7 @@ def main() -> None:
             backfill(engine, api_key, targets, start, end, args.sleep_sec, args.debug, debug_log)
         )
         msg = f"{title}\n- 처리 일수: {days}\n- 적재 행수: {rows}"
-        print(msg)
+        logger.info(msg)
         if args.slack:
             send_slack_message(f"[Nambu PV 백필 완료]\n{msg}")
         if args.slack and args.debug_slack and debug_log:
@@ -373,7 +364,7 @@ def main() -> None:
             send_slack_message(f"[Nambu PV 디버그]\n{debug_msg}")
     except Exception as e:
         err = f"{title}\n- 에러: {type(e).__name__}: {e}"
-        print(err)
+        logger.error(err)
         if args.slack:
             send_slack_message(f"[Nambu PV 백필 실패]\n{err}")
         raise

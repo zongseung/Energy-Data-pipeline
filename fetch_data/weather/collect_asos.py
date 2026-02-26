@@ -1,37 +1,31 @@
 # 해당 파일의 localhost 주소는  http://localhost:4300 임.
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
 import aiohttp
 import pandas as pd
-from dotenv import load_dotenv
+
+from fetch_data.common.config import get_service_key
+from fetch_data.common.logger import get_logger
+from fetch_data.common.impute_missing import impute_missing_values
+from fetch_data.constants import WeatherAPI
+from prefect_flows.merge_to_all import merge_to_all_csv, DATA_DIR
+
+logger = get_logger(__name__)
 
 # ===== 경로 / 모듈 세팅 =====
-
 # 이 파일 경로: /app/fetch_data/weather/collect_asos.py
 # 프로젝트 루트: /app
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-# fetch_data 모듈 임포트 가능하게 상위 디렉토리 추가
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from fetch_data.common.impute_missing import impute_missing_values
-from prefect_flows.merge_to_all import merge_to_all_csv, DATA_DIR  # ★ 여기!
 
 # ===== 환경변수 / API 키 =====
-
-# .env 파일 로드 (.env는 프로젝트 루트(/app)에 있다고 가정)
-load_dotenv(PROJECT_ROOT / ".env")
-SERVICE_KEY = os.getenv("SERVICE_KEY", "")
+SERVICE_KEY = get_service_key()
 
 if not SERVICE_KEY:
-    print("[WARN] SERVICE_KEY 환경변수가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생합니다.")
+    logger.warning("[WARN] SERVICE_KEY 환경변수가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생합니다.")
 
-API_URL = "https://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList"
+API_URL = WeatherAPI.ENDPOINT
 
 # ===== 지점 목록 CSV 로드 =====
 # station_list.csv 파일 읽기에 지속적으로 문제가 발생하여, station_ids를 하드코딩합니다.
@@ -78,7 +72,7 @@ async def fetch_city(session, city_id, start, end, max_retries: int = 3) -> pd.D
                     result_msg = header.get("resultMsg", "")
 
                     if result_code != "00":
-                        print(f"{city_id}: API 에러 - 코드={result_code}, 메시지={result_msg}")
+                        logger.warning(f"{city_id}: API 에러 - 코드={result_code}, 메시지={result_msg}")
                         return pd.DataFrame()
 
                     items = (
@@ -88,25 +82,25 @@ async def fetch_city(session, city_id, start, end, max_retries: int = 3) -> pd.D
                         .get("item", [])
                     )
                     if items:
-                        print(f"{city_id}: 데이터 {len(items)}건 수집 완료")
+                        logger.info(f"{city_id}: 데이터 {len(items)}건 수집 완료")
                         return pd.DataFrame(items)
                     else:
-                        print(f"{city_id}: 데이터 없음 (날짜: {start}~{end})")
+                        logger.info(f"{city_id}: 데이터 없음 (날짜: {start}~{end})")
                         return pd.DataFrame()
                 else:
-                    print(
+                    logger.warning(
                         f"{city_id}: 요청 실패 (시도 {attempt}/{max_retries}) "
                         f"상태코드={response.status}"
                     )
         except Exception as e:
-            print(f"{city_id}: 예외 발생 (시도 {attempt}/{max_retries}) → {e}")
+            logger.error(f"{city_id}: 예외 발생 (시도 {attempt}/{max_retries}) -> {e}")
 
         # 재시도 전 5초 대기
         if attempt < max_retries:
-            print(f"{city_id}: 5초 후 재시도...")
+            logger.info(f"{city_id}: 5초 후 재시도...")
             await asyncio.sleep(5)
 
-    print(f"{city_id}: {max_retries}회 실패 — 포기")
+    logger.error(f"{city_id}: {max_retries}회 실패 — 포기")
     return pd.DataFrame()
 
 
@@ -119,7 +113,7 @@ async def select_data_async(city_list, start: str, end: str) -> pd.DataFrame:
     # 비어있는 DF가 섞여 있어도 concat 가능하게 필터링
     results = [r for r in results if not r.empty]
     if not results:
-        print("수집된 데이터가 없습니다.")
+        logger.warning("수집된 데이터가 없습니다.")
         return pd.DataFrame()
 
     return pd.concat(results, ignore_index=True)
@@ -128,24 +122,28 @@ async def select_data_async(city_list, start: str, end: str) -> pd.DataFrame:
 # ===== 스크립트 직접 실행 시 =====
 
 if __name__ == "__main__":
-    # 입력 예: 20250101,20250131
-    raw = input("날짜를 입력하세요, start, end = 'YYYYMMDD,YYYYMMDD' : ")
-    start, end = raw.split(",")
-    start = start.strip()
-    end = end.strip()
+    import argparse
+    from fetch_data.common.utils import today_kst
+
+    parser = argparse.ArgumentParser(description="ASOS 기상 데이터 수집")
+    parser.add_argument("--start", required=True, help="시작일 (YYYYMMDD)")
+    parser.add_argument("--end", required=True, help="종료일 (YYYYMMDD)")
+    args = parser.parse_args()
+    start = args.start.strip()
+    end = args.end.strip()
 
     # 메인 비동기 루프 실행
     df = asyncio.run(select_data_async(station_ids, start, end))
 
     if df.empty:
-        print("다운로드된 데이터가 없어 종료합니다.")
+        logger.warning("다운로드된 데이터가 없어 종료합니다.")
         sys.exit(0)
 
     # 원하는 컬럼만 남기기
     df = df[["tm", "hm", "ta", "stnNm"]]
 
     # 결측치 처리 (원본 컬럼명 사용: ta, hm, tm, stnNm)
-    print("\n결측치 처리 중...")
+    logger.info("결측치 처리 중...")
     result = impute_missing_values(
         df,
         columns=["ta", "hm"],
@@ -172,11 +170,11 @@ if __name__ == "__main__":
     # 일별 CSV 저장 (컨테이너 기준: /app/data/asos_YYYYMMDD_YYYYMMDD.csv)
     daily_path = OUTPUT_DIR / f"asos_{start}_{end}.csv"
     df.to_csv(daily_path, index=False, encoding="utf-8-sig")
-    print(f"\n일별 파일 저장 완료: {daily_path}")
+    logger.info(f"일별 파일 저장 완료: {daily_path}")
 
     # 누적 CSV에 머지 (컨테이너 기준: /app/data/asos_all_merged.csv)
     merged_path = merge_to_all_csv(daily_path)
-    print(f"누적 파일 갱신 완료: {merged_path}")
+    logger.info(f"누적 파일 갱신 완료: {merged_path}")
 
-    print("\n샘플 데이터:")
-    print(df.head())
+    logger.info("샘플 데이터:")
+    logger.info(str(df.head()))

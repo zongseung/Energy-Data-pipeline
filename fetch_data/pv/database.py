@@ -8,7 +8,6 @@ Tables:
 4. plant_info_namdong: 남동발전 발전소 정보 (위경도 포함)
 """
 
-import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -25,14 +24,11 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
-from dotenv import load_dotenv
 
-# 환경 변수 로드
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
+from fetch_data.common.config import get_db_url
 
-# Database URL
-DB_URL = os.getenv("LOCAL_DB_URL", "postgresql+psycopg2://pv:pv@localhost:5434/pv")
+# Database URL (환경 변수 중앙 관리 모듈에서 로드)
+DB_URL = get_db_url()
 
 Base = declarative_base()
 

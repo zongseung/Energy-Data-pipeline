@@ -3,19 +3,20 @@ import aiohttp
 import json
 import pandas as pd
 import xml.etree.ElementTree as ET
-import os
-import re
 from pathlib import Path
 from datetime import datetime, timedelta, date as date_
-from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-load_dotenv()
+from fetch_data.common.config import get_db_url, get_nambu_api_key
+from fetch_data.common.logger import get_logger
+from fetch_data.common.utils import now_kst, parse_hour_column
+from fetch_data.constants import NamebuAPI
+
+logger = get_logger(__name__)
 
 # 1. 환경 및 DB 설정
 current_file = Path(__file__).resolve()
 PROJECT_ROOT = current_file.parent.parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
 
 # plant.json에서 gencd -> plant_name 매핑 로드 (파일이 없으면 빈 dict)
 _PLANT_JSON = PROJECT_ROOT / "plant.json"
@@ -25,14 +26,14 @@ if _PLANT_JSON.exists():
         for _p in json.load(_f):
             GENCD_TO_NAME.setdefault(_p["plant_code"], _p["plant_name"])
 
-ENDPOINT = "https://apis.data.go.kr/B552520/PwrSunLightInfo/getDataService"
+ENDPOINT = NamebuAPI.ENDPOINT
 
 # lazy 초기화: import 시점이 아닌 실행 시점에 검증
 _engine = None
 
 
 def _get_api_key() -> str:
-    key = os.getenv("NAMBU_API_KEY")
+    key = get_nambu_api_key()
     if not key:
         raise RuntimeError("NAMBU_API_KEY가 설정되어 있지 않습니다.")
     return key
@@ -41,7 +42,7 @@ def _get_api_key() -> str:
 def _get_engine():
     global _engine
     if _engine is None:
-        db_url = os.getenv("DB_URL") or os.getenv("PV_DATABASE_URL") or os.getenv("LOCAL_DB_URL")
+        db_url = get_db_url()
         if not db_url:
             raise RuntimeError("DB_URL(또는 PV_DATABASE_URL/LOCAL_DB_URL)이 설정되어 있지 않습니다.")
         _engine = create_engine(db_url)
@@ -86,21 +87,20 @@ def get_active_targets(engine_):
     """
     with engine_.connect() as conn:
         df = pd.read_sql(text(query), conn)
-    
+
     active_targets = []
-    yesterday = datetime.now() - timedelta(days=1)
+    yesterday = now_kst().replace(tzinfo=None) - timedelta(days=1)
 
     for row in df.itertuples(index=False):
         gencd = str(row.gencd).strip()
         hogi = int(row.hogi)
         plant_name = getattr(row, "plant_name", None)
         last_dt = row.last_dt
-        
         # 필터링: 마지막 기록이 2025년 이전이면 발전 중단으로 간주하여 스킵
         if last_dt and last_dt.year < 2025:
-            print(f"⏩ {gencd} ({hogi}호기): {last_dt.year}년 이후 기록 없음. 수집 제외.")
+            logger.info(f"{gencd} ({hogi}호기): {last_dt.year}년 이후 기록 없음. 수집 제외.")
             continue
-            
+
         # 시작 날짜 결정:
         # - 마지막 날짜의 시간 데이터가 24개 미만이면 그 날짜부터 재수집(해당 일자 데이터 replace)
         # - 아니면 다음 날부터 수집
@@ -112,8 +112,8 @@ def get_active_targets(engine_):
             else:
                 start_dt = datetime.combine(last_day + timedelta(days=1), datetime.min.time())
         else:
-            start_dt = datetime.now() - timedelta(days=365)
-        
+            start_dt = now_kst().replace(tzinfo=None) - timedelta(days=365)
+
         if start_dt.date() <= yesterday.date():
             active_targets.append({
                 "gencd": gencd,
@@ -121,8 +121,8 @@ def get_active_targets(engine_):
                 "plant_name": plant_name,
                 "start_dt": start_dt,
             })
-            
-    print(f"✅ 총 {len(active_targets)}개 발전소가 활성 상태이며 수집 대상입니다.")
+
+    logger.info(f"총 {len(active_targets)}개 발전소가 활성 상태이며 수집 대상입니다.")
     return active_targets
 
 # --- [Task 2: API 데이터 수집 및 전처리] ---
@@ -139,15 +139,13 @@ async def fetch_api_data(session, date_str, gencd, hogi):
             root = ET.fromstring(await response.text())
             items = root.find('.//items')
             return {child.tag: child.text for child in items} if items is not None else None
-    except Exception:
+    except Exception as e:
+        logger.error(f"API 호출 실패: {e}")
         return None
-
-from fetch_data.common.date_utils import extract_hour0 as _extract_hour0
-
 
 async def collect_and_save(engine_, targets):
     """활성 발전소들에 대해 API 데이터를 수집하고 전처리하여 DB에 저장"""
-    yesterday = datetime.now() - timedelta(days=1)
+    yesterday = now_kst().replace(tzinfo=None) - timedelta(days=1)
     total_rows = 0
 
     async with aiohttp.ClientSession() as session:
@@ -155,8 +153,8 @@ async def collect_and_save(engine_, targets):
             date_list = pd.date_range(start=target["start_dt"].date(), end=yesterday.date()).strftime("%Y%m%d").tolist()
             if not date_list: continue
 
-            print(f"📡 {target.get('plant_name') or target['gencd']} ({target['hogi']}호기) {len(date_list)}일분 수집 중...")
-            
+            logger.info(f"{target.get('plant_name') or target['gencd']} ({target['hogi']}호기) {len(date_list)}일분 수집 중...")
+
             raw_data = []
             for d_str in date_list:
                 data = await fetch_api_data(session, d_str, target["gencd"], target["hogi"])
@@ -171,8 +169,8 @@ async def collect_and_save(engine_, targets):
                 v_vars = [c for c in df_raw.columns if c.startswith('qhorgen')]
                 df_long = df_raw.melt(id_vars=["ymd", "hogi", "gencd", "ipptnm", "qvodgen", "qvodavg", "qvodmax", "qvodmin"], value_vars=v_vars,
                                       var_name='h_str', value_name='generation')
-                
-                df_long["hour0"] = df_long["h_str"].apply(_extract_hour0).astype(int)
+
+                df_long["hour0"] = df_long["h_str"].apply(parse_hour_column).astype(int)
                 df_long["datetime"] = pd.to_datetime(df_long["ymd"]) + pd.to_timedelta(df_long["hour0"], unit="h")
                 df_long["generation"] = pd.to_numeric(df_long["generation"], errors="coerce").fillna(0)
                 df_long["daily_total"] = pd.to_numeric(df_long["qvodgen"], errors="coerce")
@@ -224,9 +222,9 @@ async def collect_and_save(engine_, targets):
                     )
 
                     final_df.to_sql("nambu_generation", con=conn, if_exists="append", index=False)
-                
+
                 total_rows += len(final_df)
-                print(f"   ㄴ ✅ {len(final_df)}행 저장 완료")
+                logger.info(f"   -> {len(final_df)}행 저장 완료")
 
     return total_rows
 
@@ -239,7 +237,7 @@ def solar_automation_flow():
     if targets:
         asyncio.run(collect_and_save(engine, targets))
     else:
-        print("☀️ 모든 발전소가 최신 상태입니다.")
+        logger.info("모든 발전소가 최신 상태입니다.")
 
 if __name__ == "__main__":
     solar_automation_flow()

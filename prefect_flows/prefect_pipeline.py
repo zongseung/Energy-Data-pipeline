@@ -5,7 +5,6 @@ Prefect ETL Pipeline
 """
 
 import sys
-import os
 from pathlib import Path
 from datetime import datetime, timedelta
 

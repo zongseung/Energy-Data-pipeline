@@ -51,8 +51,8 @@ os.environ.setdefault("PREFECT_API_URL", PREFECT_API_URL)
 # 공통 인프라 설정
 # =======================================================================
 
-def get_infra_overrides():
-    """Docker 인프라 설정을 반환합니다."""
+def get_job_variables():
+    """Docker work pool job variables를 반환합니다."""
     return {
         "image": "pv-pipeline:latest",
         "image_pull_policy": "Never",
@@ -99,36 +99,25 @@ async def wait_for_api(timeout: int = 120) -> None:
 
 
 async def ensure_work_pool(pool_name: str = "pv-pool") -> None:
-    """Docker 타입 work pool이 없으면 생성합니다."""
+    """Docker 타입 work pool을 생성하거나 template을 업데이트합니다."""
+    from prefect_docker.worker import DockerWorker
+
+    # 표준 Docker worker template + 기본값 설정
+    base_job_template = DockerWorker.get_default_base_job_template()
+    base_job_template["variables"]["properties"]["image"]["default"] = "pv-pipeline:latest"
+    base_job_template["variables"]["properties"]["image_pull_policy"]["default"] = "Never"
+
     async with get_client() as client:
         try:
             pool = await client.read_work_pool(work_pool_name=pool_name)
-            print(f"Work pool '{pool_name}' 이미 존재 (타입: {pool.type})")
+            print(f"Work pool '{pool_name}' 이미 존재 (타입: {pool.type}) - template 업데이트 중...")
+            # 기존 풀도 항상 template 업데이트 (image_pull_policy: Never 보장)
+            await client._client.patch(
+                f"/work_pools/{pool_name}",
+                json={"base_job_template": base_job_template},
+            )
+            print(f"Work pool '{pool_name}' template 업데이트 완료")
         except Exception:
-            base_job_template = {
-                "job_configuration": {
-                    "image": "pv-pipeline:latest",
-                    "env": {
-                        "PREFECT_API_URL": PREFECT_API_URL,
-                        "SERVICE_KEY": SERVICE_KEY,
-                        "PV_DATABASE_URL": PV_DATABASE_URL,
-                        "TZ": "Asia/Seoul",
-                    },
-                    "networks": [DOCKER_NETWORK],
-                },
-                "variables": {
-                    "required": ["image"],
-                    "properties": {
-                        "image": {
-                            "title": "Image",
-                            "description": "Docker image to use",
-                            "type": "string",
-                            "default": "pv-pipeline:latest",
-                        }
-                    },
-                },
-            }
-
             await client.create_work_pool(
                 WorkPoolCreate(
                     name=pool_name,
@@ -165,7 +154,7 @@ async def deploy_weather_flow() -> None:
         ],
         tags=["weather", "daily"],
         description="매일 오전 9시에 전날 기상 데이터를 수집, 처리, 저장",
-        infra_overrides=get_infra_overrides(),
+        job_variables=get_job_variables(),
     )
 
     await deployment.apply()
@@ -188,7 +177,7 @@ async def deploy_full_etl_flow() -> None:
         schedules=[],  # 수동 실행만
         tags=["etl", "full", "manual"],
         description="기상+PV 전체 ETL (수동 실행)",
-        infra_overrides=get_infra_overrides(),
+        job_variables=get_job_variables(),
     )
 
     await deployment.apply()
@@ -216,7 +205,7 @@ async def deploy_namdong_flow() -> None:
         ],
         tags=["pv", "namdong", "monthly"],
         description="매월 10일 오전 10시에 전월 남동발전 PV 데이터를 수집/백필",
-        infra_overrides=get_infra_overrides(),
+        job_variables=get_job_variables(),
     )
 
     await deployment.apply()
@@ -244,7 +233,7 @@ async def deploy_nambu_flow() -> None:
         ],
         tags=["pv", "nambu", "daily"],
         description="매일 오전 9시 30분에 남부발전 PV 데이터를 수집/백필",
-        infra_overrides=get_infra_overrides(),
+        job_variables=get_job_variables(),
     )
 
     await deployment.apply()
@@ -272,7 +261,7 @@ async def deploy_namdong_wind_flow() -> None:
         ],
         tags=["wind", "namdong", "monthly"],
         description="매월 10일 오전 11시에 전월 남동발전 풍력 데이터를 수집",
-        infra_overrides=get_infra_overrides(),
+        job_variables=get_job_variables(),
     )
 
     await deployment.apply()

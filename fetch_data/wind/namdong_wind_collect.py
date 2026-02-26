@@ -15,14 +15,16 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 import requests
-from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.logger import get_logger
+from fetch_data.common.utils import now_kst
 from notify.slack_notifier import send_slack_message
 
+logger = get_logger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-load_dotenv(PROJECT_ROOT / ".env")
 
 # API 설정
 API_BASE = "https://apis.data.go.kr/B551893/wind-power-by-hour/list"
@@ -73,7 +75,7 @@ def fetch_namdong_wind_api(
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            print(f"[API 오류] page={page}: {e}")
+            logger.error(f"[API 오류] page={page}: {e}")
             break
 
         # API 응답에 'reponse' (오타) 또는 'response' 키 사용
@@ -81,11 +83,11 @@ def fetch_namdong_wind_api(
         content = body.get("content", [])
 
         if not content:
-            print(f"[API] page={page}: 데이터 없음 -> 수집 종료")
+            logger.info(f"[API] page={page}: 데이터 없음 -> 수집 종료")
             break
 
         all_records.extend(content)
-        print(f"[API] page={page}: {len(content)}건 수집 (누적 {len(all_records)}건)")
+        logger.info(f"[API] page={page}: {len(content)}건 수집 (누적 {len(all_records)}건)")
         page += 1
         time.sleep(sleep_sec)
 
@@ -178,7 +180,7 @@ def load_namdong_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
     df["plant_name"] = df["plant_name"].astype(str).str.strip()
 
     result = df[["timestamp", "plant_name", "generation"]].dropna(subset=["timestamp"])
-    print(f"[CSV] 남동발전 풍력 CSV 로드: {len(result)}행")
+    logger.info(f"[CSV] 남동발전 풍력 CSV 로드: {len(result)}행")
     return result.reset_index(drop=True)
 
 
@@ -192,7 +194,7 @@ def upsert_wind_namdong(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
     ON CONFLICT (timestamp, plant_name) DO UPDATE SET generation = EXCLUDED.generation
     """
     if df.empty:
-        print("[DB] 적재할 데이터가 없습니다.")
+        logger.info("[DB] 적재할 데이터가 없습니다.")
         return 0
 
     resolved_url = resolve_db_url(db_url)
@@ -217,9 +219,9 @@ def upsert_wind_namdong(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
             batch = records[i : i + batch_size]
             conn.execute(upsert_sql, batch)
             total += len(batch)
-            print(f"[DB] wind_namdong upsert: {total}/{len(records)}")
+            logger.info(f"[DB] wind_namdong upsert: {total}/{len(records)}")
 
-    print(f"[DB] wind_namdong 적재 완료: {total}행")
+    logger.info(f"[DB] wind_namdong 적재 완료: {total}행")
     return total
 
 
@@ -246,10 +248,10 @@ def run_namdong_wind_collection(
     Returns:
         적재 행 수
     """
-    print(f"\n{'='*60}")
-    print("남동발전 풍력 수집 시작")
-    print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}\n")
+    logger.info("=" * 60)
+    logger.info("남동발전 풍력 수집 시작")
+    logger.info(f"실행 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
 
     try:
         if target_start and target_end:
@@ -260,12 +262,12 @@ def run_namdong_wind_collection(
             start_str = prev_start.strftime("%Y%m%d")
             end_str = prev_end.strftime("%Y%m%d")
 
-        print(f"수집 기간: {start_str} ~ {end_str}")
+        logger.info(f"수집 기간: {start_str} ~ {end_str}")
 
         # API 수집
         df_wide = fetch_namdong_wind_api(start_str, end_str)
         if df_wide.empty:
-            print("API에서 수집된 데이터가 없습니다.")
+            logger.info("API에서 수집된 데이터가 없습니다.")
             send_slack_message(
                 f"[Namdong Wind 완료]\n"
                 f"- 기간: {start_str}~{end_str}\n"
@@ -275,7 +277,7 @@ def run_namdong_wind_collection(
 
         # wide -> long 변환
         df_long = transform_wide_to_long(df_wide)
-        print(f"변환 완료: {len(df_long)}행")
+        logger.info(f"변환 완료: {len(df_long)}행")
 
         # DB 적재
         inserted = upsert_wind_namdong(df_long, db_url)
@@ -292,7 +294,7 @@ def run_namdong_wind_collection(
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
-        print(f"\n수집 중 에러 발생: {error_msg}")
+        logger.error(f"수집 중 에러 발생: {error_msg}")
         send_slack_message(f"[Namdong Wind 실패]\n- 에러: {error_msg}")
         raise
 
