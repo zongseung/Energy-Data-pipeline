@@ -9,11 +9,13 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "aiohttp>=3.13.2",
-    "asyncpg>=0.29.0",
+    "docker>=7.1.0",
+    "git-filter-repo>=2.47.0",
     "ipykernel>=7.1.0",
     "pandas>=2.3.3",
     "polars>=1.0.0",
     "prefect>=2.14.0,<3.0.0",
+    "prefect-docker>=0.5.0",
     "pyarrow>=15.0.0",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.5",

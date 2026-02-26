@@ -1,3 +1,9 @@
+# ============================================================
+# 주의: 이 파일은 현재 미사용 상태입니다.
+# 실제 운영 스택: docker/docker-compose.yml
+# 실행: make up  또는  docker compose -f docker/docker-compose.yml up -d
+# ============================================================
+
 version: '3.8'
 
 services:
@@ -6,10 +12,9 @@ services:
     container_name: pv-main-db
     restart: always
     environment:
-      # .env 파일에 정의된 변수를 사용하도록 수정
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASS}
-      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_USER=${DB_USER:-pv}
+      - POSTGRES_PASSWORD=${DB_PASS:-pv}
+      - POSTGRES_DB=${DB_NAME:-pv}
     ports:
       - "5432:5432"
     volumes:

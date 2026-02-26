@@ -1,3 +1,8 @@
+# ============================================================
+# 주의: 이 파일은 현재 미사용 상태입니다.
+# 실제 운영 이미지: docker/Dockerfile
+# 실행: make up  또는  docker compose -f docker/docker-compose.yml up -d
+# ============================================================
 FROM python:3.11-slim
 
 WORKDIR /app
