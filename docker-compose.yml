@@ -18,7 +18,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - /mnt/iscsi-renewable/postgres/pv-main-data:/var/lib/postgresql/data
     networks:
       - pv-net
 
@@ -48,6 +48,7 @@ services:
       - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
       - PREFECT_API_URL=${PREFECT_API_URL}
       - NAMDONG_WIND_KEY=${NAMDONG_WIND_KEY}
+      - SMP_LEGACY_DB_URL=${SMP_LEGACY_DB_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -64,6 +65,7 @@ services:
       - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
       - PREFECT_API_URL=${PREFECT_API_URL}
       - NAMDONG_WIND_KEY=${NAMDONG_WIND_KEY}
+      - SMP_LEGACY_DB_URL=${SMP_LEGACY_DB_URL:-}
     command: ["uv", "run", "python", "/app/prefect_flows/deploy.py"]
     depends_on:
       - pv-db

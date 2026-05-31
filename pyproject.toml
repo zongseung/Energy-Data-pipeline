@@ -25,6 +25,8 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "tqdm>=4.67.1",
     "workalendar>=17.0.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
 ]
 
 [dependency-groups]

@@ -1,6 +1,6 @@
 # Energy-Data-pipeline
 
-남부발전/남동발전 태양광(PV) 발전 데이터 및 기상 데이터를 수집, 전처리하여 PostgreSQL에 저장하고 Grafana 지도 시각화를 제공하는 파이프라인입니다.
+남부발전/남동발전 태양광(PV)·풍력 발전 데이터, 기상 데이터, 그리고 **SMP(계통한계가격)** 데이터를 수집, 전처리하여 PostgreSQL에 저장하고 Grafana 지도 시각화를 제공하는 파이프라인입니다.
 
 ## 시스템 아키텍처
 
@@ -74,6 +74,29 @@
                                                   pv_data/ (NAS) → PostgreSQL
 ```
 
+### 4. SMP (계통한계가격) 데이터
+한국전력거래소(KPX) 및 EPSIS(전력통계정보시스템)에서 SMP/BLMP를 수집합니다.
+육지/제주 구분이며, 시간 표기는 KPX의 hour-ending(1~24시) 규약을 구간시작(0~23시)으로 변환해 적재합니다.
+2010년 이전(제주시장 개시 전)은 단일가격이라 `unified`로 분류합니다.
+
+```
+KPX smpInland.es / smpJeju.es ─┐ (시간별, GET→CSRF→POST 스크래핑)
+                                ├→ smp_scraper.py → smp_collect.py ──→ smp_hourly + smp_weighted_avg(daily)
+KPX bidSmpLfdDataRt.es ─────────┤ (제주 실시간 15분, 96구간/일)
+                                └→ smp_realtime.py ─────────────────→ smp_realtime_jeju
+EPSIS selectEkmaSmpSmp.ajax ───→ smp_aggregate.py ─────────────────→ smp_weighted_avg(월/연 SMP·BLMP)
+                                                  ↓
+                                  PostgreSQL + smp_data/*.csv (DB 적재 시 자동 미러)
+```
+
+- **smp_collect.py**: 하루전시장 시간별 SMP(육지/제주). 한 페이지에 최근 7일창을 주므로 증분 수집. 27열(1~24시+최대/최소/가중평균) 중 가중평균을 일별 가중평균으로 함께 적재.
+- **smp_aggregate.py**: EPSIS 공식 월별/연도별 가중평균(SMP=육지/제주/통합, BLMP=2001~2006).
+- **smp_realtime.py**: 제주 실시간시장 15분 단위(하루 96구간). `--backfill`로 2024-03~ 과거 일괄 수집.
+- **smp_backfill.py**: 과거 CSV 백필 (`--mode master`/`wide`/`epsis-daily`).
+- **legacy_sync.py**: 공통 DB → 개인 DB(`SMP_LEGACY_DB_URL`) 백업 동기화(미설정 시 skip).
+
+> **CSV 미러**: 모든 SMP DB 적재(upsert) 시 해당 테이블 전체가 `smp_data/<table>.csv`로 자동 갱신되어 DB와 항상 일치합니다(개인 DB 동기화 제외).
+
 ## 프로젝트 구조
 
 ```
@@ -92,23 +115,34 @@ Energy-Data-pipeline/
 │   │   └── impute_missing.py    # 결측치 처리
 │   ├── weather/                 # 기상 데이터 수집
 │   │   └── collect_asos.py      # ASOS API 수집
-│   └── pv/                      # PV 데이터 수집
-│       ├── nambu_probe_date.py      # 남부발전 시작일 탐색
-│       ├── nambu_bulk_sync.py       # 남부발전 일괄 수집
-│       ├── nambu_merge_pv_data.py   # 남부발전 전처리
-│       ├── daily_pv_automation.py   # 일별 자동화
-│       ├── namdong_collect_pv.py    # 남동발전 CSV 수집
-│       ├── namdong_merge_pv_data.py # 남동발전 전처리
-│       └── database.py              # PV DB 모델
+│   ├── pv/                      # PV 데이터 수집
+│   │   ├── nambu_probe_date.py      # 남부발전 시작일 탐색
+│   │   ├── nambu_bulk_sync.py       # 남부발전 일괄 수집
+│   │   ├── nambu_merge_pv_data.py   # 남부발전 전처리
+│   │   ├── daily_pv_automation.py   # 일별 자동화
+│   │   ├── namdong_collect_pv.py    # 남동발전 CSV 수집
+│   │   ├── namdong_merge_pv_data.py # 남동발전 전처리
+│   │   └── database.py              # PV DB 모델
+│   └── smp/                     # SMP(계통한계가격) 수집
+│       ├── smp_scraper.py           # KPX 스크래핑(GET/CSRF/POST/표 파싱)
+│       ├── smp_collect.py           # 시간별 SMP + 일별 가중평균
+│       ├── smp_aggregate.py         # EPSIS 월/연 가중평균(SMP·BLMP)
+│       ├── smp_realtime.py          # 제주 실시간 15분(96구간/일)
+│       ├── smp_backfill.py          # 과거 CSV 백필(master/wide/epsis-daily)
+│       ├── legacy_sync.py           # 공통 DB → 개인 DB 백업
+│       ├── _common.py               # upsert + CSV 미러 공통 헬퍼
+│       └── database.py              # SMP DB 모델(3개 테이블)
 │
 ├── prefect_flows/
 │   ├── deploy.py                # 플로우 배포 스크립트
 │   ├── prefect_pipeline.py      # 메인 플로우 정의
+│   ├── smp_flow.py              # SMP 4개 플로우 정의
 │   └── merge_to_all.py          # CSV 병합 유틸
 │
 ├── pv_data/                     # 남동발전 데이터 (NAS mount)
 ├── pv_data_raw/                 # 원본 수집 데이터
 ├── pv_data_processed/           # 전처리된 데이터
+├── smp_data/                    # SMP CSV 미러 (DB 적재 시 자동 갱신)
 │
 ├── initial_db_ingestion.py      # DB 초기 적재
 ├── .env                         # 환경변수 (API 키 등)
@@ -201,6 +235,17 @@ sequenceDiagram
 - `namdong_generation`: 남동발전 시간별 발전량(스키마는 환경에 따라 다를 수 있음)
 - `nambu_plants`, `namdong_plants`: 발전소 메타(선택/환경에 따라)
 
+### SMP 테이블 (3개)
+모든 가격 단위는 원/kWh, 시각은 KST·구간시작 기준. `region`은 `land`/`jeju`/`unified`(2010년 이전 단일가격).
+
+| 테이블 | 설명 | 컬럼 |
+|--------|------|------|
+| `smp_hourly` | 하루전시장 시간별 SMP | `timestamp`, `region`, `price` · unique(timestamp, region) |
+| `smp_weighted_avg` | 일/월/연 가중평균(SMP·BLMP) | `period_type`(daily/monthly/yearly), `period`, `region`, `price_type`(smp/blmp), `weighted_avg` · unique(period_type, period, region, price_type) |
+| `smp_realtime_jeju` | 제주 실시간시장 15분 SMP | `timestamp`(15분), `region`, `price`(음수 가능), `is_confirmed`(D+1 확정) · unique(timestamp, region) |
+
+각 테이블은 `smp_data/<table>.csv`로 자동 미러링됩니다.
+
 ## Prefect Flows & 스케줄
 
 Prefect deployment 등록은 `pv-deploy`가 수행합니다.
@@ -210,7 +255,28 @@ Prefect deployment 등록은 `pv-deploy`가 수행합니다.
 - `daily-weather-collection` (09:00, KST) — 기상 CSV 수집 (옵션)
 - `daily-nambu-pv-collection` (09:30, KST) — 남부발전 PV 적재 + Slack 알림
 - `monthly-namdong-pv-collection` (매월 10일 10:00, KST) — 전월 남동발전 PV 적재 + Slack 알림
+- `monthly-namdong-wind-collection` (매월 10일 11:00, KST) — 전월 남동발전 풍력 적재
+- `daily-smp-collection` (06:00, KST) — SMP 시간별 + 일별 가중평균
+- `monthly-smp-aggregate` (매월 2일 07:00, KST) — SMP 월/연 가중평균(EPSIS)
+- `daily-smp-realtime-jeju` (19:00, KST) — 제주 실시간 15분 SMP
+- `weekly-smp-legacy-sync` (매주 월 07:00, KST) — SMP 개인 DB 백업
 - `full-etl` — 수동 실행(필요 시)
+
+### SMP 수동 수집/백필
+```bash
+# 시간별(최근 7일창 증분) + 일별 가중평균
+uv run python -m fetch_data.smp.smp_collect
+
+# 월/연 가중평균(EPSIS, SMP·BLMP)
+uv run python -m fetch_data.smp.smp_aggregate --period all
+
+# 제주 실시간 15분: 최근 / 과거 전체(2024-03~)
+uv run python -m fetch_data.smp.smp_realtime
+uv run python -m fetch_data.smp.smp_realtime --backfill
+
+# 과거 CSV 백필 (master=long-form / wide=27열 / epsis-daily=가중평균컬럼)
+uv run python -m fetch_data.smp.smp_backfill --mode epsis-daily --file land.csv --region land
+```
 
 ## 수동 백필 (남부발전 2026~)
 

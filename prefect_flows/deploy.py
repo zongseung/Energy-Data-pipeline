@@ -44,6 +44,9 @@ NAMBU_API_KEY = os.getenv("NAMBU_API_KEY", "")
 if not NAMBU_API_KEY:
     print("[WARN] NAMBU_API_KEY가 설정되지 않았습니다. 남부발전 PV 수집 시 오류가 발생할 수 있습니다.")
 
+# SMP 개인 DB 백업용(선택). 미설정 시 weekly 백업 flow가 자동 skip.
+SMP_LEGACY_DB_URL = os.getenv("SMP_LEGACY_DB_URL", "")
+
 os.environ.setdefault("PREFECT_API_URL", PREFECT_API_URL)
 
 
@@ -71,6 +74,7 @@ def get_job_variables():
             "NAMDONG_PAGE_INDEX": NAMDONG_PAGE_INDEX,
             "NAMDONG_OUTPUT_DIR": NAMDONG_OUTPUT_DIR,
             "NAMBU_API_KEY": NAMBU_API_KEY,
+            "SMP_LEGACY_DB_URL": SMP_LEGACY_DB_URL,
             "TZ": "Asia/Seoul",
         },
         "networks": [DOCKER_NETWORK],
@@ -268,6 +272,90 @@ async def deploy_namdong_wind_flow() -> None:
     print("Deployment 완료: 'monthly-namdong-wind-collection' (매월 10일 11:00)")
 
 
+async def deploy_smp_flow() -> None:
+    """하루전시장 시간별 SMP 수집 플로우 배포"""
+    flow = import_object("prefect_flows.smp_flow.daily_smp_collection_flow")
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="daily-smp-collection",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/smp_flow.py:daily_smp_collection_flow",
+        parameters={},
+        schedules=[CronSchedule(cron="0 6 * * *", timezone="Asia/Seoul")],  # 매일 06:00
+        tags=["smp", "daily"],
+        description="매일 06:00에 하루전시장 시간별 SMP(육지/제주) + 일별 가중평균 수집",
+        job_variables=get_job_variables(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'daily-smp-collection' (매일 06:00)")
+
+
+async def deploy_smp_aggregate_flow() -> None:
+    """월/연 가중평균 SMP 수집 플로우 배포"""
+    flow = import_object("prefect_flows.smp_flow.monthly_smp_aggregate_flow")
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="monthly-smp-aggregate",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/smp_flow.py:monthly_smp_aggregate_flow",
+        parameters={},
+        schedules=[CronSchedule(cron="0 7 2 * *", timezone="Asia/Seoul")],  # 매월 2일 07:00
+        tags=["smp", "aggregate", "monthly"],
+        description="매월 2일 07:00에 월별/연도별 공식 가중평균 SMP 수집",
+        job_variables=get_job_variables(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'monthly-smp-aggregate' (매월 2일 07:00)")
+
+
+async def deploy_smp_realtime_jeju_flow() -> None:
+    """제주 실시간 15분 SMP 수집 플로우 배포"""
+    flow = import_object("prefect_flows.smp_flow.daily_smp_realtime_jeju_flow")
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="daily-smp-realtime-jeju",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/smp_flow.py:daily_smp_realtime_jeju_flow",
+        parameters={},
+        schedules=[CronSchedule(cron="0 19 * * *", timezone="Asia/Seoul")],  # 매일 19:00
+        tags=["smp", "realtime", "jeju", "daily"],
+        description="매일 19:00에 제주 실시간시장 15분 SMP(전일 확정) 수집",
+        job_variables=get_job_variables(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'daily-smp-realtime-jeju' (매일 19:00)")
+
+
+async def deploy_smp_legacy_sync_flow() -> None:
+    """SMP 개인 DB 백업 동기화 플로우 배포"""
+    flow = import_object("prefect_flows.smp_flow.weekly_smp_legacy_sync_flow")
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="weekly-smp-legacy-sync",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/smp_flow.py:weekly_smp_legacy_sync_flow",
+        parameters={},
+        schedules=[CronSchedule(cron="0 7 * * 1", timezone="Asia/Seoul")],  # 매주 월 07:00
+        tags=["smp", "backup", "weekly"],
+        description="매주 월요일 07:00에 공통 DB -> 개인 DB(SMP_LEGACY_DB_URL) 백업 동기화",
+        job_variables=get_job_variables(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'weekly-smp-legacy-sync' (매주 월 07:00)")
+
+
 # =======================================================================
 # 메인 실행
 # =======================================================================
@@ -290,6 +378,10 @@ async def create_all_deployments() -> None:
     await deploy_namdong_flow()
     await deploy_nambu_flow()
     await deploy_namdong_wind_flow()
+    await deploy_smp_flow()
+    await deploy_smp_aggregate_flow()
+    await deploy_smp_realtime_jeju_flow()
+    await deploy_smp_legacy_sync_flow()
 
     print("\n" + "=" * 60)
     print("모든 Deployment 완료!")
@@ -297,11 +389,15 @@ async def create_all_deployments() -> None:
 
     # 배포 요약
     print("배포된 Flow:")
-    print("  1. daily-weather-collection       - 매일 09:00 (기상 데이터)")
-    print("  2. full-etl                       - 수동 실행 (전체 ETL)")
-    print("  3. monthly-namdong-pv-collection  - 매월 10일 10:00 (남동발전 PV)")
-    print("  4. daily-nambu-pv-collection      - 매일 09:30 (남부발전 PV)")
+    print("  1. daily-weather-collection        - 매일 09:00 (기상 데이터)")
+    print("  2. full-etl                        - 수동 실행 (전체 ETL)")
+    print("  3. monthly-namdong-pv-collection   - 매월 10일 10:00 (남동발전 PV)")
+    print("  4. daily-nambu-pv-collection       - 매일 09:30 (남부발전 PV)")
     print("  5. monthly-namdong-wind-collection - 매월 10일 11:00 (남동발전 풍력)")
+    print("  6. daily-smp-collection            - 매일 06:00 (SMP 시간별+일별)")
+    print("  7. monthly-smp-aggregate           - 매월 2일 07:00 (SMP 월/연 가중평균)")
+    print("  8. daily-smp-realtime-jeju         - 매일 19:00 (제주 실시간 15분)")
+    print("  9. weekly-smp-legacy-sync          - 매주 월 07:00 (개인 DB 백업)")
     print("")
 
 
