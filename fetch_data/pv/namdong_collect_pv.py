@@ -14,6 +14,7 @@ from fetch_data.common.db_utils import resolve_db_url
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import now_kst
 from fetch_data.constants import NamdongAPI
+from fetch_data.gen.namdong_gen_collect import get_koen_ssl_context
 from fetch_data.pv.namdong_merge_pv_data import read_csv_flexible, hour_columns, extract_hour
 from notify.slack_notifier import send_slack_message
 
@@ -203,7 +204,11 @@ async def download_monthly_csvs(
 
     saved_files: List[Path] = []
 
-    async with aiohttp.ClientSession(headers={"User-Agent": headers_common["User-Agent"]}) as session:
+    # koenergy.kr는 중간 인증서를 누락(불완전 체인) → 보충한 SSL 컨텍스트 사용
+    connector = aiohttp.TCPConnector(ssl=get_koen_ssl_context())
+    async with aiohttp.ClientSession(
+        headers={"User-Agent": headers_common["User-Agent"]}, connector=connector
+    ) as session:
         for idx, (ds, de) in enumerate(month_ranges, start=1):
             main_url = build_main_url(page_index, org_no, hoki_s, hoki_e, ds, de)
 
