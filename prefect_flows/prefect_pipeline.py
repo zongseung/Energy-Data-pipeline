@@ -14,10 +14,10 @@ import pandas as pd
 # 상위 디렉토리를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fetch_data.weather.collect_asos import select_data_async, station_ids
+from fetch_data.weather.asos_collect import select_data_async, station_ids
 from fetch_data.common.impute_missing import impute_missing_values
 from prefect_flows.merge_to_all import merge_to_all_csv
-from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure, notify_slack_rich
+from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
 
 # ==============================

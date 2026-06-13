@@ -7,7 +7,6 @@ Tables:
 3. wind_hangyoung: 한경풍력 발전 데이터
 """
 
-import os
 from pathlib import Path
 
 from sqlalchemy import (
@@ -17,17 +16,18 @@ from sqlalchemy import (
     String,
     DateTime,
     Index,
-    create_engine,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base
 from dotenv import load_dotenv
+
+from fetch_data.common.logger import get_logger
+from fetch_data.common.db_base import get_engine, get_session
+
+logger = get_logger(__name__)
 
 # 환경 변수 로드
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
-
-# Database URL: 컨테이너에서는 DB_URL, 로컬에서는 LOCAL_DB_URL 사용
-DB_URL = os.getenv("DB_URL") or os.getenv("LOCAL_DB_URL", "postgresql+psycopg2://pv:pv@localhost:5434/pv")
 
 Base = declarative_base()
 
@@ -96,38 +96,23 @@ class WindHangyoung(Base):
 # Engine & Session
 # ========================================
 
-_engine = None
-
-
-def get_engine():
-    """Get or create SQLAlchemy engine."""
-    global _engine
-    if _engine is None:
-        _engine = create_engine(DB_URL, echo=False)
-    return _engine
-
-
-def get_session():
-    """Get database session."""
-    engine = get_engine()
-    Session = sessionmaker(bind=engine)
-    return Session()
+# 엔진/세션은 fetch_data.common.db_base 사용 (get_engine, get_session)
 
 
 def init_db():
     """Initialize wind database tables."""
     engine = get_engine()
     Base.metadata.create_all(engine)
-    print("[DB] 풍력 테이블 생성 완료")
+    logger.info("풍력 테이블 생성 완료")
 
 
 def drop_all_tables():
     """Drop all wind tables (use with caution)."""
     engine = get_engine()
     Base.metadata.drop_all(engine)
-    print("[DB] 풍력 테이블 삭제 완료")
+    logger.info("풍력 테이블 삭제 완료")
 
 
 if __name__ == "__main__":
-    print("Wind Database 초기화")
+    logger.info("Wind Database 초기화")
     init_db()

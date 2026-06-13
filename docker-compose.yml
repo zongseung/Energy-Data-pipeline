@@ -18,7 +18,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - /mnt/iscsi-renewable/postgres/pv-main-data:/var/lib/postgresql/data
     networks:
       - pv-net
 
@@ -39,22 +39,8 @@ services:
     networks:
       - pv-net
 
-  pv-worker:
-    build: .
-    container_name: pv-worker
-    restart: always
-    env_file: .env
-    environment:
-      - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
-      - PREFECT_API_URL=${PREFECT_API_URL}
-      - NAMDONG_WIND_KEY=${NAMDONG_WIND_KEY}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      - pv-db
-    networks:
-      - pv-net
-      - prefect-network
+  # pv-worker 제거됨 (2026-06-13): docker.sock 미마운트로 pv-pool flow run을 크래시시키던
+  # 고장난 중복 워커였음. 실제 워커는 docker/docker-compose.yml 의 pv-pipeline-worker 사용.
   pv-deploy:
     build: .
     container_name: pv-deploy
@@ -64,6 +50,7 @@ services:
       - DB_URL=postgresql+psycopg2://${DB_USER}:${DB_PASS}@pv-db:5432/${DB_NAME}
       - PREFECT_API_URL=${PREFECT_API_URL}
       - NAMDONG_WIND_KEY=${NAMDONG_WIND_KEY}
+      - SMP_LEGACY_DB_URL=${SMP_LEGACY_DB_URL:-}
     command: ["uv", "run", "python", "/app/prefect_flows/deploy.py"]
     depends_on:
       - pv-db
@@ -93,4 +80,4 @@ networks:
     driver: bridge
   prefect-network:
     external: true
-    name: weather-pipeline_prefect-new
+    name: pv-pipeline-network

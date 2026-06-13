@@ -127,8 +127,10 @@ def transform_wide_to_long(df_wide: pd.DataFrame) -> pd.DataFrame:
     # timestamp 생성: hour 24 -> 다음 날 00시
     hour_num = df_long["hour_num"]
     df_long["temp_hour"] = np.where(hour_num == 24, "00", hour_num.map("{:02d}".format))
+    # API가 dgenYmd를 'YYYY-MM-DD'로 반환(과거 'YYYYMMDD'와 혼용) → 대시 제거로 정규화
+    ymd = df_long["dgenYmd"].astype(str).str.replace("-", "", regex=False)
     df_long["timestamp"] = pd.to_datetime(
-        df_long["dgenYmd"].astype(str) + " " + df_long["temp_hour"] + ":00:00",
+        ymd + " " + df_long["temp_hour"] + ":00:00",
         format="%Y%m%d %H:%M:%S",
         errors="coerce",
     )
@@ -167,7 +169,7 @@ def load_namdong_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
         DataFrame[timestamp, plant_name, generation]
     """
     if csv_path is None:
-        csv_path = PROJECT_ROOT / "nandong_wind_power.csv"
+        csv_path = PROJECT_ROOT / "inputs" / "wind" / "nandong_wind_power.csv"
     else:
         csv_path = Path(csv_path)
 

@@ -28,19 +28,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENDPOINT = NamebuAPI.ENDPOINT
 
 
-def _validate_yyyymmdd(s: str) -> str:
-    if not re.fullmatch(r"\d{8}", s):
-        raise ValueError(f"YYYYMMDD 형식이어야 합니다: {s!r}")
-    datetime.strptime(s, "%Y%m%d")
-    return s
-
-
-def _to_date(s: str) -> date:
-    return datetime.strptime(_validate_yyyymmdd(s), "%Y%m%d").date()
-
-
-def _to_yyyymmdd(d: date) -> str:
-    return d.strftime("%Y%m%d")
+from fetch_data.common.date_utils import (
+    validate_yyyymmdd as _validate_yyyymmdd,
+    to_date_yyyymmdd as _to_date,
+    to_yyyymmdd as _to_yyyymmdd,
+)
 
 
 def _log_debug(msg: str, debug: bool, debug_log: Optional[list[str]]) -> None:

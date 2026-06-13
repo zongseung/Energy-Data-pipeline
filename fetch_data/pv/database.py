@@ -8,9 +8,7 @@ Tables:
 4. plant_info_namdong: 남동발전 발전소 정보 (위경도 포함)
 """
 
-from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     Column,
@@ -20,15 +18,13 @@ from sqlalchemy import (
     DateTime,
     Text,
     Index,
-    create_engine,
-    text,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base
 
-from fetch_data.common.config import get_db_url
+from fetch_data.common.db_base import get_engine, get_session
+from fetch_data.common.logger import get_logger
 
-# Database URL (환경 변수 중앙 관리 모듈에서 로드)
-DB_URL = get_db_url()
+logger = get_logger(__name__)
 
 Base = declarative_base()
 
@@ -125,35 +121,21 @@ class PlantInfoNamdong(Base):
 # Engine & Session
 # ========================================
 
-_engine = None
-
-def get_engine():
-    """Get or create SQLAlchemy engine."""
-    global _engine
-    if _engine is None:
-        _engine = create_engine(DB_URL, echo=False)
-    return _engine
-
-
-def get_session():
-    """Get database session."""
-    engine = get_engine()
-    Session = sessionmaker(bind=engine)
-    return Session()
+# 엔진/세션은 fetch_data.common.db_base 사용 (get_engine, get_session)
 
 
 def init_db():
     """Initialize database tables."""
     engine = get_engine()
     Base.metadata.create_all(engine)
-    print("[DB] PV 테이블 생성 완료")
+    logger.info("PV 테이블 생성 완료")
 
 
 def drop_all_tables():
     """Drop all PV tables (use with caution)."""
     engine = get_engine()
     Base.metadata.drop_all(engine)
-    print("[DB] PV 테이블 삭제 완료")
+    logger.info("PV 테이블 삭제 완료")
 
 
 # ========================================
@@ -224,5 +206,5 @@ def get_namdong_location(plant_name: str) -> dict:
 
 
 if __name__ == "__main__":
-    print("PV Database 초기화")
+    logger.info("PV Database 초기화")
     init_db()

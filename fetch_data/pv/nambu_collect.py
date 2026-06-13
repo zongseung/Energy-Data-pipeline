@@ -19,7 +19,7 @@ current_file = Path(__file__).resolve()
 PROJECT_ROOT = current_file.parent.parent.parent
 
 # plant.json에서 gencd -> plant_name 매핑 로드 (파일이 없으면 빈 dict)
-_PLANT_JSON = PROJECT_ROOT / "plant.json"
+_PLANT_JSON = PROJECT_ROOT / "config" / "plant.json"
 GENCD_TO_NAME: dict[str, str] = {}
 if _PLANT_JSON.exists():
     with open(_PLANT_JSON, "r", encoding="utf-8") as _f:

@@ -316,10 +316,10 @@ class TestDuplicateCodeDetection:
         """_resolve_db_url은 fetch_data/common/db_utils.py에만 존재해야 함"""
         duplicated_files = [
             "fetch_data/pv/nambu_backfill.py",
-            "fetch_data/pv/namdong_collect_pv.py",
-            "fetch_data/wind/namdong_wind_collect.py",
-            "fetch_data/wind/seobu_wind_load.py",
-            "fetch_data/wind/hangyoung_wind_load.py",
+            "fetch_data/pv/namdong_collect.py",
+            "fetch_data/wind/namdong_collect.py",
+            "fetch_data/wind/seobu_backfill.py",
+            "fetch_data/wind/hangyoung_backfill.py",
         ]
         for f in duplicated_files:
             count = self._count_pattern_in_file(f, "def _resolve_db_url")
@@ -328,8 +328,8 @@ class TestDuplicateCodeDetection:
     def test_send_slack_only_in_notify(self):
         """send_slack_message는 notify/slack_notifier.py에만 정의되어야 함"""
         duplicated_files = [
-            "fetch_data/pv/namdong_collect_pv.py",
-            "fetch_data/wind/namdong_wind_collect.py",
+            "fetch_data/pv/namdong_collect.py",
+            "fetch_data/wind/namdong_collect.py",
             "prefect_flows/prefect_pipeline.py",
         ]
         for f in duplicated_files:

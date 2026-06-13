@@ -19,9 +19,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from fetch_data.wind.database import init_db, get_engine, Base
-from fetch_data.wind.namdong_wind_collect import backfill_from_csv as load_namdong
-from fetch_data.wind.seobu_wind_load import load_seobu_to_db
-from fetch_data.wind.hangyoung_wind_load import load_hangyoung_to_db
+from fetch_data.wind.namdong_collect import backfill_from_csv as load_namdong
+from fetch_data.wind.seobu_backfill import load_seobu_to_db
+from fetch_data.wind.hangyoung_backfill import load_hangyoung_to_db
 
 
 def main():

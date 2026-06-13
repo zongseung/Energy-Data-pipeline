@@ -23,16 +23,8 @@ def get_db_url() -> str:
     return "postgresql+psycopg2://pv:pv@localhost:5436/pv"
 
 
-def get_prefect_api_url() -> str:
-    return os.getenv("PREFECT_API_URL", "http://pv-prefect-server:4200/api")
-
-
 def get_nambu_api_key() -> str:
     return os.getenv("NAMBU_API_KEY", "")
-
-
-def get_slack_webhook_url() -> str:
-    return os.getenv("SLACK_WEBHOOK_URL", "")
 
 
 def get_service_key() -> str:
