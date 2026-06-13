@@ -7,15 +7,15 @@ from typing import List, Optional, Tuple
 
 import aiohttp
 import pandas as pd
-from prefect import flow, task
+from prefect import task
 from sqlalchemy import create_engine, text
 
 from fetch_data.common.db_utils import resolve_db_url
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import now_kst
 from fetch_data.constants import NamdongAPI
-from fetch_data.gen.namdong_gen_collect import get_koen_ssl_context
-from fetch_data.pv.namdong_merge_pv_data import read_csv_flexible, hour_columns, extract_hour
+from fetch_data.gen.namdong_collect import get_koen_ssl_context
+from fetch_data.pv.namdong_transform import read_csv_flexible, hour_columns, extract_hour
 from notify.slack_notifier import send_slack_message
 
 logger = get_logger(__name__)
@@ -47,27 +47,12 @@ def _sanitize_filename(s: str) -> str:
     return s[:180]
 
 
-def _validate_yyyymmdd(date_str: str) -> str:
-    if not re.fullmatch(r"\d{8}", date_str):
-        raise ValueError("YYYYMMDD 형식(예: 20210101)이어야 합니다.")
-    datetime.strptime(date_str, "%Y%m%d")
-    return date_str
-
-
-def _to_date_yyyymmdd(s: str) -> date:
-    return datetime.strptime(s, "%Y%m%d").date()
-
-
-def _to_yyyymmdd(d: date) -> str:
-    return d.strftime("%Y%m%d")
-
-
-def _month_end(d: date) -> date:
-    if d.month == 12:
-        next_month = date(d.year + 1, 1, 1)
-    else:
-        next_month = date(d.year, d.month + 1, 1)
-    return next_month - timedelta(days=1)
+from fetch_data.common.date_utils import (
+    month_end as _month_end,
+    to_yyyymmdd as _to_yyyymmdd,
+    to_date_yyyymmdd as _to_date_yyyymmdd,
+    validate_yyyymmdd as _validate_yyyymmdd,
+)
 
 
 from fetch_data.common.date_utils import prev_month_range
@@ -189,9 +174,9 @@ async def download_monthly_csvs(
     sleep_sec: int = 5,
 ) -> List[Path]:
     month_ranges = split_by_month(date_s, date_e)
-    print(f"\n총 {len(month_ranges)}개 구간(월 단위)으로 분할합니다.")
+    logger.info(f"총 {len(month_ranges)}개 구간(월 단위)으로 분할")
     for i, (ds, de) in enumerate(month_ranges, start=1):
-        print(f"  {i:>2}. {ds} ~ {de}")
+        logger.info(f"  {i:>2}. {ds} ~ {de}")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     tag = tag_for_filename(org_no, hoki_s, hoki_e)
@@ -217,7 +202,7 @@ async def download_monthly_csvs(
                 async with session.get(main_url, timeout=30) as r1:
                     r1.raise_for_status()
             except Exception as e:
-                print(f"[FAIL] ({idx}/{len(month_ranges)}) main.do GET 실패 {ds}~{de}: {e}")
+                logger.warning(f"main.do GET 실패 ({idx}/{len(month_ranges)}) {ds}~{de}: {e}")
                 if idx < len(month_ranges):
                     await asyncio.sleep(sleep_sec)
                 continue
@@ -243,25 +228,23 @@ async def download_monthly_csvs(
                     content_type = (r2.headers.get("Content-Type", "") or "").lower()
                     body = await r2.read()
             except Exception as e:
-                print(f"[FAIL] ({idx}/{len(month_ranges)}) csvDown POST 실패 {ds}~{de}: {e}")
+                logger.warning(f"csvDown POST 실패 ({idx}/{len(month_ranges)}) {ds}~{de}: {e}")
                 if idx < len(month_ranges):
                     await asyncio.sleep(sleep_sec)
                 continue
 
             if "csv" not in content_type or not is_probably_csv(body):
-                print(f"[FAIL] ({idx}/{len(month_ranges)}) {ds}~{de} 비정상 응답")
-                print(f"  Content-Type: {content_type}")
-                print(f"  Size: {len(body)} bytes")
-                print(f"  Head(200): {body[:200]}")
+                logger.warning(f"비정상 응답 ({idx}/{len(month_ranges)}) {ds}~{de} "
+                               f"| Content-Type={content_type} | Size={len(body)}B | Head={body[:200]}")
             else:
                 out_name = _sanitize_filename(f"south_pv_{tag}_{ds}-{de}.csv")
                 out_path = OUTPUT_DIR / out_name
                 out_path.write_bytes(body)
                 saved_files.append(out_path)
-                print(f"[OK] ({idx}/{len(month_ranges)}) Saved: {out_path} ({len(body)} bytes)")
+                logger.info(f"Saved ({idx}/{len(month_ranges)}): {out_path} ({len(body)} bytes)")
 
             if idx < len(month_ranges):
-                print(f"...{sleep_sec}초 대기 후 다음 구간 수집")
+                logger.info(f"{sleep_sec}초 대기 후 다음 구간 수집")
                 await asyncio.sleep(sleep_sec)
 
     return saved_files
@@ -438,15 +421,6 @@ def run_namdong_collection(
         logger.error(f"수집 중 에러 발생: {error_msg}")
         send_slack_message(f"[Namdong PV 실패]\n- 에러: {error_msg}")
         raise
-
-
-@flow(name="Monthly Namdong PV Collection Flow", log_prints=True)
-def daily_namdong_collection_flow(
-    target_start: Optional[str] = None,
-    target_end: Optional[str] = None,
-    sleep_sec: int = 5,
-) -> List[Path]:
-    return run_namdong_collection(target_start, target_end, sleep_sec)
 
 
 def main():

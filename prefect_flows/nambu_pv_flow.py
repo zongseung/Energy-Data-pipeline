@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from prefect import flow, task
 
-from fetch_data.pv.daily_pv_automation import solar_automation_flow
+from fetch_data.pv.nambu_collect import solar_automation_flow
 from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
 

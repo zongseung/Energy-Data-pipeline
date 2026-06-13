@@ -15,8 +15,8 @@ Phase:
   verify: 행수 대사 리포트
 
 실행:
-    uv run python scripts/schema_migration.py            # 전체 (p1→p2→p3→verify)
-    uv run python scripts/schema_migration.py --phase p1
+    uv run python scripts/migrations/schema_migration.py            # 전체 (p1→p2→p3→verify)
+    uv run python scripts/migrations/schema_migration.py --phase p1
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
@@ -240,7 +240,7 @@ def p2():
                 cap_info = KOEN_PLANT_CAPACITIES.get(name)
                 loc = resolve_location(name)
                 rows.append(_row(
-                    name=name, fuel=fuel, op="koen",
+                    name=name, fuel=fuel, op="namdong",  # KOEN=한국남동발전 → namdong 통일
                     cap_mw=cap_info["capacity_mw"] if cap_info else None,
                     conf=cap_info["confidence"] if cap_info else "불확실",
                     lat=loc["lat"] if loc else None,
@@ -338,7 +338,7 @@ def p3():
 
         with engine.begin() as conn:
             id_map = dict(conn.execute(text(
-                "SELECT plant_name, plant_id FROM plants WHERE operator='koen' AND fuel_type=:f"
+                "SELECT plant_name, plant_id FROM plants WHERE operator='namdong' AND fuel_type=:f"
             ), {"f": fuel}).fetchall())
             df["plant_id"] = df["plant_name"].map(id_map)
             unmapped = df["plant_id"].isna().sum()

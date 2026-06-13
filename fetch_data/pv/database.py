@@ -8,9 +8,7 @@ Tables:
 4. plant_info_namdong: 남동발전 발전소 정보 (위경도 포함)
 """
 
-from pathlib import Path
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import (
     Column,
@@ -21,11 +19,13 @@ from sqlalchemy import (
     Text,
     Index,
     create_engine,
-    text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from fetch_data.common.config import get_db_url
+from fetch_data.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Database URL (환경 변수 중앙 관리 모듈에서 로드)
 DB_URL = get_db_url()
@@ -146,14 +146,14 @@ def init_db():
     """Initialize database tables."""
     engine = get_engine()
     Base.metadata.create_all(engine)
-    print("[DB] PV 테이블 생성 완료")
+    logger.info("PV 테이블 생성 완료")
 
 
 def drop_all_tables():
     """Drop all PV tables (use with caution)."""
     engine = get_engine()
     Base.metadata.drop_all(engine)
-    print("[DB] PV 테이블 삭제 완료")
+    logger.info("PV 테이블 삭제 완료")
 
 
 # ========================================
@@ -224,5 +224,5 @@ def get_namdong_location(plant_name: str) -> dict:
 
 
 if __name__ == "__main__":
-    print("PV Database 초기화")
+    logger.info("PV Database 초기화")
     init_db()

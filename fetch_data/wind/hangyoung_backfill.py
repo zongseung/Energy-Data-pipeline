@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
@@ -27,7 +30,7 @@ def load_hangyoung_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
         DataFrame[timestamp, plant_name, generation]
     """
     if csv_path is None:
-        csv_path = PROJECT_ROOT / "Hangyoung_wind_power.csv"
+        csv_path = PROJECT_ROOT / "inputs" / "wind" / "Hangyoung_wind_power.csv"
     else:
         csv_path = Path(csv_path)
 
@@ -41,7 +44,7 @@ def load_hangyoung_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
     df["plant_name"] = "Hangyoung"
 
     result = df[["timestamp", "plant_name", "generation"]].dropna(subset=["timestamp"])
-    print(f"[CSV] 한경풍력 CSV 로드: {len(result)}행")
+    logger.info(f"한경풍력 CSV 로드: {len(result)}행")
     return result.reset_index(drop=True)
 
 
@@ -53,7 +56,7 @@ def load_hangyoung_to_db(csv_path: Optional[str] = None, db_url: Optional[str] =
     df = load_hangyoung_wind_csv(csv_path)
 
     if df.empty:
-        print("[DB] 적재할 데이터가 없습니다.")
+        logger.info("적재할 데이터가 없습니다.")
         return 0
 
     resolved_url = resolve_db_url(db_url)
@@ -66,7 +69,7 @@ def load_hangyoung_to_db(csv_path: Optional[str] = None, db_url: Optional[str] =
         conn.execute(text("TRUNCATE TABLE wind_hangyoung"))
         df.to_sql("wind_hangyoung", con=conn, if_exists="append", index=False)
 
-    print(f"[DB] wind_hangyoung 적재 완료: {len(df)}행")
+    logger.info(f"wind_hangyoung 적재 완료: {len(df)}행")
     return len(df)
 
 

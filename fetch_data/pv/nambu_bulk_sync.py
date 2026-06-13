@@ -8,9 +8,12 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from tqdm import tqdm
 
+from fetch_data.common.logger import get_logger
+
 # 1. 환경 설정
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
+logger = get_logger(__name__)
 
 API_KEY = os.getenv("NAMBU_API_KEY")
 ENDPOINT = "https://apis.data.go.kr/B552520/PwrSunLightInfo/getDataService"
@@ -36,7 +39,7 @@ def get_missing_dates(file_path, start_date_str, end_date):
         missing_dates = expected_dates - existing_dates
         return sorted(list(missing_dates))
     except Exception as e:
-        print(f" [!] {file_path.name} 읽기 오류: {e}")
+        logger.warning(f"{file_path.name} 읽기 오류: {e}")
         return sorted(list(expected_dates))
 
 async def fetch_nambu_data(session, date_str, org_cd, hoki):
@@ -83,13 +86,13 @@ async def process_plant(session, org_cd, hoki, start_date_str):
 
 async def main():
     if not API_KEY:
-        print("[!] NAMBU_API_KEY를 확인하세요.")
+        logger.error("NAMBU_API_KEY를 확인하세요.")
         return
 
     df_targets = pd.read_csv(INPUT_CSV).dropna(subset=['시작일'])
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
-    print(f"\n🔍 총 {len(df_targets)}개 중 제외 대상을 뺀 나머지 수집을 시작합니다.")
+    logger.info(f"총 {len(df_targets)}개 발전소 수집 시작")
     
     async with aiohttp.ClientSession() as session:
         for _, row in df_targets.iterrows():
@@ -98,12 +101,12 @@ async def main():
             
             # ⭐ 제외 리스트에 있으면 건너뜀
             if (org_cd, hoki) in EXCLUDE_LIST:
-                print(f" ⏩ [{org_cd}_{hoki}]는 이미 완료되어 건너뜁니다.")
+                logger.info(f"[{org_cd}_{hoki}] 이미 완료 — 건너뜀")
                 continue
                 
             await process_plant(session, org_cd, hoki, str(row['시작일']))
 
-    print("\n🎉 모든 작업이 완료되었습니다!")
+    logger.info("모든 작업 완료")
 
 if __name__ == "__main__":
      asyncio.run(main())

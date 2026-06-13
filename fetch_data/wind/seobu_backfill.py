@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
@@ -27,7 +30,7 @@ def load_seobu_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
         DataFrame[timestamp, plant_name, capacity_mw, generation]
     """
     if csv_path is None:
-        csv_path = PROJECT_ROOT / "seobu_wind.csv"
+        csv_path = PROJECT_ROOT / "inputs" / "wind" / "seobu_wind.csv"
     else:
         csv_path = Path(csv_path)
 
@@ -42,7 +45,7 @@ def load_seobu_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
     df["generation"] = pd.to_numeric(df["generation"], errors="coerce")
 
     result = df[["timestamp", "plant_name", "capacity_mw", "generation"]].dropna(subset=["timestamp"])
-    print(f"[CSV] 서부발전 풍력 CSV 로드: {len(result)}행")
+    logger.info(f"서부발전 풍력 CSV 로드: {len(result)}행")
     return result.reset_index(drop=True)
 
 
@@ -52,7 +55,7 @@ def upsert_wind_seobu(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
     ON CONFLICT (timestamp, plant_name) DO UPDATE
     """
     if df.empty:
-        print("[DB] 적재할 데이터가 없습니다.")
+        logger.info("적재할 데이터가 없습니다.")
         return 0
 
     resolved_url = resolve_db_url(db_url)
@@ -79,9 +82,9 @@ def upsert_wind_seobu(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
             batch = records[i : i + batch_size]
             conn.execute(upsert_sql, batch)
             total += len(batch)
-            print(f"[DB] wind_seobu upsert: {total}/{len(records)}")
+            logger.info(f"wind_seobu upsert: {total}/{len(records)}")
 
-    print(f"[DB] wind_seobu 적재 완료: {total}행")
+    logger.info(f"wind_seobu 적재 완료: {total}행")
     return total
 
 

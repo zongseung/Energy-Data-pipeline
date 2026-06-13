@@ -169,7 +169,7 @@ def load_namdong_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
         DataFrame[timestamp, plant_name, generation]
     """
     if csv_path is None:
-        csv_path = PROJECT_ROOT / "nandong_wind_power.csv"
+        csv_path = PROJECT_ROOT / "inputs" / "wind" / "nandong_wind_power.csv"
     else:
         csv_path = Path(csv_path)
 

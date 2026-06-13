@@ -6,6 +6,10 @@ from typing import List, Optional
 
 import pandas as pd
 
+from fetch_data.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 DEFAULT_INPUT_DIR = Path.cwd() / "pv_data_raw"   # 수집 스크립트 OUTPUT_DIR과 맞추기
 DEFAULT_OUT_PATH  = Path.cwd() / "pv_data" / "south_pv_all_long.csv"
 
@@ -77,7 +81,7 @@ def merge_to_long(input_dir: Path, out_path: Path) -> None:
     long_parts: List[pd.DataFrame] = []
 
     for fp in files:
-        print(f"read: {fp.name}")
+        logger.info(f"read: {fp.name}")
         df = read_csv_flexible(fp)
 
         # 기본 컬럼 보정 (사이트 원본 기준)
@@ -101,7 +105,7 @@ def merge_to_long(input_dir: Path, out_path: Path) -> None:
                 return row["발전소명"]
             
             df["발전소명"] = df.apply(add_hogi_suffix, axis=1)
-            print(f"  -> 호기 구분 적용: {len(multi_hogi_plants)}개 발전소")
+            logger.info(f"호기 구분 적용: {len(multi_hogi_plants)}개 발전소")
 
         # 일자 컬럼명도 케이스별로 정리
         if "일자" not in df.columns:
@@ -135,8 +139,8 @@ def merge_to_long(input_dir: Path, out_path: Path) -> None:
 
     # 저장: utf-8-sig 추천(엑셀 호환) / 분석용이면 utf-8도 OK
     merged.to_csv(out_path, index=False, encoding="utf-8-sig")
-    print(f"\n✅ merged saved: {out_path}")
-    print(f"rows: {len(merged):,} / plants: {merged['발전소명'].nunique():,} / hours: {merged['시간'].nunique():,}")
+    logger.info(f"merged saved: {out_path}")
+    logger.info(f"rows: {len(merged):,} / plants: {merged['발전소명'].nunique():,} / hours: {merged['시간'].nunique():,}")
 
 
 if __name__ == "__main__":

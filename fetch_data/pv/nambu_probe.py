@@ -7,9 +7,12 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
+from fetch_data.common.logger import get_logger
+
 # 1. .env 로드 및 설정
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
+logger = get_logger(__name__)
 
 API_KEY = os.getenv("NAMBU_API_KEY")
 ENDPOINT = "https://apis.data.go.kr/B552520/PwrSunLightInfo/getDataService"
@@ -71,15 +74,15 @@ async def find_start_date(session, org_cd, hoki):
 
 async def main():
     if not API_KEY:
-        print("[Error] NAMBU_API_KEY가 없습니다."); return
+        logger.error("NAMBU_API_KEY가 없습니다.")
+        return
 
     results = []
     async with aiohttp.ClientSession() as session:
-        print(f"--- 총 {len(PLANT_LIST)}개 발전소 기점 조사 시작 ---")
-        for org_cd, hoki in PLANT_LIST: # 
-            print(f"조사 중: [{org_cd}] {hoki}호기...", end=" ", flush=True)
+        logger.info(f"총 {len(PLANT_LIST)}개 발전소 기점 조사 시작")
+        for org_cd, hoki in PLANT_LIST:
             start_date = await find_start_date(session, org_cd, hoki)
-            print(f"결과: {start_date}")
+            logger.info(f"[{org_cd}] {hoki}호기 → {start_date}")
             results.append({"발전소코드": org_cd, "호기": hoki, "시작일": start_date})
             await asyncio.sleep(0.2) # API 과부하 방지
 
@@ -87,7 +90,7 @@ async def main():
     df = pd.DataFrame(results)
     out_path = PROJECT_ROOT / "pv_start_dates.csv"
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
-    print(f"\n✅ 조사가 완료되었습니다! 파일 저장 위치: {out_path}")
+    logger.info(f"조사 완료. 파일 저장: {out_path}")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -80,6 +80,7 @@ prefect.db
 # 📓 Jupyter
 ############################
 .ipynb_checkpoints/
+*.ipynb
 
 ############################
 # 🐳 Docker (local volumes)
@@ -99,3 +100,17 @@ grafana/logs/
 build/
 dist/
 *.egg-info/
+
+############################
+# 📁 문서 / Claude 작업파일 (추적 제외)
+############################
+docs/
+.claude/
+
+############################
+# ⚙️ config/ 설정파일은 추적 (*.csv 제외 규칙보다 우선)
+############################
+!config/
+!config/*.csv
+
+*.pem

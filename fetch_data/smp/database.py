@@ -33,6 +33,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 Base = declarative_base()
 
@@ -158,16 +161,16 @@ def init_db() -> None:
     """SMP 테이블(3개)을 생성합니다. 기존 테이블에는 영향이 없습니다."""
     engine = get_engine()
     Base.metadata.create_all(engine)
-    print("[DB] SMP 테이블 생성 완료: smp_hourly, smp_weighted_avg, smp_realtime_jeju")
+    logger.info("SMP 테이블 생성 완료: smp_hourly, smp_weighted_avg, smp_realtime_jeju")
 
 
 def drop_all_tables() -> None:
     """SMP 테이블을 삭제합니다(주의해서 사용)."""
     engine = get_engine()
     Base.metadata.drop_all(engine)
-    print("[DB] SMP 테이블 삭제 완료")
+    logger.info("SMP 테이블 삭제 완료")
 
 
 if __name__ == "__main__":
-    print("SMP Database 초기화")
+    logger.info("SMP Database 초기화")
     init_db()

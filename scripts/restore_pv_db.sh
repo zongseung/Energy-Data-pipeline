@@ -5,7 +5,7 @@
 set -e
 
 # 설정
-CONTAINER_NAME="pv-postgres"
+CONTAINER_NAME="pv-data-postgres"
 DB_USER="pv"
 DB_NAME="pv"
 BACKUP_DIR="/mnt/nvme/weather-data-download-center/nas-weather-data/db_backup/pv_db"

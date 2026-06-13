@@ -11,7 +11,7 @@ from typing import Optional
 
 from prefect import flow, task
 
-from fetch_data.wind.namdong_wind_collect import run_namdong_wind_collection
+from fetch_data.wind.namdong_collect import run_namdong_wind_collection
 from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
 

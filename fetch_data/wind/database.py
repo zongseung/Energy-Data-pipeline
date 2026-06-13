@@ -22,6 +22,10 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 
+from fetch_data.common.logger import get_logger
+
+logger = get_logger(__name__)
+
 # 환경 변수 로드
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -118,16 +122,16 @@ def init_db():
     """Initialize wind database tables."""
     engine = get_engine()
     Base.metadata.create_all(engine)
-    print("[DB] 풍력 테이블 생성 완료")
+    logger.info("풍력 테이블 생성 완료")
 
 
 def drop_all_tables():
     """Drop all wind tables (use with caution)."""
     engine = get_engine()
     Base.metadata.drop_all(engine)
-    print("[DB] 풍력 테이블 삭제 완료")
+    logger.info("풍력 테이블 삭제 완료")
 
 
 if __name__ == "__main__":
-    print("Wind Database 초기화")
+    logger.info("Wind Database 초기화")
     init_db()
