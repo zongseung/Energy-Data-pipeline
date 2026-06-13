@@ -18,17 +18,13 @@ from sqlalchemy import (
     DateTime,
     Text,
     Index,
-    create_engine,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base
 
-from fetch_data.common.config import get_db_url
+from fetch_data.common.db_base import get_engine, get_session
 from fetch_data.common.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Database URL (환경 변수 중앙 관리 모듈에서 로드)
-DB_URL = get_db_url()
 
 Base = declarative_base()
 
@@ -125,21 +121,7 @@ class PlantInfoNamdong(Base):
 # Engine & Session
 # ========================================
 
-_engine = None
-
-def get_engine():
-    """Get or create SQLAlchemy engine."""
-    global _engine
-    if _engine is None:
-        _engine = create_engine(DB_URL, echo=False)
-    return _engine
-
-
-def get_session():
-    """Get database session."""
-    engine = get_engine()
-    Session = sessionmaker(bind=engine)
-    return Session()
+# 엔진/세션은 fetch_data.common.db_base 사용 (get_engine, get_session)
 
 
 def init_db():

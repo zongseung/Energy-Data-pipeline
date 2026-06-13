@@ -43,7 +43,7 @@ def resolve_db_url(cli_db_url: Optional[str] = None) -> str:
             if u.hostname == "pv-db" and local_db_url:
                 return local_db_url
             if u.hostname == "pv-db":
-                host_port = int(os.getenv("PV_DB_PORT_FORWARD", "5435"))
+                host_port = int(os.getenv("PV_DB_PORT_FORWARD", "5436"))
                 if u.username and u.password:
                     netloc = f"{u.username}:{u.password}@localhost:{host_port}"
                 elif u.username:

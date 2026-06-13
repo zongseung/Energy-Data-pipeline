@@ -9,15 +9,13 @@ Tables:
 설계 원칙:
 - 기존 PV/Wind/Weather/Gen 테이블과 충돌하지 않도록 독립 Base 사용.
 - init_db()는 이 모듈의 3개 테이블만 생성한다(기존 테이블 무영향).
-- DB URL은 공통 헬퍼(get_db_url)로 해석한다.
+- DB 엔진/세션은 공통 db_base(resolve_db_url 기반)로 통일한다.
 
 시간 표기 규약(중요):
 - KPX는 1~24시 hour-ending(구간 종료) 표기를 쓴다. 적재 시 구간시작으로 변환:
   시간별  라벨 N -> (N-1)시          (1시->00:00 ... 24시->23:00)
   실시간  Nh K구간 -> (N-1)시 + (K-1)*15분 (1h1구간->00:00 ... 24h4구간->23:45)
 """
-
-from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -28,11 +26,10 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    create_engine,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base
 
-from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.db_base import get_engine, get_session
 from fetch_data.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -134,27 +131,7 @@ class SMPRealtimeJeju(Base):
 # Engine & Session
 # ========================================
 
-_engine = None
-
-
-def get_engine(db_url: Optional[str] = None):
-    """SQLAlchemy 엔진을 생성/반환합니다(싱글턴).
-
-    적재 모듈(_common)과 동일하게 resolve_db_url을 사용해 도커/호스트 환경을
-    자동 전환한다(호스트에서 pv-db DNS 실패 방지).
-    """
-    global _engine
-    if db_url is not None:
-        return create_engine(db_url, echo=False)
-    if _engine is None:
-        _engine = create_engine(resolve_db_url(), echo=False)
-    return _engine
-
-
-def get_session():
-    """DB 세션을 반환합니다."""
-    Session = sessionmaker(bind=get_engine())
-    return Session()
+# 엔진/세션은 fetch_data.common.db_base 사용 (get_engine, get_session)
 
 
 def init_db() -> None:
