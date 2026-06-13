@@ -1,314 +1,260 @@
 # Energy-Data-pipeline
 
-남부발전/남동발전 태양광(PV)·풍력 발전 데이터, 기상 데이터, 그리고 **SMP(계통한계가격)** 데이터를 수집, 전처리하여 PostgreSQL에 저장하고 Grafana 지도 시각화를 제공하는 파이프라인입니다.
+대한민국 발전·전력 데이터를 수집·전처리·적재하고 Grafana로 시각화하는 ETL 파이프라인입니다.
+Prefect 2로 오케스트레이션하고 PostgreSQL에 저장합니다.
 
-## 시스템 아키텍처
+**수집 도메인**
+- **태양광(PV)** — 남부발전(API), 남동발전(koenergy.kr 스크래핑)
+- **풍력(Wind)** — 남동발전(공공API), 서부·한경(CSV 적재)
+- **비태양광(KOEN gen)** — 남동발전 해양소수력·연료전지·화력(koenergy.kr)
+- **기상(Weather)** — 기상청 ASOS
+- **SMP(계통한계가격)** — KPX 하루전/실시간 + EPSIS 가중평균(육지/제주)
+- **제주(Jeju)** — 계통수급 실시간·수급 월별·연료원별 거래량·시간별 수요
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Docker Compose                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐     │
-│  │ prefect-postgres │     │   pv-postgres    │     │    pv-grafana    │     │
-│  │    -new          │     │                  │     │                  │     │
-│  │  ───────────────│     │  ───────────────│     │  ───────────────│     │
-│  │  Prefect 메타DB  │     │  PV/기상 데이터  │     │  시각화 대시보드  │     │
-│  │  :5432 (내부)    │     │  :5434 (외부)    │     │  :3003 (외부)    │     │
-│  └────────┬─────────┘     └────────┬─────────┘     └────────┬─────────┘     │
-│           │                        │                        │               │
-│           │                        │                        │               │
-│  ┌────────▼─────────┐              │                        │               │
-│  │ prefect-server   │              │                        │               │
-│  │    -new          │◄─────────────┼────────────────────────┘               │
-│  │  ───────────────│              │                                        │
-│  │  오케스트레이션   │              │                                        │
-│  │  :4300 (외부)    │              │                                        │
-│  └────────┬─────────┘              │                                        │
-│           │                        │                                        │
-│     ┌─────┴─────┐                  │                                        │
-│     │           │                  │                                        │
-│  ┌──▼───┐  ┌────▼────┐             │                                        │
-│  │ pv-  │  │  pv-    │             │                                        │
-│  │deploy│  │ worker  │─────────────┘                                        │
-│  │ -er  │  │         │                                                      │
-│  │ ─────│  │ ────────│                                                      │
-│  │1회   │  │플로우    │                                                      │
-│  │배포  │  │실행      │                                                      │
-│  └──────┘  └─────────┘                                                      │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+코드·주석·문서는 한국어가 기본입니다.
 
-## Docker 컨테이너 상세
+---
 
-| 컨테이너 | 이미지 | 포트 | 역할 |
-|---------|--------|------|------|
-| **prefect-postgres-new** | postgres:14 | 내부 5432 | Prefect 서버 메타데이터 저장 (플로우 상태, 스케줄, 로그) |
-| **pv-postgres** | postgres:14 | 5434:5432 | PV 발전량, 기상 데이터 저장용 메인 DB |
-| **pv-grafana** | grafana/grafana | 3003:3000 | 데이터 시각화 대시보드 (지도, 시계열 차트) |
-| **prefect-server-new** | prefecthq/prefect:2 | 4300:4200 | Prefect 오케스트레이션 서버 (스케줄링, 모니터링 UI) |
-| **pv-deployer** | pv-pipeline:latest | - | 플로우 배포 (시작 시 1회 실행 후 종료) |
-| **pv-worker** | prefecthq/prefect:2 | - | Docker Worker - 스케줄된 플로우 실제 실행 |
-
-## 데이터 흐름
-
-### 1. 기상 데이터 (Weather)
-```
-기상청 ASOS API → collect_asos.py → CSV → PostgreSQL (pv-postgres)
-                        ↓
-              daily-weather-collection-flow (매일 09:00)
-```
-
-### 2. 남부발전 PV 데이터
-```
-남부발전 API → nambu_bulk_sync.py → pv_data_raw/ → nambu_merge_pv_data.py
-                                                            ↓
-                                              pv_data_processed/ → PostgreSQL
-```
-
-### 3. 남동발전 PV 데이터
-```
-남동발전 CSV → namdong_collect_pv.py → pv_data_raw/ → namdong_merge_pv_data.py
-                                                            ↓
-                                                  pv_data/ (NAS) → PostgreSQL
-```
-
-### 4. SMP (계통한계가격) 데이터
-한국전력거래소(KPX) 및 EPSIS(전력통계정보시스템)에서 SMP/BLMP를 수집합니다.
-육지/제주 구분이며, 시간 표기는 KPX의 hour-ending(1~24시) 규약을 구간시작(0~23시)으로 변환해 적재합니다.
-2010년 이전(제주시장 개시 전)은 단일가격이라 `unified`로 분류합니다.
-
-```
-KPX smpInland.es / smpJeju.es ─┐ (시간별, GET→CSRF→POST 스크래핑)
-                                ├→ smp_scraper.py → smp_collect.py ──→ smp_hourly + smp_weighted_avg(daily)
-KPX bidSmpLfdDataRt.es ─────────┤ (제주 실시간 15분, 96구간/일)
-                                └→ smp_realtime.py ─────────────────→ smp_realtime_jeju
-EPSIS selectEkmaSmpSmp.ajax ───→ smp_aggregate.py ─────────────────→ smp_weighted_avg(월/연 SMP·BLMP)
-                                                  ↓
-                                  PostgreSQL + smp_data/*.csv (DB 적재 시 자동 미러)
-```
-
-- **smp_collect.py**: 하루전시장 시간별 SMP(육지/제주). 한 페이지에 최근 7일창을 주므로 증분 수집. 27열(1~24시+최대/최소/가중평균) 중 가중평균을 일별 가중평균으로 함께 적재.
-- **smp_aggregate.py**: EPSIS 공식 월별/연도별 가중평균(SMP=육지/제주/통합, BLMP=2001~2006).
-- **smp_realtime.py**: 제주 실시간시장 15분 단위(하루 96구간). `--backfill`로 2024-03~ 과거 일괄 수집.
-- **smp_backfill.py**: 과거 CSV 백필 (`--mode master`/`wide`/`epsis-daily`).
-- **legacy_sync.py**: 공통 DB → 개인 DB(`SMP_LEGACY_DB_URL`) 백업 동기화(미설정 시 skip).
-
-> **CSV 미러**: 모든 SMP DB 적재(upsert) 시 해당 테이블 전체가 `smp_data/<table>.csv`로 자동 갱신되어 DB와 항상 일치합니다(개인 DB 동기화 제외).
-
-## 프로젝트 구조
+## 디렉터리 구조
 
 ```
 Energy-Data-pipeline/
-├── docker/
-│   ├── docker-compose.yml       # 메인 Docker 구성
-│   ├── Dockerfile               # pv-pipeline 이미지 빌드
-│   └── grafana/
-│       ├── provisioning/        # Grafana 자동 설정
-│       │   ├── datasources/     # PostgreSQL 연결
-│       │   └── dashboards/      # 대시보드 프로비저닝
-│       └── dashboards/          # JSON 대시보드 파일
+├── fetch_data/                         # 수집·변환 코드 (소스별 패키지)
+│   ├── common/                         # 공통 인프라
+│   │   ├── db_base.py                  #   ★ 엔진/세션 단일 팩토리 (get_engine/get_session)
+│   │   ├── db_utils.py                 #   resolve_db_url (컨테이너/호스트 자동 전환)
+│   │   ├── config.py · logger.py · utils.py · date_utils.py
+│   │   └── impute_missing.py           #   결측치 보간(스플라인+이력평균)
+│   ├── weather/  asos_collect.py       # ASOS 기상 수집
+│   ├── pv/
+│   │   ├── nambu_collect.py            # 남부 PV 일일 수집(라이브)
+│   │   ├── nambu_backfill.py           # 남부 PV 과거 백필(수동)
+│   │   ├── nambu_bulk_sync.py          # 남부 PV 대량 일괄 수집(standalone)
+│   │   ├── nambu_transform.py          # 남부 wide→long 변환
+│   │   ├── nambu_probe.py              # 남부 최초 데이터일 탐지
+│   │   ├── namdong_collect.py          # 남동 PV 수집(koenergy 스크래핑)
+│   │   ├── namdong_transform.py        # 남동 PV 변환
+│   │   └── database.py                 # PV 테이블 모델
+│   ├── wind/
+│   │   ├── namdong_collect.py          # 남동 풍력(API + CSV 백필)
+│   │   ├── seobu_backfill.py           # 서부 풍력(CSV)
+│   │   ├── hangyoung_backfill.py       # 한경 풍력(CSV)
+│   │   └── database.py
+│   ├── gen/                            # KOEN 비태양광(해양소수력/연료전지/화력)
+│   │   ├── namdong_collect.py · transform_gen.py · pipeline.py · load_gen.py
+│   │   └── capacities.py · locations.py
+│   ├── smp/
+│   │   ├── smp_scraper.py · smp_collect.py · smp_aggregate.py · smp_realtime.py
+│   │   ├── smp_backfill.py · legacy_sync.py · _common.py · database.py
+│   └── jeju/
+│       └── jeju_realtime_collect.py · jeju_sukub_collect.py · jeju_gen_collect.py · jeju_demand_collect.py
 │
-├── fetch_data/
-│   ├── common/                  # 공통 유틸리티
-│   │   └── impute_missing.py    # 결측치 처리
-│   ├── weather/                 # 기상 데이터 수집
-│   │   └── collect_asos.py      # ASOS API 수집
-│   ├── pv/                      # PV 데이터 수집
-│   │   ├── nambu_probe_date.py      # 남부발전 시작일 탐색
-│   │   ├── nambu_bulk_sync.py       # 남부발전 일괄 수집
-│   │   ├── nambu_merge_pv_data.py   # 남부발전 전처리
-│   │   ├── daily_pv_automation.py   # 일별 자동화
-│   │   ├── namdong_collect_pv.py    # 남동발전 CSV 수집
-│   │   ├── namdong_merge_pv_data.py # 남동발전 전처리
-│   │   └── database.py              # PV DB 모델
-│   └── smp/                     # SMP(계통한계가격) 수집
-│       ├── smp_scraper.py           # KPX 스크래핑(GET/CSRF/POST/표 파싱)
-│       ├── smp_collect.py           # 시간별 SMP + 일별 가중평균
-│       ├── smp_aggregate.py         # EPSIS 월/연 가중평균(SMP·BLMP)
-│       ├── smp_realtime.py          # 제주 실시간 15분(96구간/일)
-│       ├── smp_backfill.py          # 과거 CSV 백필(master/wide/epsis-daily)
-│       ├── legacy_sync.py           # 공통 DB → 개인 DB 백업
-│       ├── _common.py               # upsert + CSV 미러 공통 헬퍼
-│       └── database.py              # SMP DB 모델(3개 테이블)
+├── prefect_flows/                      # Prefect flow 래퍼 (수집기엔 @flow 없음)
+│   ├── deploy.py                       # 모든 deployment/스케줄 등록
+│   ├── prefect_pipeline.py             # 기상 / full-etl
+│   ├── nambu_pv_flow.py · namdong_pv_flow.py · namdong_wind_flow.py
+│   ├── smp_flow.py · gen_flow.py · jeju_flow.py
+│   └── notify_tasks.py · merge_to_all.py
 │
-├── prefect_flows/
-│   ├── deploy.py                # 플로우 배포 스크립트
-│   ├── prefect_pipeline.py      # 메인 플로우 정의
-│   ├── smp_flow.py              # SMP 4개 플로우 정의
-│   └── merge_to_all.py          # CSV 병합 유틸
+├── config/                             # 추적되는 설정 파일
+│   ├── station_list.csv                #   ASOS 지점 목록
+│   └── plant.json                      #   남부 gencd → 발전소명 매핑
+├── inputs/wind/                        # 풍력 백필 원본 CSV (gitignore)
+├── scripts/
+│   ├── backup_pv_db.sh · restore_pv_db.sh   # DB 백업/복원 (→ NAS)
+│   ├── init_wind_tables.py             # 풍력 테이블 초기화(compose wind-init)
+│   └── migrations/                     # 일회성·기록용 (직접 실행 안 함)
+│       ├── schema_migration.py         #   plants/generation 코어 마이그레이션
+│       └── *.sql                       #   dual-write 트리거 등
 │
-├── pv_data/                     # 남동발전 데이터 (NAS mount)
-├── pv_data_raw/                 # 원본 수집 데이터
-├── pv_data_processed/           # 전처리된 데이터
-├── smp_data/                    # SMP CSV 미러 (DB 적재 시 자동 갱신)
-│
-├── initial_db_ingestion.py      # DB 초기 적재
-├── .env                         # 환경변수 (API 키 등)
-├── ARCHITECTURE.md              # 상세 아키텍처 문서
-└── README.md
+├── docker/                             # ★ 운영 스택 (정본)
+│   ├── docker-compose.yml · Dockerfile
+│   └── grafana/                        # provisioning + 대시보드
+├── notify/slack_notifier.py            # Slack Webhook 알림
+├── Makefile · pyproject.toml · uv.lock · .env
+└── ARCHITECTURE.md · README.md
 ```
 
-## 환경 변수 설정
+> **네이밍 규약**: 수집기 파일명은 역할 동사로 통일합니다 — `*_collect`(라이브 수집) · `*_backfill`(일회성/이력) · `*_transform`(wide→long 변환) · `*_probe`(보조 탐지).
+> **레이어 규칙**: `@flow`는 `prefect_flows/`에만 두고, 수집기는 단일 진입점 `run(...)`을 노출합니다.
 
-`.env` 파일:
+---
+
+## 운영 스택 (docker/)
+
+실제 운영은 `docker/docker-compose.yml` 스택을 사용합니다 (`Makefile` 기준).
+
+| 컨테이너 | 역할 | 포트(host) |
+|---|---|---|
+| **pv-data-postgres** | 메인 데이터 DB (PV·풍력·SMP·gen·plants·generation) | `5436` |
+| **pv-pipeline-grafana** | 대시보드 | `3006` |
+| **pv-prefect-server** | Prefect 오케스트레이션 | `4400` |
+| **pv-prefect-postgres** | Prefect 메타DB | 내부 |
+| **pv-pipeline-worker** | Docker 워크풀(`pv-pool`) 워커 — flow run 컨테이너 기동 | - |
+| **pv-deployer** | `pv-pipeline:latest` 빌드 + `deploy.py` 1회 실행 | - |
+
+- 호스트에서 메인 DB 접속: `postgresql+psycopg2://pv:pv@localhost:5436/pv`
+- 컨테이너 내부에선 호스트명 `pv-db`(=pv-data-postgres). `resolve_db_url`이 환경을 자동 전환합니다.
+
 ```bash
-docker compose up -d --build
+make up        # docker compose -f docker/docker-compose.yml up -d
+make rebuild   # 이미지 재빌드 + deployer 재실행 (코드/스케줄 변경 반영)
+make logs-worker
+make ps
+make db        # psql 접속
 ```
 
-실행 시 동작:
-- `pv-db`, `pv-grafana`, `pv-worker`가 상시 실행됩니다.
-- `pv-deploy`가 1회 실행되어 Prefect에 deployment/schedule을 등록한 뒤 종료됩니다.
+> 별도의 루트 `docker-compose.yml`(pv-main-db:5432·pv-main-grafana:3002)도 존재하나, 이는 옛 스택입니다. 운영은 `docker/` 스택을 기준으로 하세요.
 
-## 서비스 & 포트
-
-| 구성요소 | 컨테이너 | 기본 포트 | 비고 |
-|---|---|---:|---|
-| Postgres | `pv-main-db` | `5432` | PV 데이터 저장소 |
-| Grafana | `pv-main-grafana` | `3002` | `http://localhost:3002` |
-| Prefect Worker | `pv-worker` | - | Prefect work pool(`pv-pool`) 구독 |
-| Deployer(1회) | `pv-deploy` | - | `prefect_flows/deploy.py` 실행 |
-
-## 아키텍처 (Mermaid)
-
-### 전체 구성
-```mermaid
-flowchart LR
-  subgraph Sources[Data Sources]
-    NambuAPI["남부발전 API\n(B552520)"]
-    NamdongCSV["남동발전 CSV\n(koenergy.kr)"]
-    ASOS["기상 ASOS API\n(선택)"]
-  end
-
-  subgraph Prefect[Prefect 2]
-    Server["Prefect Server\n(외부 컨테이너/서비스)"]
-    Worker["pv-worker\nPrefect Worker"]
-  end
-
-  subgraph Compose["This repo: docker compose"]
-    DB[(pv-db\nPostgres)]
-    Grafana["pv-grafana\nGrafana"]
-    Deployer["pv-deploy\n(1회 실행)\nregister deployments"]
-  end
-
-  subgraph Jobs[Flows & Scripts]
-    NamdongFlow["Monthly Namdong PV Flow\n(10th 10:00)"]
-    NambuFlow["Daily Nambu PV Flow\n(09:30)"]
-    NambuBackfill["Manual backfill\nnambu_backfill.py"]
-  end
-
-  Deployer --> Server
-  Server --> Worker
-
-  NamdongCSV --> NamdongFlow --> DB
-  NambuAPI --> NambuFlow --> DB
-  NambuAPI --> NambuBackfill --> DB
-  DB --> Grafana
-```
-
-### 스케줄 실행 흐름
-```mermaid
-sequenceDiagram
-  autonumber
-  participant Cron as Cron (Deployment Schedule)
-  participant Prefect as Prefect Server
-  participant Worker as Prefect Worker (pv-worker)
-  participant Job as Flow Run Container
-  participant DB as Postgres (pv-db)
-  participant Slack as Slack Webhook (optional)
-
-  Cron->>Prefect: time reached (cron)
-  Prefect->>Worker: create flow run
-  Worker->>Job: start container & run flow
-  Job->>DB: upsert/append PV rows
-  Job-->>Slack: success/failure message
-  Job-->>Worker: completed/failed
-  Worker-->>Prefect: report state/logs
-```
-
-## 데이터 모델(핵심 테이블)
-현재 수집/적재 스크립트 기준으로 아래 테이블을 사용합니다.
-
-- `nambu_generation`: 남부발전 시간별 발전량(24행/일 목표)
-  - 주요 컬럼: `datetime`, `gencd`, `hogi`, `plant_name`, `generation`, `daily_total`, `daily_avg`, `daily_max`, `daily_min`
-- `namdong_generation`: 남동발전 시간별 발전량(스키마는 환경에 따라 다를 수 있음)
-- `nambu_plants`, `namdong_plants`: 발전소 메타(선택/환경에 따라)
-
-### SMP 테이블 (3개)
-모든 가격 단위는 원/kWh, 시각은 KST·구간시작 기준. `region`은 `land`/`jeju`/`unified`(2010년 이전 단일가격).
-
-| 테이블 | 설명 | 컬럼 |
-|--------|------|------|
-| `smp_hourly` | 하루전시장 시간별 SMP | `timestamp`, `region`, `price` · unique(timestamp, region) |
-| `smp_weighted_avg` | 일/월/연 가중평균(SMP·BLMP) | `period_type`(daily/monthly/yearly), `period`, `region`, `price_type`(smp/blmp), `weighted_avg` · unique(period_type, period, region, price_type) |
-| `smp_realtime_jeju` | 제주 실시간시장 15분 SMP | `timestamp`(15분), `region`, `price`(음수 가능), `is_confirmed`(D+1 확정) · unique(timestamp, region) |
-
-각 테이블은 `smp_data/<table>.csv`로 자동 미러링됩니다.
+---
 
 ## Prefect Flows & 스케줄
 
-Prefect deployment 등록은 `pv-deploy`가 수행합니다.
-- 등록 스크립트: `prefect_flows/deploy.py`
+`pv-deployer`가 `prefect_flows/deploy.py`로 아래 deployment를 등록합니다 (KST).
 
-등록되는 주요 deployment(기본):
-- `daily-weather-collection` (09:00, KST) — 기상 CSV 수집 (옵션)
-- `daily-nambu-pv-collection` (09:30, KST) — 남부발전 PV 적재 + Slack 알림
-- `monthly-namdong-pv-collection` (매월 10일 10:00, KST) — 전월 남동발전 PV 적재 + Slack 알림
-- `monthly-namdong-wind-collection` (매월 10일 11:00, KST) — 전월 남동발전 풍력 적재
-- `daily-smp-collection` (06:00, KST) — SMP 시간별 + 일별 가중평균
-- `monthly-smp-aggregate` (매월 2일 07:00, KST) — SMP 월/연 가중평균(EPSIS)
-- `daily-smp-realtime-jeju` (19:00, KST) — 제주 실시간 15분 SMP
-- `weekly-smp-legacy-sync` (매주 월 07:00, KST) — SMP 개인 DB 백업
-- `full-etl` — 수동 실행(필요 시)
+| Deployment | 스케줄 | 소스 flow |
+|---|---|---|
+| `daily-weather-collection` | 매일 09:00 | prefect_pipeline |
+| `daily-nambu-pv-collection` | 매일 09:30 | nambu_pv_flow |
+| `monthly-namdong-pv-collection` | 매월 10일 10:00 | namdong_pv_flow |
+| `monthly-namdong-wind-collection` | 매월 10일 11:00 | namdong_wind_flow |
+| `monthly-koen-gen-collection` | 매월 10일 | gen_flow |
+| `daily-smp-collection` | 매일 06:00 | smp_flow |
+| `monthly-smp-aggregate` | 매월 2일 07:00 | smp_flow |
+| `daily-smp-realtime-jeju` | 매일 19:00 | smp_flow |
+| `weekly-smp-legacy-sync` | 매주 월 07:00 | smp_flow |
+| `jeju-realtime-collection` | 매 5분 | jeju_flow |
+| `jeju-sukub-monthly-collection` | 매월 1일 01:00 | jeju_flow |
+| `jeju-gen-monthly-collection` | 매월 1일 02:00 | jeju_flow |
+| `jeju-demand-quarterly-collection` | 분기 1일 03:00 | jeju_flow |
+| `full-etl` | 수동 | prefect_pipeline |
 
-### SMP 수동 수집/백필
+---
+
+## 데이터베이스 구조
+
+메인 DB: **`pv-data-postgres`** (host `localhost:5436`, 컨테이너 `pv-db:5432`, db `pv`). 총 12개 테이블이 **2계층**으로 구성됩니다.
+
+### 계층 모델: 소스별 수집 테이블 → 통합 코어 (dual-write 트리거)
+
+```
+수집기 ─INSERT→  nambu_generation ───┐
+                 namdong_generation  ├─[AFTER INSERT 트리거]→ generation  (plant_id 자동해소, source='api')
+                 wind_namdong/seobu/hangyoung ─┘                ▲
+                                                    plants ─FK──┘   (백필 적재분은 source='backfill')
+```
+
+수집기는 **발전사별 raw 테이블**에 적재하고, 5개 트리거가 `plant_id`를 해소해 **통합 `generation`** 으로 미러링합니다(없는 발전소는 `plants`에 자동 등록).
+
+### 통합 코어 (정규화 목표)
+
+**`plants`** — 발전소 마스터 (87행). 좌표·용량·연료원·운영사의 단일 진실 원천.
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `plant_id` | serial PK | |
+| `plant_name`, `unit_no` | varchar | **UNIQUE(plant_name, unit_no)** |
+| `plant_code` | varchar | 외부코드(예: nambu gencd) |
+| `fuel_type` | varchar | solar · wind · hydro · thermal · fuel_cell |
+| `operator` | varchar | nambu · namdong · seobu · hangyoung |
+| `region` | varchar | mainland · jeju |
+| `capacity_mw`, `capacity_confidence` | double·varchar | 용량 / 신뢰도(확실·근사·불확실) |
+| `lat`,`lon`,`address`,`site_name` | | 위치 |
+| `install_angle`,`module_spec`,`inverter_spec` | | PV 전용 스펙 |
+
+> 현재 분포: nambu solar 18 · namdong solar 23 / wind 5 / thermal 24 / fuel_cell 8 / hydro 4 · seobu wind 4 · hangyoung wind 1.
+
+**`generation`** — 시간별 발전량 통합 (약 **344만행**).
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `timestamp`, `plant_id` | timestamp·int | **PK (timestamp, plant_id)** · plant_id→`plants` FK |
+| `gen_kwh` | double | 단위 kWh |
+| `source` | varchar | `api`(라이브 트리거 ~1.3만) / `backfill`(이력 ~342만) |
+
+- 인덱스: `(plant_id, timestamp DESC)`, **BRIN**(timestamp)
+- **`v_generation_hourly`** 뷰: `generation ⋈ plants` (외부/FDW 노출용 — timestamp·plant_name·unit_no·fuel_type·operator·region·lat·lon·gen_kwh)
+
+### 소스별 수집 테이블 (트리거로 `generation` 미러링)
+
+| 테이블 | 행수 | 주요 컬럼 | 트리거 |
+|---|---:|---|---|
+| `nambu_generation` | 856K | datetime·gencd·hogi·plant_name·generation·daily_*(레거시 집계) | `dualwrite_nambu` |
+| `namdong_generation` | 872K | datetime·plant_name·**hour**·generation | `dualwrite_namdong` |
+| `wind_namdong` | 172K | timestamp·plant_name·generation · uniq(ts,plant) | `dualwrite_wind_namdong` |
+| `wind_seobu` / `wind_hangyoung` | — | 〃 (+ capacity_mw) | `dualwrite_wind_*` |
+| `nambu_plants` / `namdong_plants` | 0 | 레거시 메타(현재 미사용) | - |
+
+> ⚠️ raw 테이블은 발전사별로 스키마가 제각각(시간 컬럼 `datetime`/`timestamp`, namdong은 별도 `hour`, nambu는 daily 집계 컬럼)이라 통합 `generation`이 정규화 레이어 역할을 합니다.
+
+### SMP 테이블 (독립 — 트리거 없음)
+
+단위 원/kWh, 시각 KST 구간시작, `region` = land / jeju / unified(2010년 이전 단일가격).
+
+| 테이블 | 행수 | 컬럼 (유니크키) |
+|---|---:|---|
+| `smp_hourly` | 364K | timestamp · region · price — **uniq(timestamp, region)** |
+| `smp_weighted_avg` | 16K | period_type(daily/monthly/yearly) · period · region · price_type(smp/blmp) · weighted_avg — **uniq(4컬럼)** |
+| `smp_realtime_jeju` | 79K | timestamp(15분) · region · price · is_confirmed(D+1 확정) — **uniq(timestamp, region)** |
+
+> SMP 적재 시 `smp_data/<table>.csv`로 자동 미러링됩니다.
+
+### 외부 연동
+- 이 DB는 논리복제 `pub_all`(generation·plants·smp 등)을 발행합니다.
+- **Energy-hub**(:5437, 제주 디지털 트윈)가 FDW로 generation/plants/smp를 소비합니다. demand-postgres(:5433, 전국 수요)·energy-hub-db(:5437)는 별도 프로젝트 스택입니다.
+
+---
+
+## 실행 / 수동 수집
+
 ```bash
-# 시간별(최근 7일창 증분) + 일별 가중평균
-uv run python -m fetch_data.smp.smp_collect
+uv sync                                   # 의존성 설치
 
-# 월/연 가중평균(EPSIS, SMP·BLMP)
+# 운영 스택 기동
+make up
+
+# 수집기 수동 실행 (호스트, .env 로드 필요)
+uv run python -m fetch_data.smp.smp_collect            # SMP 시간별 + 일별 가중평균
 uv run python -m fetch_data.smp.smp_aggregate --period all
+uv run python -m fetch_data.smp.smp_realtime --backfill # 제주 실시간 과거 일괄
 
-# 제주 실시간 15분: 최근 / 과거 전체(2024-03~)
-uv run python -m fetch_data.smp.smp_realtime
-uv run python -m fetch_data.smp.smp_realtime --backfill
-
-# 과거 CSV 백필 (master=long-form / wide=27열 / epsis-daily=가중평균컬럼)
-uv run python -m fetch_data.smp.smp_backfill --mode epsis-daily --file land.csv --region land
-```
-
-## 수동 백필 (남부발전 2026~)
-
-`nambu_generation`에 “원하는 기간”을 백필하려면:
-```bash
-uv run python fetch_data/pv/nambu_backfill.py \
-  --db-url "postgresql+psycopg2://<DB_USER>:<DB_PASS>@localhost:5432/<DB_NAME>"
-```
-
-### Grafana(3006)에서 바로 보이게 백필하기
-현재 `http://localhost:3006`의 Grafana는 별도 스택(`docker/docker-compose.yml`)의 DB(`pv-data-postgres`, `localhost:5436`, `pv/pv`)를 기본 데이터소스로 사용합니다.
-
-그래서 Grafana(3006) 대시보드에서 “No data”가 뜬다면, 아래처럼 **Grafana가 바라보는 DB로 백필**해야 즉시 반영됩니다.
-```bash
+# 남부 PV 백필 (Grafana 3006이 보는 메인 DB로 적재)
 uv run python fetch_data/pv/nambu_backfill.py \
   --db-url "postgresql+psycopg2://pv:pv@localhost:5436/pv"
+  # 옵션: --start --end --gencd --hogi --slack --debug
+
+# 풍력 테이블 초기화 + CSV 백필
+uv run python scripts/init_wind_tables.py
+
+# DB 백업 / 복원 (→ NAS)
+scripts/backup_pv_db.sh
+scripts/restore_pv_db.sh <백업파일>
 ```
 
-옵션:
-- `--start`, `--end`: 없으면 실행 중 입력으로 받음
-- `--gencd`, `--hogi`: 특정 발전소/호기만
-- `--slack`: Slack 알림 전송
-- `--debug`: API 응답/코드 출력
+> 테스트/린트 설정은 없습니다.
+
+---
+
+## 환경 변수 (`.env`)
+
+| 변수 | 용도 |
+|---|---|
+| `LOCAL_DB_URL` / `PV_DATABASE_URL` / `DB_URL` | PostgreSQL 접속 (호스트/컨테이너) |
+| `PREFECT_API_URL` | Prefect 서버 |
+| `NAMBU_API_KEY` | 공공데이터포털(남부발전/기상) 키 |
+| `NAMDONG_WIND_KEY` | 남동 풍력 공공API 키 |
+| `SLACK_WEBHOOK_URL` | Slack 알림 |
+| `SMP_LEGACY_DB_URL` | SMP 개인 DB 백업(미설정 시 skip) |
+| `NAMDONG_*` | 남동 수집 파라미터(시작일·org·hoki·출력경로) |
+
+---
 
 ## 트러블슈팅
 
-### 1) `pv-db` 도커 DNS(`pv-db`)를 호스트에서 못 찾음
-호스트에서 스크립트를 실행할 땐 `--db-url`을 `localhost:<port>`로 지정하세요.
+1. **호스트에서 `pv-db` DNS를 못 찾음** → 스크립트에 `--db-url`을 `localhost:5436`으로 지정 (또는 `resolve_db_url`이 자동 전환).
+2. **Grafana(3006) “No data”** → Grafana가 보는 메인 DB(`localhost:5436`)에 적재했는지 확인.
+3. **Prefect 배포는 됐는데 실행 안 됨** → `docker logs -f pv-pipeline-worker`로 워커가 `pv-pool` 구독 중인지 확인. (루트스택 `pv-worker`는 docker.sock 없는 옛 워커이므로 띄우지 말 것.)
+4. **koenergy.kr SSL 오류** → 중간 인증서 누락 사이트로, 수집기가 `get_koen_ssl_context`로 체인을 보충합니다.
+5. **코드/스케줄 변경 반영** → `make rebuild` (flow는 `pv-pipeline:latest` 이미지로 실행되므로 재빌드 필요).
 
-### 2) 남부발전 API 인증 실패(401)
-`NAMBU_API_KEY`가 URL-encoded 형태로 제공되는 경우가 있어서, 본 스크립트는 **encoded 키도 그대로 요청에 넣는 모드**를 지원합니다. 브라우저에서 동작하는 URL을 기준으로 `.env` 값을 맞추세요.
-
-### 3) Prefect 배포는 되었는데 실행이 안 됨
-- Prefect Server가 실제로 실행 중인지 확인 (`PREFECT_API_URL`)
-- Worker가 `pv-pool`을 구독하고 있는지 확인: `docker logs -f pv-worker`
+자세한 아키텍처는 `ARCHITECTURE.md` 참고.
