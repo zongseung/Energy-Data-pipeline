@@ -46,6 +46,8 @@ if not NAMBU_API_KEY:
 
 # SMP 개인 DB 백업용(선택). 미설정 시 weekly 백업 flow가 자동 skip.
 SMP_LEGACY_DB_URL = os.getenv("SMP_LEGACY_DB_URL", "")
+# demand-postgres (제주 수급 → FDW 소비용). 컨테이너 내부 호스트명/포트.
+DEMAND_DB_URL = os.getenv("DEMAND_DB_URL", "postgresql+psycopg2://demand:demand@demand-postgres:5432/demand")
 
 os.environ.setdefault("PREFECT_API_URL", PREFECT_API_URL)
 
@@ -65,6 +67,7 @@ def get_job_variables():
             "SERVICE_KEY": SERVICE_KEY,
             "PV_DATABASE_URL": PV_DATABASE_URL,
             "DB_URL": PV_DATABASE_URL,
+            "DEMAND_DB_URL": DEMAND_DB_URL,
             "SLACK_WEBHOOK_URL": SLACK_WEBHOOK_URL,
             "NAMDONG_WIND_KEY": NAMDONG_WIND_KEY,
             "NAMDONG_START_DATE": NAMDONG_START_DATE,
@@ -77,7 +80,7 @@ def get_job_variables():
             "SMP_LEGACY_DB_URL": SMP_LEGACY_DB_URL,
             "TZ": "Asia/Seoul",
         },
-        "networks": [DOCKER_NETWORK],
+        "networks": [DOCKER_NETWORK, "weather-pipeline_prefect-new"],
         "volumes": [
             "/mnt/nvme/Energy-Data-pipeline/data:/app/data",
             "/mnt/iscsi-renewable/jeju_data:/mnt/iscsi-renewable/jeju_data",
@@ -449,6 +452,48 @@ async def deploy_jeju_demand_flow() -> None:
     print("Deployment 완료: 'jeju-demand-quarterly-collection' (1/4/7/10월 1일 03:00)")
 
 
+async def deploy_jeju_supply_demand_db_flow() -> None:
+    """제주 수급 → demand DB 동기화 플로우 배포 (10분마다, energy_hub FDW 소비용)"""
+    flow = import_object("prefect_flows.jeju_flow.jeju_supply_demand_db_flow")
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="jeju-supply-demand-db-sync",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/jeju_flow.py:jeju_supply_demand_db_flow",
+        parameters={},
+        schedules=[CronSchedule(cron="*/10 * * * *", timezone="Asia/Seoul")],  # 10분마다
+        tags=["jeju", "demand", "fdw"],
+        description="10분마다 제주 수급 5분 CSV를 demand-postgres로 동기화 (energy_hub가 FDW로 소비)",
+        job_variables=get_job_variables(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'jeju-supply-demand-db-sync' (매 10분)")
+
+
+async def deploy_ekr_pv_flow() -> None:
+    """한국농어촌공사 영암/율치 PV 연간 수집 플로우 배포 (odcloud 15005796)"""
+    flow = import_object("prefect_flows.ekr_pv_flow.yearly_ekr_pv_flow")
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="yearly-ekr-pv-collection",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/ekr_pv_flow.py:yearly_ekr_pv_flow",
+        parameters={},
+        schedules=[CronSchedule(cron="0 4 8 1 *", timezone="Asia/Seoul")],  # 매년 1월 8일 04:00 (차기 등록 2027-01-06 이후)
+        tags=["pv", "ekr", "yearly"],
+        description="매년 1월 한국농어촌공사 영암/율치 PV(odcloud 15005796) 전체 연도 멱등 수집 → generation 코어",
+        job_variables=get_job_variables(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'yearly-ekr-pv-collection' (매년 1월 8일 04:00)")
+
+
 async def deploy_smp_legacy_sync_flow() -> None:
     """SMP 개인 DB 백업 동기화 플로우 배포"""
     flow = import_object("prefect_flows.smp_flow.weekly_smp_legacy_sync_flow")
@@ -501,6 +546,8 @@ async def create_all_deployments() -> None:
     await deploy_jeju_sukub_monthly_flow()
     await deploy_jeju_gen_monthly_flow()
     await deploy_jeju_demand_flow()
+    await deploy_jeju_supply_demand_db_flow()
+    await deploy_ekr_pv_flow()
 
     print("\n" + "=" * 60)
     print("모든 Deployment 완료!")
@@ -522,6 +569,8 @@ async def create_all_deployments() -> None:
     print(" 12. jeju-gen-monthly-collection     - 매월 1일 02:00 (제주 연료원별 거래량)")
     print(" 13. jeju-demand-quarterly-collection- 분기 1일 03:00 (제주 시간별 전력수요)")
     print(" 14. monthly-koen-gen-collection     - 매월 10일 10:00 (KOEN 비태양광: 화력/연료전지/소수력)")
+    print(" 15. jeju-supply-demand-db-sync      - 매 10분 (제주 수급 → demand DB, energy_hub FDW)")
+    print(" 16. yearly-ekr-pv-collection        - 매년 1월 8일 (농어촌공사 영암/율치 PV → generation 코어)")
     print("")
 
 

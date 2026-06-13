@@ -95,3 +95,21 @@ def collect_jeju_demand(from_sukub: bool = False):
 def jeju_demand_flow(from_sukub: bool = False):
     """분기마다 시간별 제주 전력수요 수집 (data.go.kr 15065239)."""
     collect_jeju_demand(from_sukub=from_sukub)
+
+
+# ─── 제주 수급 5분 → demand-postgres 동기화 (10분, energy_hub FDW 소비용) ──────
+
+from fetch_data.jeju.load_jeju_demand_db import run as _jeju_demand_db_run
+
+
+@task(name="제주 수급 → demand DB 동기화", retries=2, retry_delay_seconds=60)
+def sync_jeju_supply_demand() -> int:
+    n = _jeju_demand_db_run(months_back=2)
+    get_run_logger().info(f"[제주수급→demand DB] {n}행 upsert")
+    return n
+
+
+@flow(name="jeju-supply-demand-db-sync", log_prints=True)
+def jeju_supply_demand_db_flow() -> int:
+    """10분마다 제주 수급 5분 CSV를 demand-postgres로 동기화 (energy_hub가 FDW로 소비)."""
+    return sync_jeju_supply_demand()
