@@ -10,6 +10,7 @@ from sqlalchemy.orm import declarative_base
 
 DEFAULT_DEMAND_DB_URL = "postgresql+psycopg2://demand:demand@demand-postgres:5432/demand"
 BATCH_SIZE = 1000
+HOURLY_BATCH_SIZE = 3000
 
 Base = declarative_base()
 
@@ -63,6 +64,22 @@ def get_last_5min_timestamp(engine: Engine) -> datetime | None:
         return connection.execute(select(func.max(Demand5Min.timestamp))).scalar_one()
 
 
+def get_last_demand_weather_timestamp(engine: Engine) -> datetime | None:
+    """Return the newest persisted hourly demand-weather timestamp."""
+    with engine.connect() as connection:
+        return connection.execute(select(func.max(DemandWeather1H.timestamp))).scalar_one()
+
+
+def get_first_unknown_timestamp(engine: Engine) -> datetime | None:
+    """Return the first legacy hourly placeholder timestamp, if present."""
+    with engine.connect() as connection:
+        return connection.execute(
+            select(func.min(DemandWeather1H.timestamp)).where(
+                DemandWeather1H.station_name == "UNKNOWN"
+            )
+        ).scalar_one()
+
+
 def upsert_demand_5min(engine: Engine, records: list[dict]) -> int:
     """Insert or update KPX demand records by timestamp in bounded batches."""
     for offset in range(0, len(records), BATCH_SIZE):
@@ -78,6 +95,28 @@ def upsert_demand_5min(engine: Engine, records: list[dict]) -> int:
                     "supply_reserve",
                     "reserve_rate",
                     "operation_reserve",
+                    "is_holiday",
+                    "day_type",
+                )
+            },
+        )
+        with engine.begin() as connection:
+            connection.execute(statement)
+    return len(records)
+
+
+def upsert_demand_weather(engine: Engine, records: list[dict]) -> int:
+    """Insert or update real hourly weather rows by timestamp and station."""
+    for offset in range(0, len(records), HOURLY_BATCH_SIZE):
+        statement = insert(DemandWeather1H).values(records[offset:offset + HOURLY_BATCH_SIZE])
+        statement = statement.on_conflict_do_update(
+            index_elements=["timestamp", "station_name"],
+            set_={
+                column: getattr(statement.excluded, column)
+                for column in (
+                    "temperature",
+                    "humidity",
+                    "demand_avg",
                     "is_holiday",
                     "day_type",
                 )
