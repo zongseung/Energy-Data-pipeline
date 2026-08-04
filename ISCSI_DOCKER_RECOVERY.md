@@ -95,7 +95,7 @@
 
 | Deployment | 주기 | 확인 결과 |
 |---|---|---|
-| `unified-demand-collection` | 10분 | 전국 5분 수요를 이어서 수집하고 매시 첫 실행에 수요-기상 시간 집계와 두 materialized view를 갱신. 18:50~19:20 예약 실행 연속 `Completed` |
+| `unified-demand-collection` | 10분 | 전국 5분 수요를 이어서 수집하고 매시 첫 실행에 수요-기상 시간 집계와 두 materialized view를 갱신. 최종 이미지의 21:00 예약 run `c2852d72-c117-4cab-9443-c6656c811509`도 `Completed` |
 | `jeju-realtime-collection` | 5분 | 15:10~15:30 최근 5회 연속 `Completed` |
 | `jeju-supply-demand-db-sync` | 10분 | DB 복구 후 15:20, 15:30 연속 `Completed` |
 | `daily-weather-collection` | 매일 09:00 | `SERVICE_KEY` -> `NAMDONG_WIND_KEY` 순서로 키를 해석. 8월 1~3일 수동 복구 run 모두 `Completed` |
@@ -125,7 +125,8 @@
 
 1. 기존 ASOS CSV를 현재 운영 데이터 경로로 옮긴 뒤 실제 누락일인
    `2026-08-01`~`2026-08-03`을 날짜순으로 수집했다. 각 날짜는 95개 관측소,
-   2,280개 시간 행을 가지며 세 run 모두 `Completed`됐다.
+   2,280개 시간 행을 가지며 세 run 모두 `Completed`됐다. 보간을 제거한 코드로
+   다시 수집한 뒤에도 세 파일 모두 기온·습도 결측이 0건임을 확인했다.
 2. 전국 수요 강제 복구 run `92f98475-356c-4fca-a484-61724ea9c6f6`은
    `Completed`됐다. `demand_weather_1h`은 6,103,911행, 최신
    `2026-08-03 23:00:00`까지 복구됐다.
@@ -144,7 +145,10 @@
 7. 확정 하루전 SMP는 `smp_hourly`에 `2026-08-03 23:00:00`까지 있다.
    실시간 Jeju SMP 원천이 응답 자체를 주지 않으면 flow를 실패/retry 처리한다.
    원천 표가 정상이나 아직 확정된 행이 없는 경우에는 0건으로 끝내되 가짜 가격을
-   넣지 않는다.
+   넣지 않는다. KPX가 미확정 문구를 rowspan으로 내려주는 실제 원본을 사용한
+   최종 검증 run `ed9081b1-3ead-47ad-8e19-0367f90de1ed`는 `Completed`됐다.
+   실행 전후 `smp_realtime_jeju`는 모두 78,912행, 최신
+   `2026-05-31 23:45:00`으로 동일했다.
 
 ## 수집 데이터 복구 명령
 
