@@ -1,11 +1,13 @@
 from datetime import date, datetime
 
 import asyncio
+import aiohttp
 import pandas as pd
 import pytest
+from sqlalchemy.dialects import postgresql
 
-from fetch_data.demand.collect import get_collection_start, prepare_records
-from fetch_data.demand.database import Demand5Min, DemandWeather1H
+from fetch_data.demand.collect import get_collection_start, prepare_records, request_with_retry
+from fetch_data.demand.database import Demand5Min, DemandWeather1H, upsert_demand_5min
 
 
 def test_gap_collection_starts_on_last_database_day():
@@ -52,3 +54,260 @@ def test_empty_requested_range_fails(monkeypatch):
         asyncio.run(
             collect.collect_range(object(), date(2026, 8, 3), date(2026, 8, 3))
         )
+
+
+async def _no_sleep(*args, **kwargs):
+    pass
+
+
+def _demand_frame(day, start_slot=0, slots=288):
+    return pd.DataFrame({
+        "기준일시": [
+            datetime.combine(day, datetime.min.time()) + pd.Timedelta(minutes=5 * slot)
+            for slot in range(start_slot, start_slot + slots)
+        ]
+    })
+
+
+def test_download_range_includes_first_and_last_dates(monkeypatch):
+    from fetch_data.demand import collect
+
+    calls = []
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(session, start, end):
+        calls.append((start, end))
+        return _demand_frame(start)
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    result = asyncio.run(collect.download_range(date(2026, 8, 1), date(2026, 8, 2)))
+
+    assert calls == [
+        (date(2026, 8, 1), date(2026, 8, 1)),
+        (date(2026, 8, 2), date(2026, 8, 2)),
+    ]
+    assert len(result) == 576
+
+
+def test_download_range_merges_partial_historical_attempts(monkeypatch):
+    from fetch_data.demand import collect
+
+    historic_day = date.today() - pd.Timedelta(days=1)
+    attempts = iter([_demand_frame(historic_day, 0, 144), _demand_frame(historic_day, 144, 144)])
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(*args):
+        return next(attempts)
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    result = asyncio.run(collect.download_range(historic_day, historic_day, max_retries=2))
+
+    assert len(result) == 288
+
+
+def test_download_range_rejects_incomplete_historical_day(monkeypatch):
+    from fetch_data.demand import collect
+
+    historic_day = date.today() - pd.Timedelta(days=1)
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(*args):
+        return _demand_frame(historic_day, 0, 10)
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="incomplete KPX demand data"):
+        asyncio.run(collect.download_range(historic_day, historic_day, max_retries=2))
+
+
+def test_download_range_allows_nonempty_partial_current_day(monkeypatch):
+    from fetch_data.demand import collect
+
+    source_day = date.today()
+    attempts = iter([_demand_frame(source_day, 0, 10), _demand_frame(source_day, 10, 10)])
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(*args):
+        return next(attempts)
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    result = asyncio.run(collect.download_range(source_day, source_day, max_retries=2))
+
+    assert len(result) == 20
+
+
+def test_failed_historical_day_stops_before_later_date_persistence(monkeypatch):
+    from fetch_data.demand import collect
+
+    first_day = date.today() - pd.Timedelta(days=2)
+    later_day = first_day + pd.Timedelta(days=1)
+    downloaded_days = []
+    upserted = []
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(session, start, end):
+        downloaded_days.append(start)
+        return pd.DataFrame() if start == first_day else _demand_frame(start)
+
+    def upsert(engine, records):
+        upserted.append(records)
+        return len(records)
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    monkeypatch.setattr(collect, "upsert_demand_5min", upsert)
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="failed KPX demand data"):
+        asyncio.run(collect.collect_range(object(), first_day, later_day))
+
+    assert downloaded_days == [first_day, first_day, first_day]
+    assert upserted == []
+
+
+def test_request_with_retry_returns_after_transient_failure(monkeypatch):
+    from fetch_data.demand import collect
+
+    class Response:
+        status = 200
+        headers = {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def read(self):
+            return b"ok"
+
+    class Session:
+        def __init__(self):
+            self.outcomes = [aiohttp.ClientError("temporary"), Response()]
+            self.calls = 0
+
+        def request(self, *args, **kwargs):
+            self.calls += 1
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    session = Session()
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    assert asyncio.run(request_with_retry(session, "GET", "https://example.test", max_attempts=2)) == b"ok"
+    assert session.calls == 2
+
+
+def test_request_with_retry_raises_after_exhaustion(monkeypatch):
+    from fetch_data.demand import collect
+
+    class Session:
+        def __init__(self):
+            self.calls = 0
+
+        def request(self, *args, **kwargs):
+            self.calls += 1
+            raise aiohttp.ClientError("offline")
+
+    session = Session()
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="Request failed after 2 attempts"):
+        asyncio.run(request_with_retry(session, "GET", "https://example.test", max_attempts=2))
+    assert session.calls == 2
+
+
+def test_upsert_compiles_timestamp_conflict_with_exact_update_columns():
+    class Connection:
+        statement = None
+
+        def execute(self, statement):
+            self.statement = statement
+
+    class Transaction:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __enter__(self):
+            return self.connection
+
+        def __exit__(self, *args):
+            pass
+
+    class Engine:
+        def __init__(self):
+            self.connection = Connection()
+
+        def begin(self):
+            return Transaction(self.connection)
+
+    engine = Engine()
+    upsert_demand_5min(engine, [{"timestamp": datetime(2026, 8, 4, 10, 0)}])
+
+    sql = str(engine.connection.statement.compile(dialect=postgresql.dialect()))
+    update_columns = {
+        column
+        for column in (
+            "current_demand",
+            "current_supply",
+            "supply_capacity",
+            "supply_reserve",
+            "reserve_rate",
+            "operation_reserve",
+            "is_holiday",
+            "day_type",
+        )
+        if f"{column} = excluded.{column}" in sql
+    }
+    assert "ON CONFLICT (timestamp) DO UPDATE SET" in sql
+    assert update_columns == {
+        "current_demand",
+        "current_supply",
+        "supply_capacity",
+        "supply_reserve",
+        "reserve_rate",
+        "operation_reserve",
+        "is_holiday",
+        "day_type",
+    }

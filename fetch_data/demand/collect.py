@@ -19,6 +19,7 @@ DOWNLOAD_URL = f"{BASE_URL}/downloadSukubCSV.do"
 BACKOFF_SCHEDULE = [1, 5, 10, 20, 30]
 BASE_THROTTLE_SECONDS = 0.4
 REQUEST_TIMEOUT = 30
+EXPECTED_INTERVALS_PER_DAY = 288
 COLUMN_MAPPING = {
     "기준일시": "timestamp",
     "현재수요(MW)": "current_demand",
@@ -117,21 +118,37 @@ async def download_range(
     async with aiohttp.ClientSession(timeout=timeout) as session:
         current = start
         while current <= end:
-            frame = pd.DataFrame()
-            for _ in range(max_retries):
+            attempts: list[pd.DataFrame] = []
+            last_error: Exception | None = None
+            for attempt in range(max_retries):
                 try:
                     frame = await download_segment(session, current, current)
                     if not frame.empty:
-                        break
-                except Exception:
-                    pass
-                await asyncio.sleep(throttle_seconds)
-            if not frame.empty:
-                frames.append(frame)
+                        attempts.append(frame)
+                        merged = pd.concat(attempts, ignore_index=True).drop_duplicates(
+                            subset=[frame.columns[0]], keep="first"
+                        )
+                        if len(merged) >= EXPECTED_INTERVALS_PER_DAY:
+                            break
+                except Exception as error:
+                    last_error = error
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(throttle_seconds)
+
+            if not attempts:
+                raise RuntimeError(f"failed KPX demand data for {current.isoformat()}") from last_error
+
+            merged = pd.concat(attempts, ignore_index=True).drop_duplicates(
+                subset=[attempts[0].columns[0]], keep="first"
+            )
+            if len(merged) < EXPECTED_INTERVALS_PER_DAY and current != date.today():
+                raise RuntimeError(
+                    f"incomplete KPX demand data for {current.isoformat()}: "
+                    f"{len(merged)}/{EXPECTED_INTERVALS_PER_DAY} rows"
+                )
+            frames.append(merged)
             current += timedelta(days=1)
 
-    if not frames:
-        return pd.DataFrame()
     result = pd.concat(frames, ignore_index=True)
     return result.drop_duplicates(subset=[result.columns[0]], keep="first")
 
