@@ -1,7 +1,7 @@
 """
 Prefect Flows: SMP(계통한계가격) 수집
 
-- daily_smp_collection_flow   : 매일 06:00  하루전시장 시간별 + 일별 가중평균(육지/제주)
+- daily_smp_collection_flow   : 매일 09:00  전날 하루전시장 시간별 + 일별 가중평균(육지/제주)
 - monthly_smp_aggregate_flow  : 매월 2일 07:00  월별/연도별 공식 가중평균
 - daily_smp_realtime_jeju_flow: 매일 19:00  제주 실시간 15분(전일 확정)
 - weekly_smp_legacy_sync_flow : 매주 월 07:00  공통 DB -> 개인 DB 백업 동기화

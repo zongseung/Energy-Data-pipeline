@@ -119,7 +119,7 @@ make db        # psql 접속
 | `monthly-namdong-pv-collection` | 매월 10일 10:00 | namdong_pv_flow |
 | `monthly-namdong-wind-collection` | 매월 10일 11:00 | namdong_wind_flow |
 | `monthly-koen-gen-collection` | 매월 10일 | gen_flow |
-| `daily-smp-collection` | 매일 06:00 | smp_flow |
+| `daily-smp-collection` | 매일 09:00 (전날 데이터) | smp_flow |
 | `monthly-smp-aggregate` | 매월 2일 07:00 | smp_flow |
 | `daily-smp-realtime-jeju` | 매일 19:00 | smp_flow |
 | `weekly-smp-legacy-sync` | 매주 월 07:00 | smp_flow |

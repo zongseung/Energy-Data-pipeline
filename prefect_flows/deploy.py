@@ -316,14 +316,14 @@ async def deploy_smp_flow() -> None:
         path="/app",
         entrypoint="prefect_flows/smp_flow.py:daily_smp_collection_flow",
         parameters={},
-        schedules=[CronSchedule(cron="0 6 * * *", timezone="Asia/Seoul")],  # 매일 06:00
+        schedules=[CronSchedule(cron="0 9 * * *", timezone="Asia/Seoul")],  # 매일 09:00
         tags=["smp", "daily"],
-        description="매일 06:00에 하루전시장 시간별 SMP(육지/제주) + 일별 가중평균 수집",
+        description="매일 09:00에 전날 하루전시장 시간별 SMP(육지/제주) + 일별 가중평균 수집",
         job_variables=get_job_variables(),
     )
 
     await deployment.apply()
-    print("Deployment 완료: 'daily-smp-collection' (매일 06:00)")
+    print("Deployment 완료: 'daily-smp-collection' (매일 09:00, 전날 데이터)")
 
 
 async def deploy_smp_aggregate_flow() -> None:
@@ -560,7 +560,7 @@ async def create_all_deployments() -> None:
     print("  3. monthly-namdong-pv-collection   - 매월 10일 10:00 (남동발전 PV)")
     print("  4. daily-nambu-pv-collection       - 매일 09:30 (남부발전 PV)")
     print("  5. monthly-namdong-wind-collection - 매월 10일 11:00 (남동발전 풍력)")
-    print("  6. daily-smp-collection            - 매일 06:00 (SMP 시간별+일별)")
+    print("  6. daily-smp-collection            - 매일 09:00 (전날 SMP 시간별+일별)")
     print("  7. monthly-smp-aggregate           - 매월 2일 07:00 (SMP 월/연 가중평균)")
     print("  8. daily-smp-realtime-jeju         - 매일 19:00 (제주 실시간 15분 SMP)")
     print("  9. weekly-smp-legacy-sync          - 매주 월 07:00 (개인 DB 백업)")
