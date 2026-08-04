@@ -1,0 +1,24 @@
+[Unit]
+Description=Energy data pipeline Docker stack
+Wants=network-online.target open-iscsi.service remote-fs.target mnt-iscsi.automount mnt-iscsi\x2drenewable.automount
+After=network-online.target open-iscsi.service remote-fs.target docker.service mnt-iscsi.automount mnt-iscsi\x2drenewable.automount
+After=mnt-iscsi.mount mnt-iscsi\x2drenewable.mount
+Requires=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/mnt/nvme/Energy-Data-pipeline
+ExecStartPre=/usr/bin/test -f /mnt/iscsi/postgres/demand-postgres/PG_VERSION
+ExecStartPre=/usr/bin/test -f /mnt/iscsi-renewable/postgres/pv-data-postgres/PG_VERSION
+ExecStart=/usr/bin/docker compose -f /mnt/nvme/weather-pipeline/docker/docker-compose.yml up -d demand-db
+ExecStart=/usr/bin/docker compose -f docker/docker-compose.yml up -d
+ExecStopPost=-/bin/sh -c '/usr/bin/docker compose -f docker/docker-compose.yml stop & /usr/bin/docker compose -f /mnt/nvme/weather-pipeline/docker/docker-compose.yml stop demand-db & wait'
+Restart=on-failure
+RestartSec=30
+TimeoutStartSec=180
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

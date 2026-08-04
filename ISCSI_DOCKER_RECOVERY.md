@@ -109,17 +109,24 @@
 |---|---|---|
 | `full-etl` | 수동 | 의도된 수동 실행이며 누락이 아님 |
 
-호스트 재부팅 자동화도 아직 완성되지 않았다.
+호스트 재부팅 자동화는 2026-08-04 21:26에 최초 적용했고, 검토 보완본을
+21:54에 다시 적용했다.
 
-1. Docker, `open-iscsi`, `iscsid` 자체는 enable 상태다.
-2. `energy-data-pipeline.service`는 아직 설치되지 않았다.
-3. 운영 compose와 `demand-postgres`의 restart policy는 기본값 `no`다.
-4. `/mnt/iscsi-renewable`의 fstab 항목에는 `_netdev`가 빠져 있다.
+1. Docker, `open-iscsi`, `iscsid`, `energy-data-pipeline.service`가 모두
+   `enabled`이고 현재 `active`다.
+2. 두 fstab 항목에 `_netdev`, automount, 장치·마운트 30초 timeout을 적용했다.
+3. unit은 두 `PG_VERSION`을 확인한 뒤 수급 DB와 운영 compose를 시작하며,
+   시작 실패 시 30초마다 재시도한다.
+4. 최종 unit의 두 사전검사와 두 Compose 시작은 모두 exit 0이었고,
+   `Result=success`, `NRestarts=0`이다.
+5. 직전 fstab은
+   `/etc/fstab.energy-data-pipeline.20260804215348.bak`에 보존했다.
+6. 최종 재시작 후 22:00의 전국수요, 제주 실시간, 제주 DB 동기화 예약 run이
+   모두 `Completed`됐다. DB 최신값은 전국수요 21:55, 제주수급 21:50이다.
 
-따라서 현재 프로세스가 살아 있는 동안에는 Prefect가 스케줄을 실행하지만,
-서버 재부팅 뒤에는 이 문서의 systemd unit과 fstab 보정을 적용하기 전까지
-자동 복구가 보장되지 않는다. 과거 `weather-pipeline`의 Prefect server/worker는
-중복 수집을 막기 위해 시작하지 않고 `demand-db`만 사용한다.
+실제 전원 재부팅 검증은 운영 점검 시간에 수행한다. 과거 `weather-pipeline`의
+Prefect server/worker는 중복 수집을 막기 위해 시작하지 않고 `demand-db`만
+사용한다.
 
 ## 2026-08-04 데이터 누락 복구 결과
 
@@ -326,6 +333,17 @@ docker exec demand-postgres pg_isready -U demand -d demand
 
 ## 재부팅 후 자동 복구 설정
 
+저장소에 포함된 설치 스크립트는 iSCSI 노드, fstab, systemd unit을 먼저 검증하고
+기존 fstab을 `/etc/fstab.energy-data-pipeline.<시각>.bak`으로 백업한 뒤 아래
+설정을 일괄 적용한다. 실행 중 두 Docker 스택이 잠시 재시작된다.
+
+```bash
+cd /mnt/nvme/Energy-Data-pipeline
+sudo ./scripts/install_boot_recovery.sh
+```
+
+아래 절차는 스크립트가 적용하는 설정을 수동으로 확인하거나 복구할 때 사용한다.
+
 ### 1. iSCSI 자동 로그인
 
 다음 두 조건이 모두 필요하다.
@@ -338,8 +356,7 @@ sudo systemctl enable iscsid.service open-iscsi.service
 
 ### 2. `/etc/fstab` 보정
 
-현재 `/mnt/iscsi-renewable` 항목에는 `_netdev`가 빠져 있다. 다음처럼 네트워크
-파일시스템임을 명시한다.
+두 iSCSI 항목은 다음처럼 네트워크 파일시스템으로 설정돼 있다.
 
 ```fstab
 UUID=a85a78d5-555f-4783-bf3a-e93088a03b55 /mnt/iscsi ext4 defaults,_netdev,nofail,x-systemd.automount,x-systemd.device-timeout=30s,x-systemd.mount-timeout=30s 0 2
@@ -360,19 +377,23 @@ sudo findmnt --verify --verbose
 ```ini
 [Unit]
 Description=Energy data pipeline Docker stack
-Wants=network-online.target
-After=network-online.target open-iscsi.service docker.service
+Wants=network-online.target open-iscsi.service remote-fs.target mnt-iscsi.automount mnt-iscsi\x2drenewable.automount
+After=network-online.target open-iscsi.service remote-fs.target docker.service mnt-iscsi.automount mnt-iscsi\x2drenewable.automount
+After=mnt-iscsi.mount mnt-iscsi\x2drenewable.mount
 Requires=docker.service
-RequiresMountsFor=/mnt/iscsi /mnt/iscsi-renewable
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/mnt/nvme/Energy-Data-pipeline
+ExecStartPre=/usr/bin/test -f /mnt/iscsi/postgres/demand-postgres/PG_VERSION
+ExecStartPre=/usr/bin/test -f /mnt/iscsi-renewable/postgres/pv-data-postgres/PG_VERSION
 ExecStart=/usr/bin/docker compose -f /mnt/nvme/weather-pipeline/docker/docker-compose.yml up -d demand-db
 ExecStart=/usr/bin/docker compose -f docker/docker-compose.yml up -d
-ExecStop=/usr/bin/docker compose -f docker/docker-compose.yml stop
-ExecStop=/usr/bin/docker compose -f /mnt/nvme/weather-pipeline/docker/docker-compose.yml stop demand-db
+ExecStopPost=-/bin/sh -c '/usr/bin/docker compose -f docker/docker-compose.yml stop & /usr/bin/docker compose -f /mnt/nvme/weather-pipeline/docker/docker-compose.yml stop demand-db & wait'
+Restart=on-failure
+RestartSec=30
 TimeoutStartSec=180
 TimeoutStopSec=180
 
@@ -386,9 +407,10 @@ sudo systemctl enable --now energy-data-pipeline.service
 systemctl status energy-data-pipeline.service --no-pager
 ```
 
-이 unit은 정상 종료 시 Docker 스택을 먼저 정지하고, 재부팅 시 iSCSI 마운트가
-준비된 뒤 운영 compose를 시작한다. NAS가 부팅 시점에 응답하지 않아 unit이
-실패했다면 NAS 복구 후 다음 한 줄로 다시 시작한다.
+이 unit은 정상 종료와 부분 기동 실패 모두에서 두 Docker 스택 정지를 시도하고,
+재부팅 시 iSCSI 마운트와 실제 PostgreSQL 데이터 디렉터리가 준비된 뒤 운영
+compose를 시작한다. NAS가 부팅 시점에 늦게 응답해 시작이 실패하면 30초 후 계속
+재시도한다. 수동 재시작은 다음 한 줄을 사용한다.
 
 ```bash
 sudo systemctl restart energy-data-pipeline.service
