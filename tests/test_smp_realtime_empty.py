@@ -8,7 +8,11 @@ from prefect_flows import smp_flow
 
 def _unconfirmed_grid():
     return [["구분", "구분", "08.04"]] + [
-        [f"{slot // 4 + 1}h", f"{slot % 4 + 1}구간", "확정가격은 D+1일 18시 공표"]
+        [
+            f"{slot // 4 + 1}h",
+            f"{slot % 4 + 1}구간",
+            "확정가격은D+1일18시까지공표예정입니다.",
+        ]
         for slot in range(96)
     ]
 

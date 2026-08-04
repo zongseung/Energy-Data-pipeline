@@ -38,7 +38,7 @@ logger = get_logger(__name__)
 _MMDD_RE = re.compile(r"^\s*(\d{1,2})\.(\d{1,2})")
 _HOUR_RE = re.compile(r"^\s*(\d+)\s*[hH]\s*$")
 _GUGAN_RE = re.compile(r"^\s*(\d+)\s*구간\s*$")
-_UNCONFIRMED_MARKER = "확정가격은D+1일18시공표"
+_UNCONFIRMED_MARKER = "확정가격은D+1일18시까지공표예정입니다."
 _UNCONFIRMED = object()
 SLOTS = SMPAPI.REALTIME_SLOTS_PER_DAY  # 96
 
