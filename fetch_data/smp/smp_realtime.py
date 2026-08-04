@@ -129,7 +129,7 @@ def run_realtime_collection(db_url: Optional[str] = None) -> int:
     )
     if grid is None:
         logger.warning("[realtime] 그리드 수집 실패")
-        return 0
+        raise RuntimeError("제주 실시간 SMP 원천 데이터가 비어 있습니다")
     df = parse_realtime_grid(grid, ref=date.today())
     if df.empty:
         logger.info("[realtime] 확정된 신규 데이터 없음")

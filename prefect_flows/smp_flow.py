@@ -67,10 +67,7 @@ def monthly_smp_aggregate_flow() -> int:
 
 @task(name="제주 실시간 SMP 수집 실행", retries=2, retry_delay_seconds=300)
 def run_smp_realtime_task() -> int:
-    inserted = run_realtime_collection()
-    if inserted == 0:
-        raise RuntimeError("제주 실시간 SMP 원천 데이터가 비어 있습니다")
-    return inserted
+    return run_realtime_collection()
 
 
 @flow(name="Daily SMP Realtime Jeju Flow", log_prints=True)
