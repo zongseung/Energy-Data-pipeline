@@ -33,6 +33,7 @@ import aiohttp
 import pandas as pd
 
 from fetch_data.common.logger import get_logger
+from fetch_data.jeju import jeju_csv_store
 
 logger = get_logger(__name__)
 
@@ -133,12 +134,21 @@ def _save_month(body: bytes, first: date) -> Optional[Path]:
     df = df[cols]
 
     out_path = OUT_DIR / f"jeju_sukub_{first.strftime('%Y%m')}.csv"
-    if out_path.exists():
-        existing = pd.read_csv(out_path, dtype=str)
-        existing["timestamp"] = pd.to_datetime(existing["timestamp"], errors="coerce")
-        df = pd.concat([existing, df], ignore_index=True)
-    df = df.drop_duplicates(subset="timestamp", keep="last").sort_values("timestamp")
-    df.to_csv(out_path, index=False, encoding="utf-8-sig")
+    with jeju_csv_store.file_lock(out_path):
+        if out_path.exists():
+            try:
+                existing = pd.read_csv(out_path, dtype=str)
+                if "timestamp" not in existing.columns:
+                    raise ValueError("timestamp 컬럼 없음")
+                existing["timestamp"] = pd.to_datetime(existing["timestamp"], errors="coerce")
+                if existing["timestamp"].isna().any():
+                    raise ValueError("유효하지 않은 timestamp")
+            except Exception as e:
+                logger.warning(f"  {first.strftime('%Y-%m')} 기존 파일 읽기 실패, 저장 생략: {e}")
+                return None
+            df = pd.concat([existing, df], ignore_index=True)
+        df = df.drop_duplicates(subset="timestamp", keep="last").sort_values("timestamp")
+        jeju_csv_store.atomic_to_csv(df, out_path)
     logger.info(f"  저장: {out_path.name} ({len(df)}행)")
     return out_path
 
