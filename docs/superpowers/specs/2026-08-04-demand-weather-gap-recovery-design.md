@@ -59,11 +59,9 @@ not print the credential.
 ### Nationwide Demand Collector
 
 The active collector writes directly to the existing demand PostgreSQL database
-through `DEMAND_DB_URL`. The collector converts only the SQLAlchemy driver part
-of that URL from `postgresql+psycopg2` to `postgresql+asyncpg` for its async
-session; host, port, credentials, and database name remain unchanged. It does
-not introduce a second demand database variable. It preserves the current
-uniqueness contract:
+through `DEMAND_DB_URL` with the project's existing synchronous PostgreSQL
+driver. It does not introduce another database variable or driver dependency.
+It preserves the current uniqueness contract:
 
 - `demand_5min`: one row per `timestamp`.
 - `demand_weather_1h`: one row per `(timestamp, station_name)`.
@@ -83,15 +81,19 @@ repeatedly downloading the full history.
 
 At the first 10-minute run of each hour, the flow aggregates complete
 `demand_5min` hours and joins them to the merged ASOS weather CSV. Recovery
-starts one hour after the latest stored `demand_weather_1h` timestamp and ends
-at the earlier of:
+starts at the earlier of the first legacy `station_name='UNKNOWN'` placeholder
+timestamp and one hour after the latest stored `demand_weather_1h` timestamp.
+It ends at the earlier of:
 
 - the latest complete demand hour; and
 - the latest available weather hour.
 
 The process does not fabricate weather rows. If weather is temporarily behind,
 the hourly boundary remains pending and is retried after daily weather recovery.
-Existing rows are updated by the same `(timestamp, station_name)` upsert.
+Existing rows are updated by the same `(timestamp, station_name)` upsert. After
+real station rows exist for an hour, the flow deletes that hour's legacy
+`UNKNOWN` placeholder. The normal hourly run recomputes the previous 48 hours,
+so weather arriving at 09:00 can repair every hour of the previous day.
 
 After an hourly write, the flow refreshes `mv_latest_weather` and
 `mv_hourly_national`. A refresh failure fails the flow so dashboards cannot look
@@ -100,11 +102,13 @@ healthy while remaining stale.
 ### Daily Weather Recovery
 
 The existing daily ASOS flow continues to collect the previous day at 09:00
-Asia/Seoul. Before normal scheduling is considered restored, recovery reads the
-merged ASOS CSV `date` column and builds the expected calendar-date set from the
-day after the latest `demand_weather_1h` timestamp through yesterday. Dates with
-no ASOS rows are collected in ascending order with the resolved key. Existing
-daily files are merged idempotently, so rerunning a boundary date is safe.
+Asia/Seoul. Before normal scheduling is considered restored, the existing
+merged ASOS CSV is copied once from the stopped pipeline's data directory into
+this repository's active data directory. Recovery reads its `date` column and
+builds the expected calendar-date set from the day containing the earliest
+unrepaired hourly timestamp through yesterday. Dates with no ASOS rows are
+collected in ascending order with the resolved key. Existing daily files are
+merged idempotently, so rerunning a boundary date is safe.
 
 The weather recovery completes before the historical hourly demand-weather
 aggregation, ensuring the join has source data for the whole recoverable range.
@@ -159,7 +163,8 @@ Automated tests cover:
 - database-derived backfill boundaries and recent-window behavior;
 - idempotent upsert identity for both demand tables;
 - empty-source-result failure;
-- hourly aggregation stopping at the common complete boundary; and
+- hourly aggregation stopping at the common complete boundary;
+- removal of `UNKNOWN` only after real station rows exist for the hour; and
 - the 10-minute Prefect schedule and deployment entry point.
 
 Production verification records row counts and maximum timestamps before and
