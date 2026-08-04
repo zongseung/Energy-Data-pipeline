@@ -473,6 +473,29 @@ async def deploy_jeju_supply_demand_db_flow() -> None:
     print("Deployment 완료: 'jeju-supply-demand-db-sync' (매 10분)")
 
 
+async def deploy_unified_demand_flow() -> None:
+    """전국 5분 수요 수집 및 시간별 수요-기상 집계 플로우 배포"""
+    flow = import_object("prefect_flows.demand_flow.unified_demand_collection_flow")
+
+    deployment = await Deployment.build_from_flow(
+        flow=flow,
+        name="unified-demand-collection",
+        work_pool_name="pv-pool",
+        path="/app",
+        entrypoint="prefect_flows/demand_flow.py:unified_demand_collection_flow",
+        parameters={"force_hourly": False},
+        schedules=[
+            CronSchedule(cron="*/10 * * * *", timezone="Asia/Seoul")
+        ],
+        tags=["demand", "weather", "hourly"],
+        description="10분마다 전국 5분 수요를 수집하고 매시 수요-기상 집계 및 뷰를 새로고침",
+        job_variables=get_job_variables(),
+    )
+
+    await deployment.apply()
+    print("Deployment 완료: 'unified-demand-collection' (매 10분)")
+
+
 async def deploy_ekr_pv_flow() -> None:
     """한국농어촌공사 영암/율치 PV 연간 수집 플로우 배포 (odcloud 15005796)"""
     flow = import_object("prefect_flows.ekr_pv_flow.yearly_ekr_pv_flow")
@@ -547,6 +570,7 @@ async def create_all_deployments() -> None:
     await deploy_jeju_gen_monthly_flow()
     await deploy_jeju_demand_flow()
     await deploy_jeju_supply_demand_db_flow()
+    await deploy_unified_demand_flow()
     await deploy_ekr_pv_flow()
 
     print("\n" + "=" * 60)
@@ -571,6 +595,7 @@ async def create_all_deployments() -> None:
     print(" 14. monthly-koen-gen-collection     - 매월 10일 10:00 (KOEN 비태양광: 화력/연료전지/소수력)")
     print(" 15. jeju-supply-demand-db-sync      - 매 10분 (제주 수급 → demand DB, energy_hub FDW)")
     print(" 16. yearly-ekr-pv-collection        - 매년 1월 8일 (농어촌공사 영암/율치 PV → generation 코어)")
+    print(" 17. unified-demand-collection       - 매 10분 (전국 수요 수집, 매시 수요-기상 집계)")
     print("")
 
 
