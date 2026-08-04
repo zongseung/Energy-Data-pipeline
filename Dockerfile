@@ -23,4 +23,4 @@ ENV PYTHONUNBUFFERED=1
 
 # 4. 실행 명령
 # Prefect 워커(Worker)를 실행하여 배포된 플로우(Flow)를 대기합니다.
-CMD ["uv", "run", "prefect", "worker", "start", "--pool", "default-agent-pool"]
+CMD ["uv", "run", "prefect", "worker", "start", "--pool", "pv-pool", "--type", "docker"]

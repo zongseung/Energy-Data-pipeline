@@ -93,12 +93,12 @@ def load_category(engine, category: str, out_dir: Path) -> int:
     if category not in FUEL_MAP:
         raise ValueError(f"알 수 없는 카테고리: {category} (가능: {list(FUEL_MAP)})")
     fuel = FUEL_MAP[category]
-    csv_path = Path(out_dir) / f"{category}_long.csv"
-    if not csv_path.exists():
-        logger.warning(f"[{category}] {csv_path} 없음 — 건너뜀")
+    src_path = Path(out_dir) / f"{category}_long.parquet"
+    if not src_path.exists():
+        logger.warning(f"[{category}] {src_path} 없음 — 건너뜀")
         return 0
 
-    df = pd.read_csv(csv_path)
+    df = pd.read_parquet(src_path)
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
     df["generation"] = pd.to_numeric(df["generation"], errors="coerce")
     df["plant_name"] = df["plant_name"].astype(str).str.strip()

@@ -109,7 +109,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  timestamp AS time,\n  plant_name,\n  generation\nFROM wind_namdong\nWHERE timestamp >= '${namdong_start}'::timestamp\n  AND timestamp <= '${namdong_end}'::timestamp\nORDER BY timestamp",
+          "rawSql": "SELECT\n  timestamp AS time,\n  plant_name,\n  gen_kwh AS generation\nFROM v_generation_hourly\nWHERE operator = 'namdong' AND fuel_type = 'wind'\n  AND timestamp >= '${namdong_start}'::timestamp\n  AND timestamp <= '${namdong_end}'::timestamp\nORDER BY timestamp",
           "refId": "A",
           "timeFrom": "0s",
           "timeShift": null
@@ -175,7 +175,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  SUM(generation) AS total_generation\nFROM wind_namdong\nWHERE timestamp >= '${namdong_start}'::timestamp\n  AND timestamp <= '${namdong_end}'::timestamp",
+          "rawSql": "SELECT\n  SUM(gen_kwh) AS total_generation\nFROM v_generation_hourly\nWHERE operator = 'namdong' AND fuel_type = 'wind'\n  AND timestamp >= '${namdong_start}'::timestamp\n  AND timestamp <= '${namdong_end}'::timestamp",
           "refId": "A"
         }
       ],
@@ -283,7 +283,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  timestamp AS time,\n  plant_name,\n  generation\nFROM wind_seobu\nWHERE timestamp >= '${seobu_start}'::timestamp\n  AND timestamp <= '${seobu_end}'::timestamp\nORDER BY timestamp",
+          "rawSql": "SELECT\n  timestamp AS time,\n  plant_name,\n  gen_kwh AS generation\nFROM v_generation_hourly\nWHERE operator = 'seobu'\n  AND timestamp >= '${seobu_start}'::timestamp\n  AND timestamp <= '${seobu_end}'::timestamp\nORDER BY timestamp",
           "refId": "A",
           "timeFrom": "0s",
           "timeShift": null
@@ -349,7 +349,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  SUM(generation) AS total_generation\nFROM wind_seobu\nWHERE timestamp >= '${seobu_start}'::timestamp\n  AND timestamp <= '${seobu_end}'::timestamp",
+          "rawSql": "SELECT\n  SUM(gen_kwh) AS total_generation\nFROM v_generation_hourly\nWHERE operator = 'seobu'\n  AND timestamp >= '${seobu_start}'::timestamp\n  AND timestamp <= '${seobu_end}'::timestamp",
           "refId": "A"
         }
       ],
@@ -457,7 +457,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  timestamp AS time,\n  SUM(generation) AS generation\nFROM wind_hangyoung\nWHERE timestamp >= '${hangyoung_start}'::timestamp\n  AND timestamp <= '${hangyoung_end}'::timestamp\nGROUP BY timestamp\nORDER BY timestamp",
+          "rawSql": "SELECT\n  timestamp AS time,\n  SUM(gen_kwh) AS generation\nFROM v_generation_hourly\nWHERE operator = 'hangyoung'\n  AND timestamp >= '${hangyoung_start}'::timestamp\n  AND timestamp <= '${hangyoung_end}'::timestamp\nGROUP BY timestamp\nORDER BY timestamp",
           "refId": "A",
           "timeFrom": "0s",
           "timeShift": null
@@ -523,7 +523,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  SUM(generation) AS total_generation\nFROM wind_hangyoung\nWHERE timestamp >= '${hangyoung_start}'::timestamp\n  AND timestamp <= '${hangyoung_end}'::timestamp",
+          "rawSql": "SELECT\n  SUM(gen_kwh) AS total_generation\nFROM v_generation_hourly\nWHERE operator = 'hangyoung'\n  AND timestamp >= '${hangyoung_start}'::timestamp\n  AND timestamp <= '${hangyoung_end}'::timestamp",
           "refId": "A"
         }
       ],

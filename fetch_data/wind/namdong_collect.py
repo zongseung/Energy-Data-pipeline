@@ -18,6 +18,7 @@ import requests
 from sqlalchemy import create_engine, text
 
 from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.generation_core import upsert_generation
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import now_kst
 from notify.slack_notifier import send_slack_message
@@ -191,40 +192,15 @@ def load_namdong_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
 # =========================================================
 
 def upsert_wind_namdong(df: pd.DataFrame, db_url: Optional[str] = None) -> int:
-    """
-    wind_namdong 테이블에 upsert합니다.
-    ON CONFLICT (timestamp, plant_name) DO UPDATE SET generation = EXCLUDED.generation
-    """
+    """남동발전 풍력을 신규 코어(plants/generation)에 UPSERT (구 wind_namdong write 대체)."""
     if df.empty:
         logger.info("[DB] 적재할 데이터가 없습니다.")
         return 0
 
-    resolved_url = resolve_db_url(db_url)
-    if not resolved_url:
-        raise RuntimeError("DB_URL이 설정되지 않았습니다.")
-
-    engine = create_engine(resolved_url)
-
-    upsert_sql = text("""
-        INSERT INTO wind_namdong (timestamp, plant_name, generation)
-        VALUES (:timestamp, :plant_name, :generation)
-        ON CONFLICT (timestamp, plant_name)
-        DO UPDATE SET generation = EXCLUDED.generation
-    """)
-
-    records = df[["timestamp", "plant_name", "generation"]].to_dict("records")
-    batch_size = 5000
-    total = 0
-
-    with engine.begin() as conn:
-        for i in range(0, len(records), batch_size):
-            batch = records[i : i + batch_size]
-            conn.execute(upsert_sql, batch)
-            total += len(batch)
-            logger.info(f"[DB] wind_namdong upsert: {total}/{len(records)}")
-
-    logger.info(f"[DB] wind_namdong 적재 완료: {total}행")
-    return total
+    return upsert_generation(
+        df[["timestamp", "plant_name", "generation"]],
+        operator="namdong", fuel_type="wind", db_url=db_url,
+    )
 
 
 # =========================================================

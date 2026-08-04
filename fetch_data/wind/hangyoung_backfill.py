@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
 from fetch_data.common.db_utils import resolve_db_url
+from fetch_data.common.generation_core import upsert_generation
 from fetch_data.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -49,9 +50,10 @@ def load_hangyoung_wind_csv(csv_path: Optional[str] = None) -> pd.DataFrame:
 
 
 def load_hangyoung_to_db(csv_path: Optional[str] = None, db_url: Optional[str] = None) -> int:
-    """
-    wind_hangyoung 테이블에 bulk insert합니다.
-    한경풍력은 unique constraint가 없으므로 truncate + insert 방식.
+    """한경풍력을 신규 코어(plants/generation)에 UPSERT (구 wind_hangyoung write 대체).
+
+    원본 CSV는 한 timestamp에 터빈/단지별(한경1·2단계 등) 여러 행이라
+    (timestamp, plant_name)별로 SUM(= 단지 총 출력)해 적재한다.
     """
     df = load_hangyoung_wind_csv(csv_path)
 
@@ -59,18 +61,10 @@ def load_hangyoung_to_db(csv_path: Optional[str] = None, db_url: Optional[str] =
         logger.info("적재할 데이터가 없습니다.")
         return 0
 
-    resolved_url = resolve_db_url(db_url)
-    if not resolved_url:
-        raise RuntimeError("DB_URL이 설정되지 않았습니다.")
-
-    engine = create_engine(resolved_url)
-
-    with engine.begin() as conn:
-        conn.execute(text("TRUNCATE TABLE wind_hangyoung"))
-        df.to_sql("wind_hangyoung", con=conn, if_exists="append", index=False)
-
-    logger.info(f"wind_hangyoung 적재 완료: {len(df)}행")
-    return len(df)
+    agg = df.groupby(["timestamp", "plant_name"], as_index=False)["generation"].sum()
+    return upsert_generation(
+        agg, operator="hangyoung", fuel_type="wind", db_url=db_url,
+    )
 
 
 if __name__ == "__main__":

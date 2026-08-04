@@ -4,13 +4,19 @@ import json
 import pandas as pd
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from datetime import datetime, timedelta, date as date_
-from sqlalchemy import create_engine, text
+from datetime import datetime, timedelta
+from sqlalchemy import create_engine
 
 from fetch_data.common.config import get_db_url, get_nambu_api_key
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import now_kst, parse_hour_column
 from fetch_data.constants import NamebuAPI
+from fetch_data.common.generation_core import upsert_generation
+from fetch_data.pv.nambu_state import (
+    collection_start,
+    count_hours_for_day,
+    get_nambu_targets,
+)
 
 logger = get_logger(__name__)
 
@@ -48,79 +54,25 @@ def _get_engine():
         _engine = create_engine(db_url)
     return _engine
 
-def _count_hours_for_day(engine_, gencd: str, hogi: int, day: date_) -> int:
-    q = text(
-        """
-        SELECT COUNT(DISTINCT EXTRACT(HOUR FROM datetime)) AS hours
-        FROM nambu_generation
-        WHERE gencd = :gencd
-          AND hogi = :hogi
-          AND datetime >= :day_start
-          AND datetime < :day_end
-        """
-    )
-    day_start = datetime.combine(day, datetime.min.time())
-    day_end = day_start + timedelta(days=1)
-    with engine_.connect() as conn:
-        return int(
-            conn.execute(
-                q,
-                {"gencd": gencd, "hogi": hogi, "day_start": day_start, "day_end": day_end},
-            ).scalar()
-            or 0
-        )
-
-
 def get_active_targets(engine_):
-    """
-    nambu_generation 테이블을 기준으로 수집 대상을 정하고,
-    마지막 기록(또는 미완성 일자)을 확인하여 백필 시작일을 결정합니다.
-    """
-    query = """
-    SELECT
-        gencd,
-        hogi,
-        MAX(datetime) AS last_dt,
-        MAX(plant_name) AS plant_name
-    FROM nambu_generation
-    GROUP BY gencd, hogi
-    """
-    with engine_.connect() as conn:
-        df = pd.read_sql(text(query), conn)
-
+    """Core 테이블의 마지막 기록을 기준으로 수집 시작일을 결정합니다."""
     active_targets = []
-    yesterday = now_kst().replace(tzinfo=None) - timedelta(days=1)
+    today = now_kst().date()
+    yesterday = today - timedelta(days=1)
 
-    for row in df.itertuples(index=False):
-        gencd = str(row.gencd).strip()
-        hogi = int(row.hogi)
-        plant_name = getattr(row, "plant_name", None)
-        last_dt = row.last_dt
-        # 필터링: 마지막 기록이 2025년 이전이면 발전 중단으로 간주하여 스킵
-        if last_dt and last_dt.year < 2025:
-            logger.info(f"{gencd} ({hogi}호기): {last_dt.year}년 이후 기록 없음. 수집 제외.")
+    for target in get_nambu_targets(engine_):
+        last_dt = target["last_dt"]
+        hours = count_hours_for_day(engine_, target["plant_id"], last_dt.date()) if last_dt else 0
+        start_dt = collection_start(last_dt, hours, today)
+        if start_dt is None:
+            logger.info(
+                f"{target['gencd']} ({target['hogi']}호기): "
+                f"{last_dt.year}년 이후 기록 없음. 수집 제외."
+            )
             continue
 
-        # 시작 날짜 결정:
-        # - 마지막 날짜의 시간 데이터가 24개 미만이면 그 날짜부터 재수집(해당 일자 데이터 replace)
-        # - 아니면 다음 날부터 수집
-        if last_dt:
-            last_day = last_dt.date()
-            hours = _count_hours_for_day(engine_, gencd, hogi, last_day)
-            if hours < 24:
-                start_dt = datetime.combine(last_day, datetime.min.time())
-            else:
-                start_dt = datetime.combine(last_day + timedelta(days=1), datetime.min.time())
-        else:
-            start_dt = now_kst().replace(tzinfo=None) - timedelta(days=365)
-
-        if start_dt.date() <= yesterday.date():
-            active_targets.append({
-                "gencd": gencd,
-                "hogi": hogi,
-                "plant_name": plant_name,
-                "start_dt": start_dt,
-            })
+        if start_dt.date() <= yesterday:
+            active_targets.append({**target, "start_dt": start_dt})
 
     logger.info(f"총 {len(active_targets)}개 발전소가 활성 상태이며 수집 대상입니다.")
     return active_targets
@@ -198,30 +150,12 @@ async def collect_and_save(engine_, targets):
                     ]
                 ].dropna(subset=["datetime", "gencd", "hogi"])
 
-                with engine_.begin() as conn:
-                    # 전체 날짜 범위를 한 번의 DELETE로 처리
-                    unique_days = sorted(final_df["datetime"].dt.date.unique())
-                    range_start = datetime.combine(unique_days[0], datetime.min.time())
-                    range_end = datetime.combine(unique_days[-1] + timedelta(days=1), datetime.min.time())
-                    conn.execute(
-                        text(
-                            """
-                            DELETE FROM nambu_generation
-                            WHERE gencd = :gencd
-                              AND hogi = :hogi
-                              AND datetime >= :range_start
-                              AND datetime < :range_end
-                            """
-                        ),
-                        {
-                            "gencd": target["gencd"],
-                            "hogi": int(target["hogi"]),
-                            "range_start": range_start,
-                            "range_end": range_end,
-                        },
-                    )
-
-                    final_df.to_sql("nambu_generation", con=conn, if_exists="append", index=False)
+                # 신규 코어(plants/generation)에 직접 UPSERT
+                core_df = final_df.rename(
+                    columns={"datetime": "timestamp", "gencd": "plant_code", "hogi": "unit_no"}
+                )[["timestamp", "plant_name", "unit_no", "plant_code", "generation"]].copy()
+                core_df["plant_name"] = target["plant_name"]
+                upsert_generation(core_df, operator="nambu", fuel_type="solar", engine=engine_)
 
                 total_rows += len(final_df)
                 logger.info(f"   -> {len(final_df)}행 저장 완료")

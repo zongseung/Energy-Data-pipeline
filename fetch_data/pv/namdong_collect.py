@@ -16,6 +16,7 @@ from fetch_data.common.utils import now_kst
 from fetch_data.constants import NamdongAPI
 from fetch_data.gen.namdong_collect import get_koen_ssl_context
 from fetch_data.pv.namdong_transform import read_csv_flexible, hour_columns, extract_hour
+from fetch_data.common.generation_core import upsert_generation
 from notify.slack_notifier import send_slack_message
 
 logger = get_logger(__name__)
@@ -304,20 +305,11 @@ def load_namdong_to_db(files: List[Path], start_dt: date, end_dt: date, db_url: 
         return 0
 
     merged = pd.concat(long_parts, ignore_index=True)
-    start_ts = datetime.combine(start_dt, datetime.min.time())
-    end_ts = datetime.combine(end_dt + timedelta(days=1), datetime.min.time())
 
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                """
-                DELETE FROM namdong_generation
-                WHERE datetime >= :start_dt AND datetime < :end_dt
-                """
-            ),
-            {"start_dt": start_ts, "end_dt": end_ts},
-        )
-        merged.to_sql("namdong_generation", con=conn, if_exists="append", index=False)
+    # 신규 코어 직접 UPSERT (구 namdong_generation write 대체).
+    # merged["datetime"]는 이미 date+(hour-1) 구간시작 = 코어 timestamp 규약과 동일.
+    core_df = merged.rename(columns={"datetime": "timestamp"})[["timestamp", "plant_name", "generation"]]
+    upsert_generation(core_df, operator="namdong", fuel_type="solar", engine=engine)
 
     return len(merged)
 

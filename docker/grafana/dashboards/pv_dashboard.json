@@ -80,7 +80,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT p.plant_name, p.latitude, p.longitude, COALESCE(SUM(g.generation), 0) as generation FROM nambu_plants p LEFT JOIN nambu_generation g ON p.plant_name = g.plant_name AND (g.datetime AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (g.datetime AT TIME ZONE 'Asia/Seoul') <= $__timeTo() WHERE p.latitude IS NOT NULL GROUP BY p.plant_name, p.latitude, p.longitude ORDER BY generation DESC",
+          "rawSql": "SELECT p.plant_name, p.lat AS latitude, p.lon AS longitude, COALESCE(SUM(g.gen_kwh), 0) as generation FROM plants p LEFT JOIN v_generation_hourly g ON p.plant_name = g.plant_name AND g.operator = 'nambu' AND (g.timestamp AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (g.timestamp AT TIME ZONE 'Asia/Seoul') <= $__timeTo() WHERE p.operator = 'nambu' AND p.fuel_type = 'solar' AND p.lat IS NOT NULL GROUP BY p.plant_name, p.lat, p.lon ORDER BY generation DESC",
           "refId": "A"
         }
       ],
@@ -158,7 +158,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT p.plant_name, p.latitude, p.longitude, COALESCE(SUM(g.generation), 0) as generation FROM namdong_plants p LEFT JOIN namdong_generation g ON p.plant_name = g.plant_name AND g.datetime >= $__timeFrom() AND g.datetime <= $__timeTo() WHERE p.latitude IS NOT NULL GROUP BY p.plant_name, p.latitude, p.longitude ORDER BY generation DESC",
+          "rawSql": "SELECT p.plant_name, p.lat AS latitude, p.lon AS longitude, COALESCE(SUM(g.gen_kwh), 0) as generation FROM plants p LEFT JOIN v_generation_hourly g ON p.plant_name = g.plant_name AND g.operator = 'namdong' AND g.fuel_type = 'solar' AND g.timestamp >= $__timeFrom() AND g.timestamp <= $__timeTo() WHERE p.operator = 'namdong' AND p.fuel_type = 'solar' AND p.lat IS NOT NULL GROUP BY p.plant_name, p.lat, p.lon ORDER BY generation DESC",
           "refId": "A"
         }
       ],
@@ -208,7 +208,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT date_trunc('hour', datetime AT TIME ZONE 'Asia/Seoul') as time, plant_name, SUM(generation) as generation FROM nambu_generation WHERE (datetime AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (datetime AT TIME ZONE 'Asia/Seoul') <= $__timeTo() GROUP BY date_trunc('hour', datetime AT TIME ZONE 'Asia/Seoul'), plant_name ORDER BY time",
+          "rawSql": "SELECT date_trunc('hour', timestamp AT TIME ZONE 'Asia/Seoul') as time, plant_name, SUM(gen_kwh) as generation FROM v_generation_hourly WHERE operator = 'nambu' AND (timestamp AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (timestamp AT TIME ZONE 'Asia/Seoul') <= $__timeTo() GROUP BY date_trunc('hour', timestamp AT TIME ZONE 'Asia/Seoul'), plant_name ORDER BY time",
           "refId": "A"
         }
       ],
@@ -258,7 +258,7 @@
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT (datetime + (hour * INTERVAL '1 hour')) as time, plant_name, SUM(generation) as generation FROM namdong_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo() GROUP BY (datetime + (hour * INTERVAL '1 hour')), plant_name ORDER BY time",
+          "rawSql": "SELECT timestamp as time, plant_name, SUM(gen_kwh) as generation FROM v_generation_hourly WHERE operator = 'namdong' AND fuel_type = 'solar' AND timestamp >= $__timeFrom() AND timestamp <= $__timeTo() GROUP BY timestamp, plant_name ORDER BY time",
           "refId": "A"
         }
       ],
@@ -293,7 +293,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(generation) as total FROM nambu_generation WHERE (datetime AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (datetime AT TIME ZONE 'Asia/Seoul') <= $__timeTo()",
+          "rawSql": "SELECT SUM(gen_kwh) as total FROM v_generation_hourly WHERE operator = 'nambu' AND (timestamp AT TIME ZONE 'Asia/Seoul') >= $__timeFrom() AND (timestamp AT TIME ZONE 'Asia/Seoul') <= $__timeTo()",
           "refId": "A"
         }
       ],
@@ -328,7 +328,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT SUM(generation) as total FROM namdong_generation WHERE datetime >= $__timeFrom() AND datetime <= $__timeTo()",
+          "rawSql": "SELECT SUM(gen_kwh) as total FROM v_generation_hourly WHERE operator = 'namdong' AND fuel_type = 'solar' AND timestamp >= $__timeFrom() AND timestamp <= $__timeTo()",
           "refId": "A"
         }
       ],
@@ -361,7 +361,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM nambu_plants",
+          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM plants WHERE operator = 'nambu' AND fuel_type = 'solar'",
           "refId": "A"
         }
       ],
@@ -394,7 +394,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM namdong_plants",
+          "rawSql": "SELECT COUNT(DISTINCT plant_name) as count FROM plants WHERE operator = 'namdong' AND fuel_type = 'solar'",
           "refId": "A"
         }
       ],

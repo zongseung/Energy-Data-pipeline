@@ -114,3 +114,5 @@ docs/
 !config/*.csv
 
 *.pem
+*.parquet
+backups/

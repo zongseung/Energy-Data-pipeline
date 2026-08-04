@@ -231,11 +231,11 @@ def p2():
 
         fuel_map = {"ocean_hydro": "hydro", "thermal": "thermal", "fuel_cell": "fuel_cell"}
         for cat, fuel in fuel_map.items():
-            csv_path = GEN_DATA_DIR / f"{cat}_long.csv"
+            csv_path = GEN_DATA_DIR / f"{cat}_long.parquet"
             if not csv_path.exists():
-                report[f"koen_{cat}"] = "CSV 없음 — 건너뜀"
+                report[f"koen_{cat}"] = "parquet 없음 — 건너뜀"
                 continue
-            names = pd.read_csv(csv_path, usecols=["plant_name"])["plant_name"].unique()
+            names = pd.read_parquet(csv_path, columns=["plant_name"])["plant_name"].unique()
             for name in names:
                 cap_info = KOEN_PLANT_CAPACITIES.get(name)
                 loc = resolve_location(name)
@@ -328,11 +328,11 @@ def p3():
 
     # CSV 3종
     for cat, fuel in CSV_BACKFILLS.items():
-        csv_path = GEN_DATA_DIR / f"{cat}_long.csv"
+        csv_path = GEN_DATA_DIR / f"{cat}_long.parquet"
         if not csv_path.exists():
-            print(f"  {cat}: CSV 없음 — 건너뜀")
+            print(f"  {cat}: parquet 없음 — 건너뜀")
             continue
-        df = pd.read_csv(csv_path)
+        df = pd.read_parquet(csv_path)
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
         df = df[df["timestamp"].notna()]
 
