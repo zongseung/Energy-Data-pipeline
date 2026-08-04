@@ -38,6 +38,28 @@ def test_realtime_smp_unconfirmed_grid_returns_zero_without_upsert(monkeypatch):
     assert upserts == []
 
 
+def test_realtime_smp_rowspan_unconfirmed_grid_returns_zero(monkeypatch):
+    grid = _unconfirmed_grid()
+    for row in grid[5:]:
+        row[-1] = ""
+    monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
+    monkeypatch.setattr(smp_realtime, "fetch_grid", lambda *args, **kwargs: grid)
+    monkeypatch.setattr(smp_realtime.C, "upsert_realtime_jeju", lambda *args, **kwargs: 0)
+
+    assert smp_realtime.run_realtime_collection() == 0
+
+
+def test_realtime_smp_all_empty_grid_raises_source_format_error(monkeypatch):
+    grid = _unconfirmed_grid()
+    for row in grid[1:]:
+        row[-1] = ""
+    monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
+    monkeypatch.setattr(smp_realtime, "fetch_grid", lambda *args, **kwargs: grid)
+
+    with pytest.raises(RuntimeError, match="원천 데이터 형식"):
+        smp_realtime.run_realtime_collection()
+
+
 def test_realtime_smp_failed_grid_raises_stale_source_error(monkeypatch):
     monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
     monkeypatch.setattr(smp_realtime, "fetch_grid", lambda *args, **kwargs: None)

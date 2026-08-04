@@ -40,6 +40,7 @@ _HOUR_RE = re.compile(r"^\s*(\d+)\s*[hH]\s*$")
 _GUGAN_RE = re.compile(r"^\s*(\d+)\s*구간\s*$")
 _UNCONFIRMED_MARKER = "확정가격은D+1일18시까지공표예정입니다."
 _UNCONFIRMED = object()
+_EMPTY = object()
 SLOTS = SMPAPI.REALTIME_SLOTS_PER_DAY  # 96
 
 
@@ -127,17 +128,23 @@ def parse_realtime_grid(grid: List[List[str]], ref: date) -> pd.DataFrame:
             price = C.parse_price(raw)
             if price is not None:
                 by_date[d][slot_idx] = price
-            elif raw is not None and re.sub(r"\s+", "", str(raw)) == _UNCONFIRMED_MARKER:
-                by_date[d][slot_idx] = _UNCONFIRMED
             else:
-                raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
+                normalized = "" if raw is None else re.sub(r"\s+", "", str(raw))
+                if normalized == _UNCONFIRMED_MARKER:
+                    by_date[d][slot_idx] = _UNCONFIRMED
+                elif raw is not None and normalized == "":
+                    by_date[d][slot_idx] = _EMPTY
+                else:
+                    raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
 
     records = []
     for d in date_list:
         prices = by_date[d]
-        if all(price is _UNCONFIRMED for price in prices):
+        if any(price is _UNCONFIRMED for price in prices) and all(
+            price is _UNCONFIRMED or price is _EMPTY for price in prices
+        ):
             continue
-        if any(price is _UNCONFIRMED or price is None for price in prices):
+        if any(price is _UNCONFIRMED or price is _EMPTY or price is None for price in prices):
             raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
         day_start = datetime(d.year, d.month, d.day)
         for slot_idx, price in enumerate(prices):
