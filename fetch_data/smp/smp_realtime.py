@@ -38,7 +38,7 @@ logger = get_logger(__name__)
 _MMDD_RE = re.compile(r"^\s*(\d{1,2})\.(\d{1,2})")
 _HOUR_RE = re.compile(r"^\s*(\d+)\s*[hH]\s*$")
 _GUGAN_RE = re.compile(r"^\s*(\d+)\s*구간\s*$")
-_UNCONFIRMED_MARKER = "확정가격은 D+1일"
+_UNCONFIRMED_MARKER = "확정가격은D+1일18시공표"
 _UNCONFIRMED = object()
 SLOTS = SMPAPI.REALTIME_SLOTS_PER_DAY  # 96
 
@@ -127,7 +127,7 @@ def parse_realtime_grid(grid: List[List[str]], ref: date) -> pd.DataFrame:
             price = C.parse_price(raw)
             if price is not None:
                 by_date[d][slot_idx] = price
-            elif raw is not None and _UNCONFIRMED_MARKER in str(raw):
+            elif raw is not None and re.sub(r"\s+", "", str(raw)) == _UNCONFIRMED_MARKER:
                 by_date[d][slot_idx] = _UNCONFIRMED
             else:
                 raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")

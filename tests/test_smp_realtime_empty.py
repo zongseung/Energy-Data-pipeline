@@ -75,6 +75,18 @@ def test_realtime_smp_unexpected_price_cell_raises_source_format_error(monkeypat
         smp_realtime.run_realtime_collection()
 
 
+def test_realtime_smp_marker_with_error_prefix_raises_source_format_error(monkeypatch):
+    grid = _unconfirmed_grid()
+    for row in grid[1:]:
+        row[-1] = "ERROR: 확정가격은 D+1일 18시 공표 malformed"
+    monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
+    monkeypatch.setattr(smp_realtime, "fetch_grid", lambda *args, **kwargs: grid)
+    monkeypatch.setattr(smp_realtime.C, "upsert_realtime_jeju", lambda *args, **kwargs: 0)
+
+    with pytest.raises(RuntimeError, match="원천 데이터 형식"):
+        smp_realtime.run_realtime_collection()
+
+
 def test_realtime_smp_duplicate_date_headers_raise_source_format_error(monkeypatch):
     grid = [["구분", "구분", "08.03", "08.03"]] + [
         [f"{slot // 4 + 1}h", f"{slot % 4 + 1}구간", "1", "2"]
