@@ -87,7 +87,9 @@ def upsert_demand_5min(engine: Engine, records: list[dict]) -> int:
         statement = statement.on_conflict_do_update(
             index_elements=["timestamp"],
             set_={
-                column: getattr(statement.excluded, column)
+                column: func.coalesce(
+                    getattr(statement.excluded, column), getattr(Demand5Min, column)
+                )
                 for column in (
                     "current_demand",
                     "current_supply",

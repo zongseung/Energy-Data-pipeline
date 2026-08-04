@@ -91,6 +91,19 @@ def _valid_demand_intervals(frame: pd.DataFrame, expected_day: date) -> int:
     return int(valid.sum())
 
 
+def _filter_requested_day(frame: pd.DataFrame, expected_day: date) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    timestamps = pd.to_datetime(frame.iloc[:, 0], errors="coerce")
+    return frame.loc[timestamps.notna() & (timestamps.dt.date == expected_day)].copy()
+
+
+def _merge_attempts(attempts: list[pd.DataFrame]) -> pd.DataFrame:
+    timestamp_column = attempts[0].columns[0]
+    combined = pd.concat(attempts, ignore_index=True).replace(r"^\s*$", pd.NA, regex=True)
+    return combined.groupby(timestamp_column, as_index=False, sort=False).last()
+
+
 async def download_segment(
     session: aiohttp.ClientSession, start_date: date, end_date: date
 ) -> pd.DataFrame:
@@ -131,12 +144,12 @@ async def download_range(
             last_error: Exception | None = None
             for attempt in range(max_retries):
                 try:
-                    frame = await download_segment(session, current, current)
+                    frame = _filter_requested_day(
+                        await download_segment(session, current, current), current
+                    )
                     if not frame.empty:
                         attempts.append(frame)
-                        merged = pd.concat(attempts, ignore_index=True).drop_duplicates(
-                            subset=[frame.columns[0]], keep="last"
-                        )
+                        merged = _merge_attempts(attempts)
                         if _valid_demand_intervals(merged, current) >= EXPECTED_INTERVALS_PER_DAY:
                             break
                 except Exception as error:
@@ -147,9 +160,7 @@ async def download_range(
             if not attempts:
                 raise RuntimeError(f"failed KPX demand data for {current.isoformat()}") from last_error
 
-            merged = pd.concat(attempts, ignore_index=True).drop_duplicates(
-                subset=[attempts[0].columns[0]], keep="last"
-            )
+            merged = _merge_attempts(attempts)
             valid_intervals = _valid_demand_intervals(merged, current)
             if valid_intervals < EXPECTED_INTERVALS_PER_DAY and current != date.today():
                 raise RuntimeError(
@@ -159,8 +170,7 @@ async def download_range(
             frames.append(merged)
             current += timedelta(days=1)
 
-    result = pd.concat(frames, ignore_index=True)
-    return result.drop_duplicates(subset=[result.columns[0]], keep="last")
+    return _merge_attempts(frames)
 
 
 def is_holiday(timestamp: datetime) -> bool:

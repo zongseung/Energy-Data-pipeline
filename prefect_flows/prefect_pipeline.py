@@ -14,7 +14,11 @@ import pandas as pd
 # 상위 디렉토리를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fetch_data.weather.asos_collect import select_data_async, station_ids
+from fetch_data.weather.asos_collect import (
+    normalize_weather_data,
+    select_data_async,
+    station_ids,
+)
 from prefect_flows.merge_to_all import merge_to_all_csv
 from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
@@ -49,15 +53,7 @@ async def collect_weather_data(date_str: str) -> pd.DataFrame:
 @task(name="기상 컬럼 정규화", retries=2)
 def process_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize raw ASOS columns without inventing missing measurements."""
-    result = df.copy()
-    result["ta"] = pd.to_numeric(result["ta"], errors="coerce")
-    result["hm"] = pd.to_numeric(result["hm"], errors="coerce")
-    return result.rename(columns={
-        "tm": "date",
-        "hm": "humidity",
-        "ta": "temperature",
-        "stnNm": "station_name",
-    })
+    return normalize_weather_data(df)
 
 
 @task(name="기상 데이터 저장", retries=2)
@@ -120,7 +116,7 @@ def daily_weather_collection_flow(target_date: str | None = None):
         # 1. 데이터 수집
         df_future = collect_weather_data.submit(target_date)
 
-        # 2. 결측치 처리
+        # 2. 원본 컬럼 정규화
         df_processed_future = process_missing_values.submit(df_future)
 
         # 3. 데이터 저장

@@ -177,6 +177,7 @@ def test_later_attempt_can_replace_a_blank_historical_demand(monkeypatch):
     incomplete = _demand_frame(historic_day)
     incomplete.loc[100, "현재수요(MW)"] = None
     complete = _demand_frame(historic_day)
+    complete.loc[200, "현재수요(MW)"] = None
     attempts = iter([incomplete, complete])
 
     class Session:
@@ -199,6 +200,30 @@ def test_later_attempt_can_replace_a_blank_historical_demand(monkeypatch):
 
     assert len(result) == 288
     assert result["현재수요(MW)"].notna().all()
+
+
+def test_current_day_rejects_rows_from_a_different_date(monkeypatch):
+    from fetch_data.demand import collect
+
+    requested_day = date.today()
+    wrong_day = requested_day - pd.Timedelta(days=1)
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(*args):
+        return _demand_frame(wrong_day)
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="failed KPX demand data"):
+        asyncio.run(collect.download_range(requested_day, requested_day, max_retries=2))
 
 
 def test_download_range_allows_nonempty_partial_current_day(monkeypatch):
@@ -374,22 +399,7 @@ def test_upsert_compiles_timestamp_conflict_with_exact_update_columns():
     upsert_demand_5min(engine, [{"timestamp": datetime(2026, 8, 4, 10, 0)}])
 
     sql = str(engine.connection.statement.compile(dialect=postgresql.dialect()))
-    update_columns = {
-        column
-        for column in (
-            "current_demand",
-            "current_supply",
-            "supply_capacity",
-            "supply_reserve",
-            "reserve_rate",
-            "operation_reserve",
-            "is_holiday",
-            "day_type",
-        )
-        if f"{column} = excluded.{column}" in sql
-    }
-    assert "ON CONFLICT (timestamp) DO UPDATE SET" in sql
-    assert update_columns == {
+    expected_columns = {
         "current_demand",
         "current_supply",
         "supply_capacity",
@@ -399,3 +409,8 @@ def test_upsert_compiles_timestamp_conflict_with_exact_update_columns():
         "is_holiday",
         "day_type",
     }
+    assert "ON CONFLICT (timestamp) DO UPDATE SET" in sql
+    assert all(
+        f"{column} = coalesce(excluded.{column}" in sql.lower()
+        for column in expected_columns
+    )

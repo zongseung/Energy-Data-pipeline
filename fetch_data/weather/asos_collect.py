@@ -9,7 +9,6 @@ import pandas as pd
 
 from fetch_data.common.config import get_service_key
 from fetch_data.common.logger import get_logger
-from fetch_data.common.impute_missing import impute_missing_values
 from fetch_data.constants import WeatherAPI
 from prefect_flows.merge_to_all import merge_to_all_csv, DATA_DIR
 
@@ -146,6 +145,21 @@ async def select_data_async(city_list, start: str, end: str) -> pd.DataFrame:
     return pd.concat(results, ignore_index=True)
 
 
+def normalize_weather_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize raw ASOS columns while preserving missing source values."""
+    result = df.copy()
+    result["ta"] = pd.to_numeric(result["ta"], errors="coerce")
+    result["hm"] = pd.to_numeric(result["hm"], errors="coerce")
+    return result.rename(
+        columns={
+            "tm": "date",
+            "hm": "humidity",
+            "ta": "temperature",
+            "stnNm": "station_name",
+        }
+    )
+
+
 # ===== 스크립트 직접 실행 시 =====
 
 if __name__ == "__main__":
@@ -169,30 +183,7 @@ if __name__ == "__main__":
     # 원하는 컬럼만 남기기
     df = df[["tm", "hm", "ta", "stnNm"]]
 
-    # 결측치 처리 (원본 컬럼명 사용: ta, hm, tm, stnNm)
-    logger.info("결측치 처리 중...")
-    result = impute_missing_values(
-        df,
-        columns=["ta", "hm"],
-        date_col="tm",
-        station_col="stnNm",
-        debug=True,
-    )
-    if isinstance(result, tuple):
-        df, debug_info = result
-    else:
-        df = result
-
-    # 컬럼 이름 변경
-    df.rename(
-        columns={
-            "tm": "date",          # 실제로는 datetime(시각 포함)
-            "hm": "humidity",
-            "ta": "temperature",
-            "stnNm": "station_name",
-        },
-        inplace=True,
-    )
+    df = normalize_weather_data(df)
 
     # 일별 CSV 저장 (컨테이너 기준: /app/data/asos_YYYYMMDD_YYYYMMDD.csv)
     daily_path = OUTPUT_DIR / f"asos_{start}_{end}.csv"

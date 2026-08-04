@@ -47,3 +47,19 @@ def test_weather_processing_does_not_impute_missing_measurements():
 
     assert pd.isna(result.loc[1, "temperature"])
     assert pd.isna(result.loc[1, "humidity"])
+
+
+def test_direct_weather_normalization_does_not_impute_missing_measurements():
+    source = pd.DataFrame(
+        {
+            "tm": ["2026-08-03 00:00", "2026-08-03 01:00", "2026-08-03 02:00"],
+            "stnNm": ["Seoul", "Seoul", "Seoul"],
+            "ta": [20.0, None, 22.0],
+            "hm": [60.0, None, 62.0],
+        }
+    )
+
+    result = asos_collect.normalize_weather_data(source)
+
+    assert pd.isna(result.loc[1, "temperature"])
+    assert pd.isna(result.loc[1, "humidity"])

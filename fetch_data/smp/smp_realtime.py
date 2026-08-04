@@ -38,6 +38,8 @@ logger = get_logger(__name__)
 _MMDD_RE = re.compile(r"^\s*(\d{1,2})\.(\d{1,2})")
 _HOUR_RE = re.compile(r"^\s*(\d+)\s*[hH]\s*$")
 _GUGAN_RE = re.compile(r"^\s*(\d+)\s*구간\s*$")
+_UNCONFIRMED_MARKER = "확정가격은 D+1일"
+_UNCONFIRMED = object()
 SLOTS = SMPAPI.REALTIME_SLOTS_PER_DAY  # 96
 
 
@@ -67,8 +69,13 @@ def _header_dates(header: List[str], ref: date) -> List[Optional[date]]:
     out: List[Optional[date]] = []
     seq = 0  # 날짜 열 순번
     for c in header:
-        if _MMDD_RE.match(c):
-            out.append(date0 + timedelta(days=seq))
+        match = _MMDD_RE.match(c)
+        if match:
+            expected = date0 + timedelta(days=seq)
+            actual = (int(match.group(1)), int(match.group(2)))
+            if actual != (expected.month, expected.day):
+                raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
+            out.append(expected)
             seq += 1
         else:
             out.append(None)
@@ -116,13 +123,22 @@ def parse_realtime_grid(grid: List[List[str]], ref: date) -> pd.DataFrame:
     for slot_idx, row in enumerate(slot_rows):  # slot_idx 0..95
         values = row[-n_dates:] if len(row) >= n_dates else row
         for j, d in enumerate(date_list):
-            by_date[d][slot_idx] = C.parse_price(values[j]) if j < len(values) else None
+            raw = values[j] if j < len(values) else None
+            price = C.parse_price(raw)
+            if price is not None:
+                by_date[d][slot_idx] = price
+            elif raw is not None and _UNCONFIRMED_MARKER in str(raw):
+                by_date[d][slot_idx] = _UNCONFIRMED
+            else:
+                raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
 
     records = []
     for d in date_list:
         prices = by_date[d]
-        if not all(p is not None for p in prices):
-            continue  # 미확정(플레이스홀더 포함) 날짜는 skip
+        if all(price is _UNCONFIRMED for price in prices):
+            continue
+        if any(price is _UNCONFIRMED or price is None for price in prices):
+            raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
         day_start = datetime(d.year, d.month, d.day)
         for slot_idx, price in enumerate(prices):
             ts = day_start + timedelta(minutes=15 * slot_idx)
@@ -193,18 +209,19 @@ def run_realtime_backfill(
                 "issue_date": issue.strftime("%Y-%m-%d"),
             },
         )
-        if grid is not None:
-            df = parse_realtime_grid(grid, ref=issue)
+        if grid is None:
+            raise RuntimeError("제주 실시간 SMP 원천 데이터가 비어 있습니다")
+        df = parse_realtime_grid(grid, ref=issue)
+        if not df.empty:
+            # end 이후 날짜는 제외(미래/미확정 방지)
+            df = df[df["timestamp"].dt.date <= end]
             if not df.empty:
-                # end 이후 날짜는 제외(미래/미확정 방지)
-                df = df[df["timestamp"].dt.date <= end]
-                if not df.empty:
-                    n = C.upsert_realtime_jeju(df, engine=engine)
-                    total += n
-                    logger.info(
-                        f"[realtime-backfill] issue={issue} -> {n}행 "
-                        f"({df['timestamp'].min()}~{df['timestamp'].max()})"
-                    )
+                n = C.upsert_realtime_jeju(df, engine=engine)
+                total += n
+                logger.info(
+                    f"[realtime-backfill] issue={issue} -> {n}행 "
+                    f"({df['timestamp'].min()}~{df['timestamp'].max()})"
+                )
         issue = date(issue.year + 1, issue.month, issue.day)
 
     logger.info(f"[realtime-backfill] 완료: 총 {total}행 ({start}~{end})")
