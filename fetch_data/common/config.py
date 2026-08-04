@@ -28,4 +28,4 @@ def get_nambu_api_key() -> str:
 
 
 def get_service_key() -> str:
-    return os.getenv("SERVICE_KEY", "")
+    return os.getenv("SERVICE_KEY") or os.getenv("NAMDONG_WIND_KEY", "")

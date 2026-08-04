@@ -28,12 +28,12 @@ PV_DATABASE_URL = os.getenv(
     "postgresql+psycopg2://pv:pv@pv-db:5432/pv"
 )
 
-SERVICE_KEY = os.getenv("SERVICE_KEY", "")
+NAMDONG_WIND_KEY = os.getenv("NAMDONG_WIND_KEY", "")
+SERVICE_KEY = os.getenv("SERVICE_KEY") or NAMDONG_WIND_KEY
 if not SERVICE_KEY:
     print("[WARN] SERVICE_KEY가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생할 수 있습니다.")
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
-NAMDONG_WIND_KEY = os.getenv("NAMDONG_WIND_KEY", "")
 NAMDONG_START_DATE = os.getenv("NAMDONG_START_DATE", "")
 NAMDONG_ORG_NO = os.getenv("NAMDONG_ORG_NO", "")
 NAMDONG_HOKI_S = os.getenv("NAMDONG_HOKI_S", "")

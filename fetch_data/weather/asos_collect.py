@@ -20,9 +20,7 @@ logger = get_logger(__name__)
 # 프로젝트 루트: /app
 
 # ===== 환경변수 / API 키 =====
-SERVICE_KEY = get_service_key()
-
-if not SERVICE_KEY:
+if not get_service_key():
     logger.warning("[WARN] SERVICE_KEY 환경변수가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생합니다.")
 
 API_URL = WeatherAPI.ENDPOINT
@@ -58,11 +56,11 @@ MAX_CONCURRENT = 10
 
 
 async def fetch_city(
-    session, city_id, start, end, semaphore: asyncio.Semaphore, max_retries: int = 3
+    session, city_id, start, end, semaphore: asyncio.Semaphore, service_key: str, max_retries: int = 3
 ) -> pd.DataFrame:
     """단일 지점 데이터를 비동기 수집 (semaphore로 동시 요청 제한, 429 시 재시도)"""
     params = {
-        "serviceKey": SERVICE_KEY,
+        "serviceKey": service_key,
         "pageNo": "1",
         "numOfRows": "999",
         "dataType": "JSON",
@@ -129,9 +127,13 @@ async def fetch_city(
 
 async def select_data_async(city_list, start: str, end: str) -> pd.DataFrame:
     """모든 지점 데이터를 비동기로 수집 (동시 요청 수 제한)"""
+    service_key = get_service_key()
+    if not service_key:
+        raise RuntimeError("SERVICE_KEY 또는 NAMDONG_WIND_KEY가 설정되지 않았습니다.")
+
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_city(session, city, start, end, semaphore) for city in city_list]
+        tasks = [fetch_city(session, city, start, end, semaphore, service_key) for city in city_list]
         results = await asyncio.gather(*tasks)
 
     # 비어있는 DF가 섞여 있어도 concat 가능하게 필터링
