@@ -71,7 +71,9 @@ def test_existing_month_fetches_and_merges_backfill_with_realtime_rows(tmp_path,
 
 
 @pytest.mark.parametrize("response", [None, _source_csv()])
-def test_existing_month_is_retained_when_backfill_fails_or_is_empty(tmp_path, monkeypatch, response):
+def test_existing_month_is_retained_and_run_fails_when_backfill_is_empty(
+    tmp_path, monkeypatch, response
+):
     month = date(2026, 7, 1)
     path = tmp_path / "jeju_sukub_202607.csv"
     existing = _existing_rows()
@@ -86,9 +88,28 @@ def test_existing_month_is_retained_when_backfill_fails_or_is_empty(tmp_path, mo
     monkeypatch.setattr(jeju_sukub_collect, "OUT_DIR", tmp_path)
     monkeypatch.setattr(jeju_sukub_collect, "_fetch_month", fetch_month)
 
-    assert asyncio.run(jeju_sukub_collect._run_async(month, date(2026, 7, 31))) == []
+    with pytest.raises(RuntimeError, match="Jeju monthly collection failed"):
+        asyncio.run(jeju_sukub_collect._run_async(month, date(2026, 7, 31)))
     assert calls == [(date(2026, 7, 1), date(2026, 7, 31))]
     assert path.read_bytes() == original_bytes
+
+
+def test_backfill_blank_cells_do_not_overwrite_existing_values(tmp_path, monkeypatch):
+    month = date(2026, 7, 1)
+    path = tmp_path / "jeju_sukub_202607.csv"
+    _existing_rows().to_csv(path, index=False, encoding="utf-8-sig")
+    monkeypatch.setattr(jeju_sukub_collect, "OUT_DIR", tmp_path)
+
+    assert jeju_sukub_collect._save_month(
+        _source_csv("20260701000000,,120,130,140,150"), month
+    ) == path
+
+    saved = pd.read_csv(path)
+    first = saved.loc[
+        pd.to_datetime(saved["timestamp"]) == pd.Timestamp("2026-07-01")
+    ].iloc[0]
+    assert first["supply_mw"] == 10
+    assert first["demand_mw"] == 120
 
 
 @pytest.mark.parametrize("contents", [

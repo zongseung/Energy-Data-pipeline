@@ -146,7 +146,13 @@ def _save_month(body: bytes, first: date) -> Optional[Path]:
             except Exception as e:
                 logger.warning(f"  {first.strftime('%Y-%m')} 기존 파일 읽기 실패, 저장 생략: {e}")
                 return None
-            df = pd.concat([existing, df], ignore_index=True)
+            existing = existing.drop_duplicates(subset="timestamp", keep="last")
+            fresh = df.drop_duplicates(subset="timestamp", keep="last")
+            df = (
+                fresh.set_index("timestamp")
+                .combine_first(existing.set_index("timestamp"))
+                .reset_index()
+            )
         df = df.drop_duplicates(subset="timestamp", keep="last").sort_values("timestamp")
         jeju_csv_store.atomic_to_csv(df, out_path)
     logger.info(f"  저장: {out_path.name} ({len(df)}행)")
@@ -203,6 +209,13 @@ async def _run_async(start: date, end: date) -> List[Path]:
         results = await asyncio.gather(*[handle(f, l) for f, l in ranges])
 
     saved = [p for p in results if p]
+    if len(saved) != len(ranges):
+        failed = [
+            first.strftime("%Y-%m")
+            for (first, _), result in zip(ranges, results)
+            if not result
+        ]
+        raise RuntimeError(f"Jeju monthly collection failed: {', '.join(failed)}")
     logger.info(f"완료: {len(saved)}개월 저장")
     return saved
 

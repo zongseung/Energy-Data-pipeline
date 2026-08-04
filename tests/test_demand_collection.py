@@ -65,7 +65,8 @@ def _demand_frame(day, start_slot=0, slots=288):
         "기준일시": [
             datetime.combine(day, datetime.min.time()) + pd.Timedelta(minutes=5 * slot)
             for slot in range(start_slot, start_slot + slots)
-        ]
+        ],
+        "현재수요(MW)": [70000.0] * slots,
     })
 
 
@@ -144,6 +145,62 @@ def test_download_range_rejects_incomplete_historical_day(monkeypatch):
         asyncio.run(collect.download_range(historic_day, historic_day, max_retries=2))
 
 
+def test_download_range_rejects_historical_day_with_blank_demand(monkeypatch):
+    from fetch_data.demand import collect
+
+    historic_day = date.today() - pd.Timedelta(days=1)
+    frame = _demand_frame(historic_day)
+    frame.loc[100, "현재수요(MW)"] = None
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(*args):
+        return frame
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(RuntimeError, match="incomplete KPX demand data"):
+        asyncio.run(collect.download_range(historic_day, historic_day, max_retries=2))
+
+
+def test_later_attempt_can_replace_a_blank_historical_demand(monkeypatch):
+    from fetch_data.demand import collect
+
+    historic_day = date.today() - pd.Timedelta(days=1)
+    incomplete = _demand_frame(historic_day)
+    incomplete.loc[100, "현재수요(MW)"] = None
+    complete = _demand_frame(historic_day)
+    attempts = iter([incomplete, complete])
+
+    class Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    async def download_segment(*args):
+        return next(attempts)
+
+    monkeypatch.setattr(collect.aiohttp, "ClientSession", lambda **kwargs: Session())
+    monkeypatch.setattr(collect, "download_segment", download_segment)
+    monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
+
+    result = asyncio.run(
+        collect.download_range(historic_day, historic_day, max_retries=2)
+    )
+
+    assert len(result) == 288
+    assert result["현재수요(MW)"].notna().all()
+
+
 def test_download_range_allows_nonempty_partial_current_day(monkeypatch):
     from fetch_data.demand import collect
 
@@ -202,6 +259,37 @@ def test_failed_historical_day_stops_before_later_date_persistence(monkeypatch):
 
     assert downloaded_days == [first_day, first_day, first_day]
     assert upserted == []
+
+
+def test_completed_day_is_persisted_before_a_later_day_fails(monkeypatch):
+    from fetch_data.demand import collect
+
+    first_day = date.today() - pd.Timedelta(days=2)
+    second_day = first_day + pd.Timedelta(days=1)
+    calls = []
+    upserted = []
+
+    async def download(start, end):
+        calls.append((start, end))
+        if start != end:
+            raise RuntimeError("multi-day download is not resumable")
+        if start == second_day:
+            raise RuntimeError("second day failed")
+        return _demand_frame(start)
+
+    monkeypatch.setattr(collect, "download_range", download)
+    monkeypatch.setattr(
+        collect,
+        "upsert_demand_5min",
+        lambda engine, records: upserted.append(records) or len(records),
+    )
+
+    with pytest.raises(RuntimeError, match="second day failed"):
+        asyncio.run(collect.collect_range(object(), first_day, second_day))
+
+    assert calls == [(first_day, first_day), (second_day, second_day)]
+    assert len(upserted) == 1
+    assert len(upserted[0]) == 288
 
 
 def test_request_with_retry_returns_after_transient_failure(monkeypatch):

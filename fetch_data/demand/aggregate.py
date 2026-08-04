@@ -46,7 +46,7 @@ def _complete_demand_hours(engine: Engine, start: datetime, end: datetime) -> pd
         FROM demand_5min
         WHERE timestamp >= :start AND timestamp < :end
         GROUP BY date_trunc('hour', timestamp)
-        HAVING COUNT(*) >= 12
+        HAVING COUNT(current_demand) >= 12
         ORDER BY timestamp
         """
     )
@@ -64,6 +64,7 @@ def _load_weather(weather_csv: Path) -> pd.DataFrame:
     weather["timestamp"] = pd.to_datetime(weather["date"], errors="coerce").dt.floor("h")
     weather = weather.dropna(subset=["timestamp", "station_name"])
     weather = weather[weather["station_name"] != "UNKNOWN"]
+    weather = weather.dropna(subset=["temperature", "humidity"])
     return weather.drop_duplicates(subset=["timestamp", "station_name"], keep="last")
 
 

@@ -82,6 +82,15 @@ def _normalize_csv_timestamps(content: str) -> str:
     )
 
 
+def _valid_demand_intervals(frame: pd.DataFrame, expected_day: date) -> int:
+    if "현재수요(MW)" not in frame.columns or frame.empty:
+        return 0
+    timestamps = pd.to_datetime(frame.iloc[:, 0], errors="coerce")
+    demand = pd.to_numeric(frame["현재수요(MW)"], errors="coerce")
+    valid = timestamps.notna() & demand.notna() & (timestamps.dt.date == expected_day)
+    return int(valid.sum())
+
+
 async def download_segment(
     session: aiohttp.ClientSession, start_date: date, end_date: date
 ) -> pd.DataFrame:
@@ -126,9 +135,9 @@ async def download_range(
                     if not frame.empty:
                         attempts.append(frame)
                         merged = pd.concat(attempts, ignore_index=True).drop_duplicates(
-                            subset=[frame.columns[0]], keep="first"
+                            subset=[frame.columns[0]], keep="last"
                         )
-                        if len(merged) >= EXPECTED_INTERVALS_PER_DAY:
+                        if _valid_demand_intervals(merged, current) >= EXPECTED_INTERVALS_PER_DAY:
                             break
                 except Exception as error:
                     last_error = error
@@ -139,18 +148,19 @@ async def download_range(
                 raise RuntimeError(f"failed KPX demand data for {current.isoformat()}") from last_error
 
             merged = pd.concat(attempts, ignore_index=True).drop_duplicates(
-                subset=[attempts[0].columns[0]], keep="first"
+                subset=[attempts[0].columns[0]], keep="last"
             )
-            if len(merged) < EXPECTED_INTERVALS_PER_DAY and current != date.today():
+            valid_intervals = _valid_demand_intervals(merged, current)
+            if valid_intervals < EXPECTED_INTERVALS_PER_DAY and current != date.today():
                 raise RuntimeError(
                     f"incomplete KPX demand data for {current.isoformat()}: "
-                    f"{len(merged)}/{EXPECTED_INTERVALS_PER_DAY} rows"
+                    f"{valid_intervals}/{EXPECTED_INTERVALS_PER_DAY} valid rows"
                 )
             frames.append(merged)
             current += timedelta(days=1)
 
     result = pd.concat(frames, ignore_index=True)
-    return result.drop_duplicates(subset=[result.columns[0]], keep="first")
+    return result.drop_duplicates(subset=[result.columns[0]], keep="last")
 
 
 def is_holiday(timestamp: datetime) -> bool:
@@ -171,7 +181,14 @@ def prepare_records(dataframe: pd.DataFrame) -> list[dict]:
     dataframe = dataframe.rename(columns=COLUMN_MAPPING)
     dataframe = dataframe[[column for column in COLUMN_MAPPING.values() if column in dataframe]].copy()
     if "timestamp" in dataframe:
-        dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"])
+        dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"], errors="coerce")
+        for column in set(COLUMN_MAPPING.values()) - {"timestamp"}:
+            if column in dataframe:
+                dataframe[column] = pd.to_numeric(dataframe[column], errors="coerce")
+        if "current_demand" in dataframe:
+            dataframe = dataframe.dropna(subset=["timestamp", "current_demand"])
+        else:
+            dataframe = dataframe.iloc[0:0]
         dataframe["is_holiday"] = dataframe["timestamp"].apply(is_holiday)
         dataframe["day_type"] = dataframe["timestamp"].apply(get_day_type)
     return dataframe.where(pd.notnull(dataframe), None).to_dict(orient="records")
@@ -187,11 +204,17 @@ def get_collection_start(
 
 
 async def collect_range(engine: Engine, start_date: date, end_date: date) -> int:
-    """Download a non-empty date range and upsert its prepared records."""
-    dataframe = await download_range(start_date, end_date)
-    if dataframe.empty and start_date <= end_date:
-        raise RuntimeError("수집된 전력수요 데이터가 없습니다")
-    return upsert_demand_5min(engine, prepare_records(dataframe))
+    """Persist each completed day before advancing to the next date."""
+    total = 0
+    current = start_date
+    while current <= end_date:
+        dataframe = await download_range(current, current)
+        records = prepare_records(dataframe)
+        if not records:
+            raise RuntimeError("수집된 전력수요 데이터가 없습니다")
+        total += upsert_demand_5min(engine, records)
+        current += timedelta(days=1)
+    return total
 
 
 async def collect_latest(engine: Engine, now: datetime | None = None) -> int:

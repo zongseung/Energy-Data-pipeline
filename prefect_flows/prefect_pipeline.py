@@ -15,7 +15,6 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fetch_data.weather.asos_collect import select_data_async, station_ids
-from fetch_data.common.impute_missing import impute_missing_values
 from prefect_flows.merge_to_all import merge_to_all_csv
 from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
@@ -47,32 +46,18 @@ async def collect_weather_data(date_str: str) -> pd.DataFrame:
     return df
 
 
-@task(name="결측치 처리", retries=2)
+@task(name="기상 컬럼 정규화", retries=2)
 def process_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """결측치를 처리합니다."""
-    print("\n결측치 처리 시작...")
-
-    result = impute_missing_values(
-        df,
-        columns=["ta", "hm"],
-        date_col="tm",
-        station_col="stnNm",
-        debug=True,
-    )
-
-    if isinstance(result, tuple):
-        df_imputed, _ = result
-    else:
-        df_imputed = result
-
-    df_imputed = df_imputed.rename(columns={
+    """Normalize raw ASOS columns without inventing missing measurements."""
+    result = df.copy()
+    result["ta"] = pd.to_numeric(result["ta"], errors="coerce")
+    result["hm"] = pd.to_numeric(result["hm"], errors="coerce")
+    return result.rename(columns={
         "tm": "date",
         "hm": "humidity",
         "ta": "temperature",
         "stnNm": "station_name",
     })
-
-    return df_imputed
 
 
 @task(name="기상 데이터 저장", retries=2)

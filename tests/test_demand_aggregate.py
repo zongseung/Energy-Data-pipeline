@@ -90,6 +90,7 @@ def test_aggregate_uses_complete_hours_and_real_deduplicated_weather(tmp_path, m
         "2026-08-04 09:00:00,Seoul,20,60\n"
         "2026-08-04 10:00:00,Seoul,21,61\n"
         "2026-08-04 10:30:00,Seoul,22,62\n"
+        "2026-08-04 10:00:00,Busan,25,\n"
         "2026-08-04 10:00:00,UNKNOWN,30,70\n"
         "2026-08-04 11:00:00,Busan,25,65\n",
     )
@@ -109,7 +110,7 @@ def test_aggregate_uses_complete_hours_and_real_deduplicated_weather(tmp_path, m
     saved = aggregate_demand_weather(engine, weather_csv, now=datetime(2026, 8, 4, 12, 34))
 
     statement, params = connection.execute.call_args.args
-    assert "HAVING COUNT(*) >= 12" in str(statement)
+    assert "HAVING COUNT(current_demand) >= 12" in str(statement)
     assert params == {
         "start": datetime(2026, 8, 2, 12),
         "end": datetime(2026, 8, 4, 12),

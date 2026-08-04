@@ -36,7 +36,8 @@ from fetch_data.smp.smp_scraper import fetch_grid, make_session
 logger = get_logger(__name__)
 
 _MMDD_RE = re.compile(r"^\s*(\d{1,2})\.(\d{1,2})")
-_GUGAN_RE = re.compile(r"^\s*\d+\s*구간\s*$")
+_HOUR_RE = re.compile(r"^\s*(\d+)\s*[hH]\s*$")
+_GUGAN_RE = re.compile(r"^\s*(\d+)\s*구간\s*$")
 SLOTS = SMPAPI.REALTIME_SLOTS_PER_DAY  # 96
 
 
@@ -81,21 +82,34 @@ def parse_realtime_grid(grid: List[List[str]], ref: date) -> pd.DataFrame:
     ref: 연도 추정 기준일(수집 시점).
     """
     if not grid or len(grid) < 2:
-        return pd.DataFrame()
+        raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
 
     header = grid[0]
     col_dates = _header_dates(header, ref)
     date_list = [d for d in col_dates if d is not None]  # 좌->우(과거->오늘)
     n_dates = len(date_list)
     if n_dates == 0:
-        return pd.DataFrame()
+        raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
 
     # 구간(슬롯) 행만 순서대로 수집
     slot_rows = [r for r in grid[1:] if any(_GUGAN_RE.match(c) for c in r)]
-    if len(slot_rows) < SLOTS:
-        logger.warning(f"[realtime] 구간 행 부족: {len(slot_rows)} < {SLOTS}")
-        return pd.DataFrame()
-    slot_rows = slot_rows[:SLOTS]
+    expected_slots = [(slot // 4 + 1, slot % 4 + 1) for slot in range(SLOTS)]
+    actual_slots = []
+    for row in slot_rows:
+        hour = _HOUR_RE.match(row[0]) if row else None
+        interval = _GUGAN_RE.match(row[1]) if len(row) > 1 else None
+        actual_slots.append(
+            (int(hour.group(1)), int(interval.group(1)))
+            if hour and interval
+            else None
+        )
+    if (
+        len(slot_rows) != SLOTS
+        or any(len(row) < n_dates + 2 for row in slot_rows)
+        or actual_slots != expected_slots
+    ):
+        logger.warning(f"[realtime] 잘못된 구간 구조: {len(slot_rows)} rows")
+        raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
 
     # 날짜별 96 슬롯 가격 수집 (각 행의 날짜값 = 마지막 n_dates 셀)
     by_date: dict = {d: [None] * SLOTS for d in date_list}

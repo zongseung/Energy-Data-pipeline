@@ -33,6 +33,28 @@ def test_realtime_smp_failed_grid_raises_stale_source_error(monkeypatch):
         smp_realtime.run_realtime_collection()
 
 
+def test_realtime_smp_truncated_grid_raises_source_format_error(monkeypatch):
+    monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
+    monkeypatch.setattr(
+        smp_realtime,
+        "fetch_grid",
+        lambda *args, **kwargs: _unconfirmed_grid()[:-1],
+    )
+
+    with pytest.raises(RuntimeError, match="원천 데이터 형식"):
+        smp_realtime.run_realtime_collection()
+
+
+def test_realtime_smp_duplicate_slot_grid_raises_source_format_error(monkeypatch):
+    grid = _unconfirmed_grid()
+    grid[-1] = grid[-2]
+    monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
+    monkeypatch.setattr(smp_realtime, "fetch_grid", lambda *args, **kwargs: grid)
+
+    with pytest.raises(RuntimeError, match="원천 데이터 형식"):
+        smp_realtime.run_realtime_collection()
+
+
 def test_realtime_smp_task_returns_zero_for_unconfirmed_grid(monkeypatch):
     monkeypatch.setattr(smp_flow, "run_realtime_collection", lambda: 0)
 
