@@ -19,8 +19,8 @@ async def run_demand_collection_task(engine) -> int:
 
 
 @task(name="수요-기상 시간별 집계 실행", retries=2, retry_delay_seconds=300)
-def run_hourly_aggregation_task(engine) -> int:
-    return aggregate_demand_weather(engine, DEFAULT_MERGED_CSV)
+def run_hourly_aggregation_task(engine, recover: bool = False) -> int:
+    return aggregate_demand_weather(engine, DEFAULT_MERGED_CSV, recover=recover)
 
 
 @flow(name="Unified Demand Collection Flow", log_prints=True)
@@ -31,7 +31,9 @@ async def unified_demand_collection_flow(force_hourly: bool = False) -> dict[str
         demand_5min = await run_demand_collection_task(engine)
         demand_weather_1h = 0
         if force_hourly or datetime.now().minute < 10:
-            demand_weather_1h = run_hourly_aggregation_task(engine)
+            demand_weather_1h = run_hourly_aggregation_task(
+                engine, recover=force_hourly
+            )
             refresh_demand_views(engine)
         return {
             "demand_5min": demand_5min,

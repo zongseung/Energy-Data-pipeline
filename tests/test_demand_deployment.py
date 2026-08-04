@@ -97,7 +97,7 @@ def test_unified_flow_skips_hourly_work_outside_first_ten_minutes(monkeypatch):
     monkeypatch.setattr(
         demand_flow,
         "run_hourly_aggregation_task",
-        lambda engine: calls.append(("aggregate", engine)) or 7,
+        lambda engine, recover=False: calls.append(("aggregate", engine, recover)) or 7,
     )
 
     assert asyncio.run(demand_flow.unified_demand_collection_flow.fn()) == {
@@ -126,7 +126,7 @@ def test_unified_flow_runs_hourly_work_in_first_ten_minutes(monkeypatch):
     monkeypatch.setattr(
         demand_flow,
         "run_hourly_aggregation_task",
-        lambda engine: calls.append(("aggregate", engine)) or 7,
+        lambda engine, recover=False: calls.append(("aggregate", engine, recover)) or 7,
     )
     monkeypatch.setattr(
         demand_flow,
@@ -140,7 +140,7 @@ def test_unified_flow_runs_hourly_work_in_first_ten_minutes(monkeypatch):
     }
     assert calls == [
         ("collect", "engine"),
-        ("aggregate", "engine"),
+        ("aggregate", "engine", False),
         ("refresh", "engine"),
     ]
 
@@ -164,7 +164,7 @@ def test_unified_flow_forces_hourly_work_outside_first_ten_minutes(monkeypatch):
     monkeypatch.setattr(
         demand_flow,
         "run_hourly_aggregation_task",
-        lambda engine: calls.append(("aggregate", engine)) or 7,
+        lambda engine, recover=False: calls.append(("aggregate", engine, recover)) or 7,
     )
     monkeypatch.setattr(
         demand_flow,
@@ -178,7 +178,7 @@ def test_unified_flow_forces_hourly_work_outside_first_ten_minutes(monkeypatch):
     }
     assert calls == [
         ("collect", "engine"),
-        ("aggregate", "engine"),
+        ("aggregate", "engine", True),
         ("refresh", "engine"),
     ]
 
@@ -193,6 +193,22 @@ def test_demand_collection_task_awaits_collect_latest(monkeypatch):
     monkeypatch.setattr(demand_flow, "collect_latest", collect_latest)
 
     assert asyncio.run(demand_flow.run_demand_collection_task.fn("engine")) == 12
+
+
+def test_hourly_aggregation_task_forwards_recovery_flag(monkeypatch):
+    from prefect_flows import demand_flow
+
+    calls = []
+    monkeypatch.setattr(
+        demand_flow,
+        "aggregate_demand_weather",
+        lambda engine, weather_csv, recover=False: calls.append(
+            (engine, weather_csv, recover)
+        ) or 7,
+    )
+
+    assert demand_flow.run_hourly_aggregation_task.fn("engine", recover=True) == 7
+    assert calls == [("engine", demand_flow.DEFAULT_MERGED_CSV, True)]
 
 
 @pytest.mark.parametrize(
@@ -221,7 +237,7 @@ def test_unified_flow_notifies_and_reraises_boundary_failures(
             raise RuntimeError("collector failure")
         return 12
 
-    def aggregate(engine):
+    def aggregate(engine, recover=False):
         calls.append("aggregate")
         if failing_stage == "aggregate":
             raise RuntimeError("aggregate failure")
