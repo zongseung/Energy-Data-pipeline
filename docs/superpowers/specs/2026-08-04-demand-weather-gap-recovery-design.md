@@ -124,10 +124,12 @@ No new Jeju deployment is added.
 
 ### Realtime Jeju SMP Visibility
 
-`daily-smp-realtime-jeju` treats a zero-row result as a failed or explicitly
-stale run instead of reporting `Completed`. It does not insert placeholders or
-interpolate prices. Recovery remains pending until the upstream source publishes
-numeric confirmed values or another authoritative source is selected.
+`daily-smp-realtime-jeju` distinguishes an unavailable source grid from a valid
+grid whose prices are not confirmed yet. An unavailable grid fails and retries;
+a valid unconfirmed grid completes with zero writes. Neither case inserts
+placeholders or interpolates prices. Recovery remains pending until the upstream
+source publishes numeric confirmed values or another authoritative source is
+selected.
 
 ## Data Flow
 
@@ -146,8 +148,9 @@ numeric confirmed values or another authoritative source is selected.
 
 - Missing credentials fail before network access.
 - HTTP and transient network errors use the existing bounded retry policy.
-- A non-empty requested historical range that yields no source rows fails the
-  task; zero rows are not silently reported as success.
+- A non-empty requested historical demand or weather range that yields no source
+  rows fails the task. Realtime SMP is the explicit exception: a valid grid with
+  no confirmed prices returns zero writes, while a missing grid fails.
 - Database writes remain transactional and use existing unique-key upserts.
 - Backfill stops on the first failed date or interval. A rerun resumes safely
   from the persisted database/file boundary.

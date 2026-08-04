@@ -312,7 +312,8 @@ Expected: all demand unit tests pass.
 **Interfaces:**
 - Produces: `unified_demand_collection_flow(force_hourly: bool = False) -> dict[str, int]`.
 - Produces: deployment `unified-demand-collection` with cron `*/10 * * * *` in `Asia/Seoul`.
-- Produces: `run_smp_realtime_task()` that raises when the source inserts zero rows.
+- Produces: realtime SMP collection that raises when the source grid is missing,
+  but returns zero without writes for a valid grid containing no confirmed rows.
 
 - [ ] **Step 1: Write failing orchestration tests**
 
@@ -333,20 +334,39 @@ def test_unified_demand_deployment_is_every_ten_minutes():
 
 ```python
 import pytest
-from prefect_flows import smp_flow
+from fetch_data.smp import smp_realtime
 
 
-def test_realtime_smp_zero_rows_is_stale_failure(monkeypatch):
-    monkeypatch.setattr(smp_flow, "run_realtime_collection", lambda: 0)
+def unconfirmed_grid():
+    return [["구분", "구분", "08.04"]] + [
+        [f"{slot // 4 + 1}h", f"{slot % 4 + 1}구간", "확정가격은 D+1일 18시 공표"]
+        for slot in range(96)
+    ]
+
+
+def test_realtime_smp_failed_grid_is_stale_failure(monkeypatch):
+    monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
+    monkeypatch.setattr(smp_realtime, "fetch_grid", lambda *args, **kwargs: None)
     with pytest.raises(RuntimeError, match="원천 데이터가 비어"):
-        smp_flow.run_smp_realtime_task.fn()
+        smp_realtime.run_realtime_collection()
+
+
+def test_realtime_smp_unconfirmed_grid_returns_zero(monkeypatch):
+    monkeypatch.setattr(smp_realtime, "make_session", lambda: object())
+    monkeypatch.setattr(
+        smp_realtime,
+        "fetch_grid",
+        lambda *args, **kwargs: unconfirmed_grid(),
+    )
+    assert smp_realtime.run_realtime_collection() == 0
 ```
 
 - [ ] **Step 2: Run tests to verify RED**
 
 Run: `uv run pytest tests/test_demand_deployment.py tests/test_smp_realtime_empty.py -q`
 
-Expected: demand deployment is absent and SMP zero rows do not raise.
+Expected: demand deployment is absent and a missing SMP source grid does not
+raise the required stale-source error.
 
 - [ ] **Step 3: Add the unified flow**
 
@@ -364,9 +384,10 @@ timezone="Asia/Seoul")`, and default `force_hourly=False`. Call it from
 
 - [ ] **Step 5: Make empty realtime SMP visible**
 
-Immediately after `run_realtime_collection()`, raise
-`RuntimeError("제주 실시간 SMP 원천 데이터가 비어 있습니다")` when the count is
-zero. Keep existing retries and failure notification behavior.
+Raise `RuntimeError("제주 실시간 SMP 원천 데이터가 비어 있습니다")` when
+`fetch_grid()` returns no grid. Keep existing retries and failure notification
+behavior. A structurally valid grid containing only unconfirmed publication
+markers returns zero without calling the upsert function.
 
 - [ ] **Step 6: Verify GREEN and run the full suite**
 
@@ -426,13 +447,13 @@ After the calculated set confirms these three audit-baseline gaps, run:
 ```bash
 PREFECT_API_URL=http://127.0.0.1:4400/api uv run prefect deployment run \
   'daily-weather-collection-flow/daily-weather-collection' \
-  --param target_date=20260801 --watch
+  --param target_date='"20260801"' --watch
 PREFECT_API_URL=http://127.0.0.1:4400/api uv run prefect deployment run \
   'daily-weather-collection-flow/daily-weather-collection' \
-  --param target_date=20260802 --watch
+  --param target_date='"20260802"' --watch
 PREFECT_API_URL=http://127.0.0.1:4400/api uv run prefect deployment run \
   'daily-weather-collection-flow/daily-weather-collection' \
-  --param target_date=20260803 --watch
+  --param target_date='"20260803"' --watch
 ```
 
 - [ ] **Step 4: Trigger nationwide recovery**
@@ -443,7 +464,7 @@ counts. Confirm real station rows replaced repairable `UNKNOWN` rows.
 
 ```bash
 PREFECT_API_URL=http://127.0.0.1:4400/api uv run prefect deployment run \
-  'unified-demand-collection-flow/unified-demand-collection' \
+  'Unified Demand Collection Flow/unified-demand-collection' \
   --param force_hourly=true --watch
 ```
 
@@ -456,7 +477,7 @@ trigger `jeju-supply-demand-db-sync`. Confirm `jeju_supply_demand` has rows on
 ```bash
 PREFECT_API_URL=http://127.0.0.1:4400/api uv run prefect deployment run \
   'jeju-sukub-monthly-collection/jeju-sukub-monthly-collection' \
-  --param target_month=2026-08 --watch
+  --param target_month='"2026-08"' --watch
 PREFECT_API_URL=http://127.0.0.1:4400/api uv run prefect deployment run \
   'jeju-supply-demand-db-sync/jeju-supply-demand-db-sync' --watch
 ```
@@ -465,8 +486,9 @@ PREFECT_API_URL=http://127.0.0.1:4400/api uv run prefect deployment run \
 
 Confirm both materialized-view maxima match the latest recoverable hourly data,
 the 10-minute deployment has a completed run, and the old weather Prefect server
-and worker remain stopped. Confirm zero-row realtime SMP is now failed/stale and
-that no placeholder price rows were inserted.
+and worker remain stopped. Confirm a missing realtime SMP source grid is
+failed/stale, a valid unconfirmed grid performs zero writes, and no placeholder
+price rows were inserted.
 
 - [ ] **Step 7: Update the runbook and run final checks**
 
