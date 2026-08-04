@@ -120,14 +120,24 @@ def _save_month(body: bytes, first: date) -> Optional[Path]:
         "신재생풍력(MW)": "wind_mw",
     }, inplace=True)
 
-    if "ts_raw" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["ts_raw"], format="%Y%m%d%H%M%S", errors="coerce")
-        df.drop(columns=["ts_raw"], inplace=True)
-        df = df[df["timestamp"].notna()].copy()
-        cols = ["timestamp"] + [c for c in df.columns if c != "timestamp"]
-        df = df[cols]
+    if "ts_raw" not in df.columns:
+        logger.warning(f"  {first.strftime('%Y-%m')} 기준일시 컬럼 없음, 저장 생략")
+        return None
+    df["timestamp"] = pd.to_datetime(df["ts_raw"], format="%Y%m%d%H%M%S", errors="coerce")
+    df.drop(columns=["ts_raw"], inplace=True)
+    df = df[df["timestamp"].notna()].copy()
+    if df.empty:
+        logger.info(f"  {first.strftime('%Y-%m')} 유효 행 없음, 저장 생략")
+        return None
+    cols = ["timestamp"] + [c for c in df.columns if c != "timestamp"]
+    df = df[cols]
 
     out_path = OUT_DIR / f"jeju_sukub_{first.strftime('%Y%m')}.csv"
+    if out_path.exists():
+        existing = pd.read_csv(out_path, dtype=str)
+        existing["timestamp"] = pd.to_datetime(existing["timestamp"], errors="coerce")
+        df = pd.concat([existing, df], ignore_index=True)
+    df = df.drop_duplicates(subset="timestamp", keep="last").sort_values("timestamp")
     df.to_csv(out_path, index=False, encoding="utf-8-sig")
     logger.info(f"  저장: {out_path.name} ({len(df)}행)")
     return out_path
@@ -174,10 +184,6 @@ async def _run_async(start: date, end: date) -> List[Path]:
         headers={"User-Agent": USER_AGENT}, connector=connector
     ) as session:
         async def handle(first: date, last: date) -> Optional[Path]:
-            out_path = OUT_DIR / f"jeju_sukub_{first.strftime('%Y%m')}.csv"
-            if out_path.exists():
-                logger.info(f"  {first.strftime('%Y-%m')} 이미 존재, 건너뜀")
-                return out_path
             logger.info(f"  {first.strftime('%Y-%m')} 수집 중...")
             body = await _fetch_month(session, sem, first, last)
             if body:
