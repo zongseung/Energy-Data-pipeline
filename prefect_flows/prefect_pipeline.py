@@ -19,6 +19,7 @@ from fetch_data.weather.asos_collect import (
     select_data_async,
     station_ids,
 )
+from fetch_data.weather.database import load_asos_df
 from prefect_flows.merge_to_all import merge_to_all_csv
 from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
@@ -75,6 +76,21 @@ def merge_weather_to_all(output_path: str) -> str:
     return merged_path
 
 
+@task(name="기상 데이터 DB 적재", retries=2)
+def load_weather_to_db(df: pd.DataFrame) -> int:
+    """정규화된 기상 데이터를 weather_asos 테이블에 적재합니다.
+
+    CSV 저장/병합은 이 태스크와 별개로 이미 완료된 단계이므로, DB 적재가
+    실패해도 그 결과를 되돌리지 않는다 — 예외를 흡수하고 0을 반환해
+    플로우 전체가 실패 처리되지 않게 한다.
+    """
+    try:
+        return load_asos_df(df)
+    except Exception as e:
+        print(f"DB 적재 실패(CSV 저장 결과에는 영향 없음): {type(e).__name__}: {e}")
+        return 0
+
+
 # ==============================
 # Utility Functions
 # ==============================
@@ -125,15 +141,19 @@ def daily_weather_collection_flow(target_date: str | None = None):
         # 4. 통합 파일에 병합
         merged_path_future = merge_weather_to_all.submit(output_path_future)
 
+        # 5. DB 적재 (CSV 저장/병합과 별개로 병렬 진행, 실패해도 플로우에 영향 없음)
+        db_rows_future = load_weather_to_db.submit(df_processed_future)
+
         output_path = output_path_future.result()
         merged_path = merged_path_future.result()
+        db_rows = db_rows_future.result()
 
         print("\n플로우 완료!")
 
-        # 5. Slack 알림
+        # 6. Slack 알림
         notify_slack_success.submit(
             "Weather ETL",
-            f"- 날짜: {target_date}\n- 파일: {output_path}\n- 통합: {merged_path}"
+            f"- 날짜: {target_date}\n- 파일: {output_path}\n- 통합: {merged_path}\n- DB 적재: {db_rows}행"
         )
 
         return output_path
