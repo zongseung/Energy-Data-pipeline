@@ -146,16 +146,27 @@ async def select_data_async(city_list, start: str, end: str) -> pd.DataFrame:
 
 
 def normalize_weather_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize raw ASOS columns while preserving missing source values."""
+    """Normalize raw ASOS columns while preserving missing source values.
+
+    일사량(icsr)은 기온/습도와 달리 일부 지점(관측 장비 미설치)이나 야간 시간대에
+    API가 빈 문자열("")을 준다 — pd.to_numeric(errors="coerce")로 NaN이 되어
+    weather_asos에는 NULL로 적재된다(정상). icsr 컬럼 자체가 없는 입력(예: 이
+    필드를 추가하기 전 호출부, 기존 테스트)도 KeyError 없이 NaN으로 채운다.
+    """
     result = df.copy()
     result["ta"] = pd.to_numeric(result["ta"], errors="coerce")
     result["hm"] = pd.to_numeric(result["hm"], errors="coerce")
+    if "icsr" in result.columns:
+        result["icsr"] = pd.to_numeric(result["icsr"], errors="coerce")
+    else:
+        result["icsr"] = float("nan")
     return result.rename(
         columns={
             "tm": "date",
             "hm": "humidity",
             "ta": "temperature",
             "stnNm": "station_name",
+            "icsr": "solar radiation",
         }
     )
 
@@ -180,8 +191,9 @@ if __name__ == "__main__":
         logger.warning("다운로드된 데이터가 없어 종료합니다.")
         sys.exit(0)
 
-    # 원하는 컬럼만 남기기
-    df = df[["tm", "hm", "ta", "stnNm"]]
+    # 원하는 컬럼만 남기기 (icsr=일사량은 응답에 없을 수도 있어 방어적으로 처리)
+    keep_cols = ["tm", "hm", "ta", "stnNm"] + (["icsr"] if "icsr" in df.columns else [])
+    df = df[keep_cols]
 
     df = normalize_weather_data(df)
 

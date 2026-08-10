@@ -45,7 +45,10 @@ async def collect_weather_data(date_str: str) -> pd.DataFrame:
     if missing_cols:
         raise ValueError(f"필요한 컬럼이 없습니다: {missing_cols}")
 
-    df = df[needed_cols]
+    # icsr(일사량)은 필수 컬럼에서 제외 — 없어도 기온/습도 수집은 그대로 성공해야 한다.
+    # 있으면 함께 가져가고, normalize_weather_data가 NULL 처리를 맡는다.
+    select_cols = needed_cols + (["icsr"] if "icsr" in df.columns else [])
+    df = df[select_cols]
     print(f"수집된 데이터: {len(df)}건")
 
     return df
