@@ -20,6 +20,51 @@
 
 ---
 
+## 조사 범위 (번호 없는 절 — 기존 §번호 유지용)
+
+`generation` 에 쓰는 경로를 다음으로 전수 열거했다.
+
+```
+grep -rn "upsert_generation(" --include=*.py .
+grep -rn "INSERT INTO generation" --include=*.py --include=*.sql .
+```
+
+**시간 라벨을 timestamp 로 바꾸는 파일 (= §1 판정 대상)**
+
+| 파일 | 역할 |
+|---|---|
+| `fetch_data/pv/nambu_collect.py:125-126` | 남부 태양광 일일 수집. 라벨 → 구간시작 |
+| `fetch_data/pv/nambu_backfill.py:134-135` | 남부 태양광 백필. 위와 **동일 로직의 독립 복제본** |
+| `fetch_data/pv/nambu_transform.py:85,88` | 남부 레거시 매핑(1시간 늦음). 현재 미사용 — §6-5 참조 |
+| `fetch_data/pv/namdong_collect.py:297` | 남동 태양광. 라벨 → 구간시작 |
+| `fetch_data/pv/namdong_transform.py:62-66` | `extract_hour` — 위 경로가 쓰는 라벨 파서 |
+| `fetch_data/pv/ekr_collect.py:121-122` | EKR 태양광. 라벨 → 구간시작 |
+| `fetch_data/gen/transform_gen.py:89,93-94` | KOEN 비태양광. 라벨 무보정 |
+| `fetch_data/wind/namdong_collect.py:126,130-141` | 남동 풍력 API. 라벨 무보정 |
+| `fetch_data/wind/seobu_backfill.py:43` | 서부 풍력. CSV `datetime` 그대로 |
+| `fetch_data/wind/hangyoung_backfill.py:43` | 한경 풍력. CSV `timestamp` 그대로 |
+| `fetch_data/common/utils.py:18-24` | `parse_hour_column` — 남부 두 경로가 쓰는 라벨 파서 |
+
+**조사했으나 시간 변환이 없어 판정 대상이 아닌 파일**
+
+| 파일 | 왜 해당 없음인가 |
+|---|---|
+| `fetch_data/common/generation_core.py:32-37` | 적재 계층. `timestamp` 를 **변형 없이 그대로 INSERT** |
+| `fetch_data/gen/load_gen.py:62-67` | 적재 계층. 위와 동일하게 무변형 INSERT |
+| `fetch_data/pv/nambu_bulk_sync.py` | API 응답을 raw CSV 로 append 만 한다. 시간 컬럼을 만들지 않음 |
+| `fetch_data/gen/pipeline.py:175` | `transform_gen.run()` 에 위임만 한다. 자체 변환 없음 |
+| `fetch_data/gen/namdong_collect.py` | koenergy.kr 원본 CSV 다운로더. 시간 변환 없음 |
+| `fetch_data/smp/smp_collect.py:84` | `generation` 이 아닌 SMP 테이블에 쓴다. §0 규약의 근거로만 인용 |
+
+즉 **시프트는 전부 변환 단계에만 존재하고 적재 단계에는 없다.**
+
+> `nambu_collect.py` 와 `nambu_backfill.py` 는 **공용 함수를 쓰지 않는다.** 같은 melt·시각 계산이
+> 각각 인라인으로 복제돼 있고, `nambu_collect` 는 `parse_hour_column` 만 import 한다
+> (`nambu_collect.py:12`). 한쪽만 고치면 두 규약이 다시 갈라진다.
+> 매일 09:30 KST 로 도는 라이브 수집기는 `nambu_collect` 쪽이다.
+
+---
+
 ## 1. 판정 표
 
 | operator | fuel_type | 원천 라벨 의미 | 코드 처리 | DB 저장 규약 | 근거(파일:라인) | 뷰 보정 필요 |
@@ -34,9 +79,6 @@
 | namdong | wind | `qhorGen01~24` (B551893 API). **라벨 의미를 코드·응답에서 확인 불가** | `NN → NN시`, `24 → 익일 00시` | 라벨 N을 N시로 저장 | `fetch_data/wind/namdong_collect.py:126,130-141` | **불명** (잠정 `-1시간`, §5) |
 | hangyoung | wind | 사전제작 CSV. **원천 라벨이 코드에 없음** | CSV `timestamp` 그대로 | 첫날 01시 시작 ~ 익일 00시 종료 (1-based 전개 흔적) | `fetch_data/wind/hangyoung_backfill.py:43`, `inputs/wind/Hangyoung_wind_power.csv` | **불명** (잠정 `-1시간`, §5) |
 | seobu | wind | 사전제작 CSV. **원천 라벨이 코드에 없음** | CSV `datetime` 그대로 | 첫날 00시 시작 ~ 23시 종료 (0-based 형태) | `fetch_data/wind/seobu_backfill.py:43`, `inputs/wind/seobu_wind.csv` | **불명** (잠정 `없음`, §5) |
-
-적재 계층(`fetch_data/common/generation_core.py:32-37`, `fetch_data/gen/load_gen.py:62-67`)은
-`timestamp`를 **변형 없이 그대로 INSERT** 한다 — 시프트는 전부 위 변환 단계에서만 일어난다.
 
 ---
 
@@ -164,11 +206,14 @@ gen_data_raw/thermal/koen_thermal_20220101-20220131.csv   (화력)
 태양광의 일출·남중·일몰 같은 시각 앵커가 풍력에는 존재하지 않고,
 풍속 교차검증도 불가능하다 — `data/asos_all_merged.csv`에는 습도·기온·일사만 있고 **풍속 컬럼이 없다.**
 
-| series | 왜 불명인가 | 잠정 기본값 | 무엇이 있으면 확정되나 |
+아래 "가장 유력한 값"은 **지시가 아니라 관찰**이다. 확정 근거가 없어서 불명으로 남긴 것이므로
+**§7 SQL은 이 열을 적용하지 않는다.** 그대로 복사해 시프트하면 358,176행이 잘못된다.
+
+| series | 왜 불명인가 | 가장 유력한 값 (**적용 안 함**) | 무엇이 있으면 확정되나 |
 |---|---|---|---|
-| namdong/wind | 라벨 `qhorGen01~24`는 코드에서 보이지만, 그 라벨이 구간시작인지 구간종료인지 정하는 근거가 없다. 발급기관이 남부(B552520)와 다른 B551893이라 "남부에서 검증됐으니 같다"고 단정할 수 없다. | **-1시간** (1-based 전개 흔적 + 한국 전력데이터 1~24 관례) | data.go.kr B551893 데이터셋 명세서의 `qhorGen` 정의 |
-| hangyoung/wind | 사전제작 CSV(`inputs/wind/Hangyoung_wind_power.csv`)를 timestamp 그대로 적재. **원천 라벨 자체가 코드 어디에도 없다.** 2013-01-01 01:00 시작 / 2025-03-01 00:00 종료는 1-based 전개의 흔적이지만, CSV 제작 과정이 리포에 없어 확인 불가. | **-1시간** (구조 신호가 1-based) | CSV를 만든 원본 자료·스크립트 |
-| seobu/wind | 위와 동일하게 원천 라벨 없음. 다만 구조 신호는 반대다 — 2017-01-01 **00:00** 시작 / 2023-06-30 23:00 종료로 **0~23시 형태**라 1시간 늦은 아티팩트는 아니다. | **없음(보정 안 함)** | CSV를 만든 원본 자료·스크립트 |
+| namdong/wind | 라벨 `qhorGen01~24`는 코드에서 보이지만, 그 라벨이 구간시작인지 구간종료인지 정하는 근거가 없다. 발급기관이 남부(B552520)와 다른 B551893이라 "남부에서 검증됐으니 같다"고 단정할 수 없다. | -1시간 (1-based 전개 흔적 + 한국 전력데이터 1~24 관례) | data.go.kr B551893 데이터셋 명세서의 `qhorGen` 정의 |
+| hangyoung/wind | 사전제작 CSV(`inputs/wind/Hangyoung_wind_power.csv`)를 timestamp 그대로 적재. **원천 라벨 자체가 코드 어디에도 없다.** 2013-01-01 01:00 시작 / 2025-03-01 00:00 종료는 1-based 전개의 흔적이지만, CSV 제작 과정이 리포에 없어 확인 불가. | -1시간 (구조 신호가 1-based) | CSV를 만든 원본 자료·스크립트 |
+| seobu/wind | 위와 동일하게 원천 라벨 없음. 다만 구조 신호는 반대다 — 2017-01-01 **00:00** 시작 / 2023-06-30 23:00 종료로 **0~23시 형태**라 1시간 늦은 아티팩트는 아니다. | 보정 없음 | CSV를 만든 원본 자료·스크립트 |
 
 **Task 3 권고:** 아래 §7 SQL에서 풍력 보정은 주석 처리해 두었다.
 확정 근거가 나오기 전까지는 보정하지 않고, 배포 문서에 "풍력 3계열은 ±1시간 불확실"을 명시하는 편이
@@ -220,9 +265,15 @@ gen_data_raw/thermal/koen_thermal_20220101-20220131.csv   (화력)
 ```sql
 -- research 배포 뷰의 시간 보정: 원천 hour-ending(라벨 N = 구간 [N-1,N)) 을
 -- 구간시작 KST 로 통일한다. 근거: docs/time-convention-audit.md
+--
+-- ※ generation.source 는 절대 노출하지 않는다(수집 방법 은폐). 아래 SELECT 목록에
+--   source 를 추가하지 말 것. 대신 연구원이 조인 없이 쓰도록 plants 속성을 펼쳐 둔다.
 CREATE OR REPLACE VIEW research.generation_kst AS
 SELECT
     g.plant_id,
+    p.operator,
+    p.fuel_type,
+    p.plant_name,
     g.timestamp - CASE
         -- 남부 태양광: 2025-12-31 이전 레거시 적재분만 1시간 늦다.
         --             2026-01-01 00:00 이후는 이미 구간시작이므로 건드리지 않는다.
@@ -240,8 +291,7 @@ SELECT
 
         ELSE INTERVAL '0'
     END AS timestamp,
-    g.gen_kwh,
-    g.source
+    g.gen_kwh
 FROM generation g
 JOIN plants p USING (plant_id);
 ```

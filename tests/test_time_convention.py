@@ -10,12 +10,19 @@
  보정이 필요한 경로는 docs/time-convention-audit.md 의 표를 따른다.)
 
   · 라벨 N -> (N-1)시  (구간시작, 보정 불필요)
-      fetch_data/common/utils.py::parse_hour_column  (현 남부 수집 경로)
+      fetch_data/common/utils.py::parse_hour_column        (남부 두 경로가 공유하는 라벨 파서)
+      fetch_data/pv/nambu_backfill.py::_rows_from_api_payload
+      fetch_data/pv/nambu_collect.py::collect_and_save     (위와 동일 로직의 인라인 복제본)
       fetch_data/pv/ekr_collect.py::_to_long
   · 라벨 N -> N시      (구간종료 그대로, 1시간 늦음 -> 뷰에서 -1h 필요)
       fetch_data/gen/transform_gen.py::transform_wide_to_long
       fetch_data/wind/namdong_collect.py::transform_wide_to_long
       fetch_data/pv/nambu_transform.py::preprocess_nambu  (남부 레거시 매핑)
+
+**남부 경로는 공용 함수가 없다.** `nambu_collect.py:125-126` 과 `nambu_backfill.py:134-135` 는
+같은 계산의 독립된 인라인 복제본이고, `nambu_collect` 는 `parse_hour_column` 만 import 한다.
+한쪽만 고치면 두 규약이 갈라지므로 **두 경로를 각각 구동**한다 —
+특히 `nambu_collect` 는 매일 09:30 KST 로 도는 라이브 수집기라 앞으로 생길 남부 행을 전부 만든다.
 
 DB / 네트워크 없이 순수 함수만으로 통과한다.
 """
@@ -53,8 +60,12 @@ def test_parse_hour_column_라벨을_0based_구간시작으로_변환():
     assert parse_hour_column("H01") == 0
 
 
-def test_nambu_현행_수집경로는_구간시작으로_적재():
-    """남부 현행 경로(nambu_collect/nambu_backfill 공용 변환): qhorgen01 -> 당일 00시."""
+def test_nambu_백필경로는_구간시작으로_적재():
+    """남부 백필 경로(`nambu_backfill._rows_from_api_payload`): qhorgen01 -> 당일 00시.
+
+    라이브 수집기(`nambu_collect`)는 이 함수를 쓰지 않는 **별도 복제본**이다.
+    그쪽은 test_nambu_라이브_수집기도_구간시작으로_적재 가 따로 구동한다.
+    """
     payload = {
         "ymd": DAY,
         "hogi": "1",
@@ -76,6 +87,46 @@ def test_nambu_현행_수집경로는_구간시작으로_적재():
     assert ts[33.0] == pd.Timestamp(f"{DAY} 23:00")
     # 구간시작 규약이면 익일로 넘어가는 값이 없어야 한다.
     assert out["datetime"].max() < pd.Timestamp(NEXT_DAY)
+
+
+def _시각계산_두줄(rel_path: str) -> list[str]:
+    """수집기 소스에서 hour0/datetime 계산 두 줄만 꺼낸다."""
+    src = (PROJECT_ROOT / rel_path).read_text(encoding="utf-8")
+    lines = [
+        line.strip()
+        for line in src.splitlines()
+        if 'df_long["hour0"]' in line or 'df_long["datetime"]' in line
+    ]
+    assert len(lines) == 2, f"{rel_path} 의 시각 계산 줄 구조가 바뀌었다: {lines}"
+    return lines
+
+
+def test_nambu_라이브_수집기도_구간시작으로_적재():
+    """라이브 수집기(nambu_collect)의 **인라인 복제본**을 소스에서 직접 구동한다.
+
+    `collect_and_save` 는 async + aiohttp 세션 + DB 엔진이 필요해 통째로 호출할 수 없다.
+    시각 계산 두 줄만 추출해 실행한다 — backfill 쪽만 통과하고 이쪽이 갈라지는 상황을 막는다.
+    이 경로가 매일 09:30 KST 로 돌며 앞으로 생길 남부 행을 전부 만든다.
+    """
+    collect_lines = _시각계산_두줄("fetch_data/pv/nambu_collect.py")
+
+    # 두 파일이 같은 계산의 복제본이라는 사실 자체를 고정한다.
+    assert collect_lines == _시각계산_두줄("fetch_data/pv/nambu_backfill.py")
+
+    ns = {
+        "pd": pd,
+        "parse_hour_column": parse_hour_column,
+        "df_long": pd.DataFrame(
+            {"h_str": ["qhorgen01", "qhorgen12", "qhorgen24"], "ymd": [DAY] * 3}
+        ),
+    }
+    exec("\n".join(collect_lines), ns)
+
+    assert list(ns["df_long"]["datetime"]) == [
+        pd.Timestamp(f"{DAY} 00:00"),
+        pd.Timestamp(f"{DAY} 11:00"),
+        pd.Timestamp(f"{DAY} 23:00"),
+    ]
 
 
 def test_ekr_는_구간시작으로_적재():
