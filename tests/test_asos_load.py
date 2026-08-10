@@ -1,9 +1,11 @@
 """weather_asos 적재(load_asos_df) 테스트.
 
 DB 없이 통과하는 부분(컬럼 매핑, 빈/결측 DataFrame 처리, upsert SQL 형태)과
-실제 DB가 있을 때만 도는 라운드트립 테스트(skipif)로 나뉜다.
+PYTEST_DB_WRITE=1로 명시 옵트인했을 때만 도는 실제 DB 라운드트립 테스트로 나뉜다.
+기본 `pytest` 실행은 운영 DB에 어떤 DDL/INSERT/DELETE도 내지 않는다.
 """
 
+import os
 from datetime import datetime
 
 import pandas as pd
@@ -90,6 +92,27 @@ def test_load_asos_df_upserts_on_timestamp_and_station_name_with_coalesce():
     assert "on conflict (timestamp, station_name) do update set" in sql
     for column in ("temperature", "humidity", "solar_radiation"):
         assert f"{column} = coalesce(excluded.{column}, weather_asos.{column})" in sql
+
+
+def test_load_asos_df_dedupes_same_key_within_one_batch():
+    """같은 (timestamp, station_name)이 한 호출 안에 두 번 있으면 INSERT 1행으로 합쳐야 한다.
+
+    합치지 않으면 Postgres가 CardinalityViolation으로 배치 전체를 롤백한다
+    (ON CONFLICT는 같은 INSERT문 안의 중복은 못 막는다 - VALUES 자체가 중복이므로).
+    keep="last" 정책이라 나중 값이 남아야 한다.
+    """
+    engine = _FakeEngine()
+    df = pd.DataFrame([
+        {"date": "2025-11-01 00:00:00", "station_name": "강릉", "temperature": 1.0},
+        {"date": "2025-11-01 00:00:00", "station_name": "강릉", "temperature": 2.0},
+    ])
+
+    n = load_asos_df(df, engine=engine)
+    params = _params(engine)
+
+    assert n == 1
+    assert "timestamp_m1" not in params
+    assert params["temperature_m0"] == 2.0
 
 
 def test_load_asos_df_accepts_normalized_daily_frame_without_solar_column():
@@ -186,7 +209,11 @@ def test_weather_asos_unique_index_is_timestamp_and_station_name():
 # 실제 DB 라운드트립 (DB 없으면 skip)
 # =========================================================
 
-def _db_available() -> bool:
+def _db_write_enabled() -> bool:
+    """기본 `pytest` 실행은 운영 DB에 손대지 않는다 — PYTEST_DB_WRITE=1로 명시 옵트인해야
+    이 테스트가 CREATE TABLE/INSERT/DELETE를 실행한다(DB가 실제로 붙어 있을 때만)."""
+    if os.getenv("PYTEST_DB_WRITE") != "1":
+        return False
     try:
         from fetch_data.common.db_base import get_engine
         with get_engine().connect():
@@ -195,7 +222,10 @@ def _db_available() -> bool:
         return False
 
 
-@pytest.mark.skipif(not _db_available(), reason="pv DB에 접속할 수 없어 건너뜀")
+@pytest.mark.skipif(
+    not _db_write_enabled(),
+    reason="PYTEST_DB_WRITE=1 옵트인 + DB 접속 가능할 때만 실행 (기본 실행에서는 운영 DB를 건드리지 않음)",
+)
 def test_load_asos_df_roundtrip_is_idempotent_against_real_db():
     """실제 DB에 두 번 적재해도 행 수가 늘지 않는지(멱등) 확인 후 테스트 행을 정리한다."""
     from sqlalchemy import text

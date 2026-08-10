@@ -9,11 +9,14 @@ Tables:
   "1~24" 구간라벨이 아니라 이미 실제 시각(예: 2025-11-01 14:00:00)이므로
   적재 시 별도의 시(hour) 보정을 하지 않는다.
 - 다만 물리적 의미는 컬럼마다 다르다. 기상청 지상기상관측지침(2024.10) 2.4.2/2.4.3에
-  따르면 기온·습도는 "정시(00분) 순간값"이고, 2.4.6~2.4.8에 따르면 강수량·일조시간·
-  일사량 계열은 "정시까지 누적된 1시간 합"이다(예: 09~09강수량, 00시~24시 일조시간처럼
-  종료시각으로 라벨링). 즉 같은 행의 timestamp라도 temperature/humidity는 그 순간의
-  스냅샷, solar_radiation은 그 직전 1시간의 누적값으로 해석해야 한다. 코드에서 이 차이를
-  보정하지는 않는다(원본 그대로 보존) — research 뷰(Task 3)에서 조인 시 참고할 것.
+  따르면 기온·습도는 "정시(00분) 순간값"이다(이건 명시 문구로 확인됨). 2.4.6~2.4.8은
+  강수량·일조시간·일사량이 전부 "1분마다 누적된 자료에서 산출"하는 동일 계열이라고
+  밝히는데, 그중 강수량(09~09)·일조시간(00시~24시)만 종료시각 라벨을 명시한다.
+  일사량이 같은 방식으로 종료시각 라벨을 쓴다는 것은 **추정**이다(지침 2.4.6/2.4.7의
+  유추, 일사량 항목 자체에는 명시 문구 없음 — Task 2 리포트 §3-2/§7-2, Task 3에서
+  재검증 필요). 즉 같은 행의 timestamp라도 temperature/humidity는 그 순간의 스냅샷,
+  solar_radiation은 (추정상) 그 직전 1시간의 누적값으로 해석해야 한다. 코드에서 이
+  차이를 보정하지는 않는다(원본 그대로 보존) — research 뷰(Task 3)에서 조인 시 참고할 것.
 """
 
 from typing import Optional
@@ -32,7 +35,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base
 
-from fetch_data.common.db_base import get_engine, get_session
+from fetch_data.common.db_base import get_engine
 from fetch_data.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -57,7 +60,10 @@ class WeatherASOS(Base):
     station_name = Column(String(50), nullable=False, comment="관측지점명")
     temperature = Column(Float, nullable=True, comment="기온 (℃, 정시 순간값)")
     humidity = Column(Float, nullable=True, comment="상대습도 (%, 정시 순간값)")
-    solar_radiation = Column(Float, nullable=True, comment="일사량 (MJ/m^2, 정시까지의 1시간 누적값)")
+    solar_radiation = Column(
+        Float, nullable=True,
+        comment="일사량 (MJ/m^2, 정시까지의 1시간 누적값 — 추정. 지침 2.4.6/2.4.7 유추, Task 3에서 재검증 필요)",
+    )
 
     __table_args__ = (
         Index("ix_weather_asos_ts_station", "timestamp", "station_name", unique=True),
@@ -74,7 +80,8 @@ class WeatherASOS(Base):
 # Engine & Session
 # ========================================
 
-# 엔진/세션은 fetch_data.common.db_base 사용 (get_engine, get_session)
+# 엔진은 fetch_data.common.db_base 사용 (get_engine). 세션 API가 필요해지면
+# 같은 모듈의 get_session을 그때 import한다.
 
 
 def init_db():
@@ -110,7 +117,8 @@ def load_asos_df(df: pd.DataFrame, engine: Optional[Engine] = None) -> int:
     백필로 채워둔 일사량이 지워지지 않는다). 기존 upsert_demand_5min과 동일한 패턴.
 
     Returns:
-        upsert된 행 수 (timestamp/station_name이 없는 행은 제외하고 센다)
+        upsert된 행 수 (timestamp/station_name이 없는 행은 제외, 같은 키 중복은
+        마지막 값만 남기고 1행으로 센다)
     """
     if df is None or df.empty:
         logger.info("[DB] 적재할 ASOS 데이터가 없습니다.")
@@ -140,6 +148,10 @@ def load_asos_df(df: pd.DataFrame, engine: Optional[Engine] = None) -> int:
 
     columns = ["timestamp", "station_name", *_VALUE_COLUMNS]
     subset = frame[columns]
+    # 같은 배치 안에 (timestamp, station_name) 중복이 있으면 Postgres INSERT가
+    # CardinalityViolation으로 배치 전체를 롤백한다. UPSERT라 마지막 값이 이기는 게
+    # 자연스러우니 keep="last"로 미리 정리한다.
+    subset = subset.drop_duplicates(subset=["timestamp", "station_name"], keep="last")
     # NaN -> None 명시 변환. object로 먼저 캐스팅해야 float 컬럼에서 None이
     # 다시 NaN으로 되돌아가지 않는다(NaN을 그대로 보내면 DB에 SQL NULL이 아니라
     # 부동소수점 NaN 리터럴이 저장되어 집계 함수가 오염된다).
