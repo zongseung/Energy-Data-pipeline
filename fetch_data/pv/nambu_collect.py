@@ -7,7 +7,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine
 
-from fetch_data.common.config import get_db_url, get_nambu_api_key
+from fetch_data.common.config import get_nambu_api_key
+from fetch_data.common.db_utils import resolve_db_url
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import now_kst, parse_hour_column
 from fetch_data.constants import NamebuAPI
@@ -48,10 +49,7 @@ def _get_api_key() -> str:
 def _get_engine():
     global _engine
     if _engine is None:
-        db_url = get_db_url()
-        if not db_url:
-            raise RuntimeError("DB_URL(또는 PV_DATABASE_URL/LOCAL_DB_URL)이 설정되어 있지 않습니다.")
-        _engine = create_engine(db_url)
+        _engine = create_engine(resolve_db_url())
     return _engine
 
 def get_active_targets(engine_):

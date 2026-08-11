@@ -53,7 +53,6 @@ def test_all_deployments_register_unified_demand_and_list_it(monkeypatch, capsys
         "wait_for_api",
         "ensure_work_pool",
         "deploy_weather_flow",
-        "deploy_full_etl_flow",
         "deploy_namdong_flow",
         "deploy_nambu_flow",
         "deploy_namdong_wind_flow",

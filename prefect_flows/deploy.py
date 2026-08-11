@@ -3,7 +3,6 @@ Prefect Deployment Script
 
 PV 파이프라인 Flow를 배포하고 스케줄을 등록합니다.
 - daily-weather-collection-flow: 매일 오전 9시 (기상 데이터)
-- full-etl: 수동 실행 (전체 ETL)
 """
 
 import asyncio
@@ -169,29 +168,6 @@ async def deploy_weather_flow() -> None:
 
     await deployment.apply()
     print("Deployment 완료: 'daily-weather-collection' (매일 09:00)")
-
-
-async def deploy_full_etl_flow() -> None:
-    """전체 ETL 플로우 배포 (수동 실행)"""
-    flow = import_object(
-        "prefect_flows.prefect_pipeline.full_etl_flow"
-    )
-
-    deployment = await Deployment.build_from_flow(
-        flow=flow,
-        name="full-etl",
-        work_pool_name="pv-pool",
-        path="/app",
-        entrypoint="prefect_flows/prefect_pipeline.py:full_etl_flow",
-        parameters={"target_date": None},
-        schedules=[],  # 수동 실행만
-        tags=["etl", "full", "manual"],
-        description="기상+PV 전체 ETL (수동 실행)",
-        job_variables=get_job_variables(),
-    )
-
-    await deployment.apply()
-    print("Deployment 완료: 'full-etl' (수동 실행)")
 
 
 async def deploy_namdong_flow() -> None:
@@ -556,7 +532,6 @@ async def create_all_deployments() -> None:
 
     # 각 Flow 배포
     await deploy_weather_flow()
-    await deploy_full_etl_flow()
     await deploy_namdong_flow()
     await deploy_nambu_flow()
     await deploy_namdong_wind_flow()
@@ -580,7 +555,6 @@ async def create_all_deployments() -> None:
     # 배포 요약
     print("배포된 Flow:")
     print("  1. daily-weather-collection        - 매일 09:00 (기상 데이터)")
-    print("  2. full-etl                        - 수동 실행 (전체 ETL)")
     print("  3. monthly-namdong-pv-collection   - 매월 10일 10:00 (남동발전 PV)")
     print("  4. daily-nambu-pv-collection       - 매일 09:30 (남부발전 PV)")
     print("  5. monthly-namdong-wind-collection - 매월 10일 11:00 (남동발전 풍력)")

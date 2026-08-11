@@ -30,7 +30,7 @@ uv run python fetch_data/pv/database.py
 uv run python prefect_flows/deploy.py
 ```
 
-There are no test or lint configurations in this project.
+Tests: `uv run pytest` (`pyproject.toml`의 `[tool.pytest.ini_options]`, CI: `.github/workflows/ci.yml`). lint 설정은 없다.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ There are no test or lint configurations in this project.
 Three independent data pipelines, each on its own schedule:
 
 1. **Nambu (남부발전)** - Daily at 09:30 KST
-   - API-based collection (`fetch_data/pv/nambu_bulk_sync.py`) via public data portal (B552520)
+   - API-based collection (`fetch_data/pv/nambu_collect.py`) via public data portal (B552520)
    - Raw data: wide format with 24-hour columns (qhorgen01-24)
    - Preprocessing (`nambu_merge_pv_data.py`): wide-to-long melt transformation
    - DB table: `pv_nambu` with unique constraint on (timestamp, plant_id, hogi)
@@ -58,7 +58,7 @@ Three independent data pipelines, each on its own schedule:
 
 - **Deployment registration**: `pv-deploy` container runs `prefect_flows/deploy.py` once at startup to register all flows/schedules with the Prefect server
 - **Execution**: `pv-worker` subscribes to `pv-pool` work pool and executes scheduled flow runs
-- **Flows defined in**: `prefect_flows/prefect_pipeline.py` (weather/full-etl), `prefect_flows/nambu_pv_flow.py` (Nambu wrapper), `fetch_data/pv/namdong_collect_pv.py` (Namdong flow)
+- **Flows defined in**: `prefect_flows/prefect_pipeline.py` (weather), `prefect_flows/nambu_pv_flow.py` (Nambu wrapper), `fetch_data/pv/namdong_collect_pv.py` (Namdong flow)
 - **Deploy config**: `prefect_flows/deploy.py` creates a Docker-type work pool (`pv-pool`) and registers 4 deployments
 
 ### Network Topology
@@ -76,15 +76,13 @@ The main `docker-compose.yml` does **not** include a Prefect server. The PV pipe
 
 ### Database Models (`fetch_data/pv/database.py`)
 
-Four SQLAlchemy ORM tables: `pv_nambu`, `pv_namdong`, `plant_info_nambu`, `plant_info_namdong`. The module uses a global engine singleton pattern (`get_engine()`/`get_session()`). DB URL resolution: checks `LOCAL_DB_URL` env var first, falls back to localhost default. Inside containers, `DB_URL` is set via docker-compose.
+Four SQLAlchemy ORM tables: `pv_nambu`, `pv_namdong`, `plant_info_nambu`, `plant_info_namdong`. The module uses a global engine singleton pattern (`get_engine()`/`get_session()`). DB URL 해석은 `fetch_data/common/db_utils.py:resolve_db_url()` 단일 경로다 (`DB_URL` 우선, 호스트 실행 시 pv-db→localhost 치환). Inside containers, `DB_URL` is set via docker-compose.
 
 ### Notifications
 
-Slack webhook integration in two places:
-- `notify/slack_notifier.py` - standalone module
-- `prefect_flows/prefect_pipeline.py` - inline Slack helpers with Block Kit rich messages
-
-Both read `SLACK_WEBHOOK_URL` from environment.
+Slack 알림은 단일 경로다: `notify/slack_notifier.py` (수집기가 직접 사용)
+→ `prefect_flows/notify_tasks.py` (@task 래핑, flow 들이 사용).
+`SLACK_WEBHOOK_URL` 환경변수를 읽는다.
 
 ## Key Environment Variables
 
@@ -107,4 +105,4 @@ Both read `SLACK_WEBHOOK_URL` from environment.
 
 ## Backfill
 
-Manual backfill for Nambu data uses `fetch_data/pv/nambu_backfill.py` with configurable date ranges. The `nambu_probe_date.py` script detects the earliest available date for each plant.
+Manual backfill for Nambu data uses `fetch_data/pv/nambu_backfill.py` with configurable date ranges. 

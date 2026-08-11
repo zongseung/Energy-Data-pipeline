@@ -29,9 +29,7 @@ Energy-Data-pipeline/
 │   ├── pv/
 │   │   ├── nambu_collect.py            # 남부 PV 일일 수집(라이브)
 │   │   ├── nambu_backfill.py           # 남부 PV 과거 백필(수동)
-│   │   ├── nambu_bulk_sync.py          # 남부 PV 대량 일괄 수집(standalone)
 │   │   ├── nambu_transform.py          # 남부 wide→long 변환
-│   │   ├── nambu_probe.py              # 남부 최초 데이터일 탐지
 │   │   ├── namdong_collect.py          # 남동 PV 수집(koenergy 스크래핑)
 │   │   ├── namdong_transform.py        # 남동 PV 변환
 │   │   └── database.py                 # PV 테이블 모델
@@ -51,7 +49,7 @@ Energy-Data-pipeline/
 │
 ├── prefect_flows/                      # Prefect flow 래퍼 (수집기엔 @flow 없음)
 │   ├── deploy.py                       # 모든 deployment/스케줄 등록
-│   ├── prefect_pipeline.py             # 기상 / full-etl
+│   ├── prefect_pipeline.py             # 기상
 │   ├── nambu_pv_flow.py · namdong_pv_flow.py · namdong_wind_flow.py
 │   ├── smp_flow.py · gen_flow.py · jeju_flow.py
 │   └── notify_tasks.py · merge_to_all.py
@@ -127,7 +125,6 @@ make db        # psql 접속
 | `jeju-sukub-monthly-collection` | 매월 1일 01:00 | jeju_flow |
 | `jeju-gen-monthly-collection` | 매월 1일 02:00 | jeju_flow |
 | `jeju-demand-quarterly-collection` | 분기 1일 03:00 | jeju_flow |
-| `full-etl` | 수동 | prefect_pipeline |
 
 ---
 
