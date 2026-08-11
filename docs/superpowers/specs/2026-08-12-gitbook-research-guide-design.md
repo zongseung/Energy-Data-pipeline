@@ -49,7 +49,7 @@ GitBook의 독자가 필요로 하는 내용이 아니므로 다루지 않는다
 | 저장소 연결 | GitBook의 Project directory를 `docs/gitbook`으로 지정 |
 | 편집 원칙 | 저장소 Markdown이 기준본. 웹 편집은 긴급 수정 외 사용하지 않음 |
 | 다이어그램 | Mermaid 한 장으로 두 조회 경로와 공통 보안 경계를 설명 |
-| GitBook API | 반복 생성 수요가 없으므로 현재 사용하지 않음 |
+| GitBook API | 토큰 검증과 전용 Space·Docs Site 생성에 사용. GitHub App 승인은 화면에서 수행 |
 | 인증정보 | 실제 호스트·비밀번호·Tailscale 초대 링크는 문서에 넣지 않음 |
 
 GitBook은 GitHub/GitLab 양방향 Git Sync와 모노레포 Project directory를
@@ -206,23 +206,37 @@ LLM 답변은 분석의 최종 근거로 취급하지 않는다. 논문·보고�
 
 ## GitBook 연동
 
-초기 연동은 API가 아니라 GitBook 화면에서 한 번 설정한다.
+`GITBOOK_API_TOKEN`은 루트 `.env`에 보관하고 Git에 커밋하지 않는다. API는
+아래 범위에서만 사용한다.
 
-1. 무료 GitBook 조직과 Space 생성
-2. GitBook GitHub App을 저장소에 승인
-3. Git Sync에서 저장소와 기본 브랜치 선택
-4. Project directory를 `docs/gitbook`으로 설정
-5. 최초 동기화 방향은 GitHub → GitBook 선택
-6. 공개 Docs Site 생성
-7. Mermaid 연동을 설치하고 Space에 활성화
+1. `GET /v1/user`로 토큰 인증 확인
+2. `GET /v1/orgs`, `GET /v1/orgs/{organizationId}/spaces`,
+   `GET /v1/orgs/{organizationId}/sites`로 기존 항목 확인
+3. 정확히 같은 제목의 전용 Space가 없으면 `에너지 연구 데이터 안내` Space 생성
+4. 정확히 같은 제목의 전용 Docs Site가 없으면 Free의 `basic`, `public` Site 생성
+5. 기존 기본 Space·Site는 삭제하거나 덮어쓰지 않음
+
+각 생성 전에 정확한 제목으로 다시 조회해 중복 생성을 막는다. 무료 플랜의
+사이트 수 제한 등으로 생성이 거부되면 기존 사이트를 임의로 바꾸지 않고
+중단해 사용자에게 보고한다. 이 작업을 위한 영구 프로비저닝 스크립트는
+만들지 않는다.
+
+GitHub 저장소 권한 승인은 API 토큰과 별개이므로 GitBook 화면에서 한 번
+설정한다.
+
+1. GitBook GitHub App을 이 저장소에 승인
+2. 새 Space의 Git Sync에서 저장소와 기본 브랜치 선택
+3. Project directory를 `docs/gitbook`으로 설정
+4. 최초 동기화 방향은 GitHub → GitBook 선택
+5. Mermaid 연동을 설치하고 Space에 활성화
 
 이후 변경은 저장소에서 Markdown을 수정하고 기본 브랜치에 반영해 배포한다.
 GitBook 웹 편집으로 발생한 역방향 커밋과 저장소 수정이 충돌하지 않도록 웹
 편집은 긴급 상황 외에는 사용하지 않는다.
 
-GitBook API는 Space·문서·Docs Site를 생성할 수 있지만, 현재 사이트가 하나뿐이고
-최초 GitHub 권한 승인이 필요하므로 자동화하지 않는다. 여러 안내 사이트를
-반복 생성하게 될 때 별도 작업으로 검토한다.
+GitBook API로 만든 Space와 Site의 ID·게시 URL은 작업 결과로만 보고하고
+`.env`나 문서에 저장하지 않는다. Git Sync와 Mermaid는 최초 UI 승인이 필요한
+설정으로 남긴다.
 
 ## 검증
 
@@ -257,6 +271,7 @@ GitBook API는 Space·문서·Docs Site를 생성할 수 있지만, 현재 사�
 - GitBook 로그인·SSO·비공개 공유 링크
 - 운영 파이프라인 배포·장애 대응 매뉴얼
 - 실제 연구원 비밀번호·DSN·호스트·Tailscale 초대 링크 생성 또는 배포
-- GitBook API 기반 사이트 생성 자동화
+- 기존 GitBook 기본 Space·Site 삭제 또는 덮어쓰기
+- GitBook API 영구 프로비저닝 스크립트
 
 이 항목들은 Phase 2 또는 별도 운영 문서에서 다룬다.
