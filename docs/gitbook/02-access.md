@@ -88,10 +88,14 @@ dbDisconnect(con)
 ## 6. MCP 서버 (선택)
 
 자연어로 `research` 스키마를 조회하고 싶다면 `energy-mcp` MCP 서버를 쓸 수
-있다. Claude Desktop / VS Code / Continue 설정 예시는
-[`mcp-server/README.md`](../../mcp-server/README.md)에 있다 — 요약하면:
+있다. 저장소의 `mcp-server/README.md`에 Claude Desktop / VS Code / Continue
+설정 예시가 있다(GitBook 밖 파일이라 링크는 생략 — 저장소를 받은 경우에만
+참고). 요약하면:
 
-- 설치: `uvx energy-mcp` (별도 설치 스크립트 없음)
+- 설치: 이 패키지는 **아직 PyPI에 올라가 있지 않다** — `uvx energy-mcp`는
+  지금 실행하면 package not found로 실패한다. 현재는 로컬 체크아웃에서
+  `uvx --from /path/to/Energy-Data-pipeline/mcp-server energy-mcp`로 실행한다
+  (경로는 관리자에게 문의). 공개 저장소로 옮겨지면 이 문서를 갱신한다.
 - 제공 기능: 읽기전용 SQL 실행 툴 `run_sql` 하나, 스키마 설명 리소스 `energy://schema` 하나
 - 인증은 이 서버가 하지 않는다 — 본인에게 발급된 role의 DSN을
   `ENERGY_MCP_DSN` 환경변수로 넘기면 그 role의 권한과 감사 로그를 그대로 쓴다

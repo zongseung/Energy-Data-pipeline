@@ -230,7 +230,8 @@ COMMENT ON VIEW research.smp_weighted_avg IS
 -- -----------------------------------------------------------------------------
 -- research.weather_asos — ASOS 시간별 기상
 --   일사량은 95개 지점 중 63개만 관측한다(docs/asos-solar-radiation-stations.md).
---   미관측 32개 지점은 solar_radiation 이 항상 NULL 이며 이는 결측이 아니라 정상이다.
+--   미관측 32개 지점은 solar_radiation 이 사실상 전부 NULL 이다(성산·제천 각 1행,
+--   값 0인 이상치 2건 제외). 이는 결측이 아니라 정상이다.
 --   두 경우를 구분할 수 있도록 has_solar_sensor 를 함께 내보낸다.
 --
 --   ※ 일사량의 시간 라벨 규약은 아직 "추정"이다(강수·일조 항목의 구간종료 서술에서
@@ -268,7 +269,7 @@ COMMENT ON VIEW research.weather_asos IS
 COMMENT ON COLUMN research.weather_asos.solar_radiation IS
     '일사량 MJ/m². 시간 라벨이 구간시작인지 구간종료인지는 아직 추정 단계라 보정하지 않았다 — 시각 정밀도가 중요한 분석에는 주의. 야간과 미관측 지점은 NULL.';
 COMMENT ON COLUMN research.weather_asos.has_solar_sensor IS
-    'true 면 일사 관측 지점(63개) — solar_radiation 이 NULL 이면 야간이거나 결측. false 면 미관측 지점(32개) — 항상 NULL 이며 결측이 아니다. NULL 이면 2025-07-01 전수조사에 없던 신규 지점.';
+    'true 면 일사 관측 지점(63개) — solar_radiation 이 NULL 이면 야간이거나 결측. false 면 미관측 지점(32개) — 사실상 전부 NULL 이며(성산·제천 각 1행, 값 0인 이상치 2건 제외) 결측이 아니다. NULL 이면 2025-07-01 전수조사에 없던 신규 지점.';
 
 
 -- -----------------------------------------------------------------------------
@@ -297,6 +298,14 @@ GRANT SELECT ON ALL TABLES IN SCHEMA research TO research_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA research GRANT SELECT ON TABLES TO research_ro;
 
 COMMIT;
+
+-- 감사 추적: log_connections=off + log_line_prefix 에 %u(user)/%d(database) 가 없으면
+-- ALTER ROLE ... SET log_statement='all' 로 남긴 문장이 누구 것인지 복원할 수 없다
+-- (PID(%p) 는 재사용되고 접속 인가 로그 자체가 안 남는다). ALTER SYSTEM 은 트랜잭션 블록
+-- 안에서 실행할 수 없으므로 COMMIT 뒤, 클러스터 전체에 적용한다.
+ALTER SYSTEM SET log_line_prefix = '%m [%p] %u@%d ';
+ALTER SYSTEM SET log_connections = 'on';
+SELECT pg_reload_conf();
 
 
 -- =============================================================================

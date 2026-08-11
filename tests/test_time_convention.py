@@ -186,7 +186,7 @@ def test_nambu_레거시_transform_은_1시간_늦은_매핑(tmp_path, monkeypat
     """남부 레거시 매핑(pv_nambu 시절): qhorgen01 -> 당일 01시.
 
     2025-12-31 이전 남부 데이터가 1시간 늦게 적재된 원인이며,
-    현행 경로(test_nambu_현행_수집경로는_구간시작으로_적재)와 1시간 어긋난다.
+    현행 경로(test_nambu_백필경로는_구간시작으로_적재, test_nambu_라이브_수집기도_구간시작으로_적재)와 1시간 어긋난다.
     """
     raw_dir = tmp_path / "raw"
     out_dir = tmp_path / "processed"

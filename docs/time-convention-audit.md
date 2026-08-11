@@ -319,7 +319,8 @@ JOIN plants p USING (plant_id);
 
 ```
 tests/test_time_convention.py::test_parse_hour_column_라벨을_0based_구간시작으로_변환
-tests/test_time_convention.py::test_nambu_현행_수집경로는_구간시작으로_적재
+tests/test_time_convention.py::test_nambu_백필경로는_구간시작으로_적재
+tests/test_time_convention.py::test_nambu_라이브_수집기도_구간시작으로_적재
 tests/test_time_convention.py::test_ekr_는_구간시작으로_적재
 tests/test_time_convention.py::test_gen_transform_은_구간종료_라벨을_그대로_보존
 tests/test_time_convention.py::test_wind_namdong_은_구간종료_라벨을_그대로_보존

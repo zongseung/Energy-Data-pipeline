@@ -175,6 +175,14 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA research GRANT SELECT ON TABLES TO research_r
 
 COMMIT;
 
+-- 감사 추적: log_connections=off + log_line_prefix 에 %u(user)/%d(database) 가 없으면
+-- ALTER ROLE ... SET log_statement='all' 로 남긴 문장이 누구 것인지 복원할 수 없다
+-- (PID(%p) 는 재사용되고 접속 인가 로그 자체가 안 남는다). ALTER SYSTEM 은 트랜잭션 블록
+-- 안에서 실행할 수 없으므로 COMMIT 뒤, 클러스터 전체에 적용한다.
+ALTER SYSTEM SET log_line_prefix = '%m [%p] %u@%d ';
+ALTER SYSTEM SET log_connections = 'on';
+SELECT pg_reload_conf();
+
 
 -- =============================================================================
 -- 개인 role 발급 —  -v role_name=<이름> -v password=<비밀번호> 를 준 경우에만 실행

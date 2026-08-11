@@ -110,11 +110,13 @@ def load_asos_df(df: pd.DataFrame, engine: Optional[Engine] = None) -> int:
 
     입력 컬럼은 원본 CSV(`date`, `humidity`, `temperature`, `station_name`,
     `solar radiation`)나 정규화된 수집 결과(`normalize_weather_data` 출력,
-    `solar radiation` 없음) 어느 쪽이든 받는다. 없는 값 컬럼은 NULL로 채운다.
+    `solar radiation` 컬럼이 항상 있다 — icsr 미제공/미관측이면 NaN) 어느
+    쪽이든 받는다. 없는 값 컬럼은 NULL로 채운다.
 
     (timestamp, station_name) 충돌 시 COALESCE로 갱신한다 — 들어온 값이 NULL이면
-    기존 값을 유지한다(예: 일일 수집은 일사량을 안 보내므로, 매일 적재해도
-    백필로 채워둔 일사량이 지워지지 않는다). 기존 upsert_demand_5min과 동일한 패턴.
+    기존 값을 유지한다(예: 일사계 미관측 지점이나 야간 시간대는 solar_radiation이
+    NULL로 들어오므로, 매일 적재해도 백필로 채워둔 일사량이 지워지지 않는다). 기존
+    upsert_demand_5min과 동일한 패턴.
 
     Returns:
         upsert된 행 수 (timestamp/station_name이 없는 행은 제외, 같은 키 중복은
