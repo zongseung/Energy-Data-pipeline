@@ -16,8 +16,10 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import datetime
 import os
+import uuid
 from decimal import Decimal
 from typing import Any
 
@@ -27,9 +29,14 @@ from mcp.server.fastmcp import FastMCP
 DSN_ENV = "ENERGY_MCP_DSN"
 TIMEOUT_ENV = "ENERGY_MCP_STATEMENT_TIMEOUT_S"
 ROW_LIMIT_ENV = "ENERGY_MCP_ROW_LIMIT"
+# 설정되면 row_limit 초과 결과를 이 디렉터리에 CSV로 떨구고 download_url을 돌려준다.
+# (데모 스택 전용 — 정식 MCP 클라이언트에서는 미설정으로 두면 기존 동작 그대로)
+EXPORT_DIR_ENV = "ENERGY_MCP_EXPORT_DIR"
+EXPORT_URL_ENV = "ENERGY_MCP_EXPORT_URL"
 
 DEFAULT_TIMEOUT_S = 60
 DEFAULT_ROW_LIMIT = 10_000
+EXPORT_ROW_LIMIT = 100_000  # CSV 파일 상한 — 연구용 대량 추출은 DB 직접 접속이 정답
 
 # 스키마 리소스에 항상 고정으로 박아 넣는 함정 요약. research 스키마의 COMMENT가
 # 바뀌거나 누락되더라도 이 6개는 반드시 LLM에게 전달돼야 한다.
@@ -183,10 +190,9 @@ def _execute(query: str) -> dict[str, Any]:
         columns = [d.name for d in cur.description]
         fetched = cur.fetchmany(row_limit + 1)
         truncated = len(fetched) > row_limit
-        if truncated:
-            fetched = fetched[:row_limit]
+        preview = fetched[:row_limit] if truncated else fetched
 
-        rows = [dict(zip(columns, (_jsonable(v) for v in row))) for row in fetched]
+        rows = [dict(zip(columns, (_jsonable(v) for v in row))) for row in preview]
 
         result: dict[str, Any] = {
             "columns": columns,
@@ -194,7 +200,31 @@ def _execute(query: str) -> dict[str, Any]:
             "row_count": len(rows),
             "truncated": truncated,
         }
-        if truncated:
+
+        export_dir = os.environ.get(EXPORT_DIR_ENV)
+        if export_dir and fetched:
+            remainder = (
+                cur.fetchmany(EXPORT_ROW_LIMIT - len(fetched)) if truncated else []
+            )
+            name = f"export-{uuid.uuid4().hex[:8]}.csv"
+            # utf-8-sig: 엑셀이 한글 컬럼을 바로 읽도록 BOM 포함
+            with open(os.path.join(export_dir, name), "w", newline="",
+                      encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow(columns)
+                writer.writerows(fetched)
+                writer.writerows(remainder)
+            total = len(fetched) + len(remainder)
+            base = os.environ.get(EXPORT_URL_ENV, "http://localhost:8098").rstrip("/")
+            result["download_url"] = f"{base}/{name}"
+            result["download_rows"] = total
+            result["note"] = (
+                f"미리보기 {len(rows)}행. 전체 {total}행은 download_url 에서 "
+                "CSV 파일로 받을 수 있다. pandas 로 읽을 때는 "
+                "read_csv(경로, parse_dates=['timestamp'], index_col='timestamp') "
+                "처럼 시간 컬럼을 지정하라고 함께 안내하라."
+            )
+        elif truncated:
             result["note"] = (
                 f"결과가 {row_limit}행에서 잘렸습니다 "
                 f"({ROW_LIMIT_ENV}로 조정 가능). 조건을 좁혀 다시 조회하세요."
@@ -211,11 +241,36 @@ def run_sql(query: str) -> dict[str, Any]:
       거부한다.
     - 행 수는 기본 10,000행으로 제한된다. 응답의 `truncated`가 true면 결과가
       잘린 것이다 — `note`를 확인하라.
+    - PostgreSQL 문법이다. `round(sum(x)::numeric, 1)` 처럼 캐스트하라 —
+      double 에 `round(x, n)` 을 쓰면 에러난다.
+    - "발전소별/월별/지역별 …" 같은 집계 질문에는 반드시 GROUP BY 로 합산하라.
+      원시 행을 ORDER BY 로 자르면 같은 발전소가 반복돼 틀린 답이 된다.
     - 코드성 컬럼 값은 **한국어**다. 영어로 번역하지 마라. 예:
       `data_quality IN ('정상','시간별무효','전면무효','미검증')`,
       `fuel_type IN ('solar','wind','hydro','thermal','fuel_cell')` (이건 영어).
-    - 먼저 `energy://schema` 리소스를 읽고 테이블/컬럼과 함정을 파악한 뒤
-      쿼리를 작성하라.
+    - 존재하는 뷰는 아래가 전부다. 다른 테이블 이름을 지어내지 마라:
+      - `research.plants` — 발전소 마스터(plant_id, plant_name, fuel_type,
+        capacity_mw, data_quality, is_aggregate). is_aggregate=true는 합계
+        계열이므로 합산에서 제외하라.
+      - `research.generation` — 시간별 발전량(timestamp, plant_id, plant_name,
+        fuel_type, gen_kwh). plants와 plant_id로 조인돼 있다.
+      - `research.smp_hourly` / `research.smp_realtime_jeju` /
+        `research.smp_weighted_avg` — 계통한계가격(SMP, timestamp·price).
+      - `research.weather_asos` — 시간별 기상(timestamp, station_name,
+        temperature, humidity, solar_radiation, has_solar_sensor).
+      - `research.jeju_supply_demand` — 제주 계통 수급 5분(실시간, timestamp,
+        supply_mw, demand_mw, renewable_total_mw, solar_mw, wind_mw).
+      - `research.demand_5min` — 전국 5분 전력수요(timestamp, current_demand,
+        supply_capacity, reserve_rate 등. 수일 지연될 수 있음).
+      - `research.demand_weather_1h` — 전국 수요+기상 시간별 결합.
+      - `research.heat_demand` / `research.heat_demand_location` — 열수요
+        (2023년까지의 정적 데이터셋).
+    - 상세 컬럼·함정은 `energy://schema` 리소스에 있다(읽을 수 있는 클라이언트만).
+    - 조회 결과는 **마크다운 표**로 정리해 보여줘라.
+    - 응답에 `download_url`이 있으면 반드시 마크다운 링크로 안내하라 —
+      전체 데이터를 CSV 파일로 내려받는 링크다.
+    - 답변 끝에 사용한 SQL을 ```sql 코드블록으로 항상 보여줘라 — 사용자가
+      DB 클라이언트에 붙여넣어 전체 데이터를 직접 추출할 수 있게.
     """
     return _execute(query)
 

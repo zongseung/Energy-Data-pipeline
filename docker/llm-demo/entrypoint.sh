@@ -16,10 +16,14 @@ cat > /tmp/mcp-servers.json <<EOF
 }
 EOF
 
+# CSV 다운로드 서빙 — energy-mcp 가 /exports 에 떨군 파일을 stdlib 서버로 노출
+mkdir -p /exports
+python3 -m http.server 8098 --directory /exports &
+
 # Qwen3 thinking 모드 비활성 — SQL 생성에 긴 추론이 불필요하고 CPU에서 응답을 수 배 늦춘다
 exec /opt/llama/llama-server \
     -m /models/model.gguf \
-    --host 0.0.0.0 --port 8080 -c 8192 --jinja \
+    --host 0.0.0.0 --port 8080 -c 16384 --jinja \
     --chat-template-kwargs '{"enable_thinking": false}' \
     --mcp-servers-config /tmp/mcp-servers.json \
     "$@"

@@ -20,6 +20,10 @@ BACKOFF_SCHEDULE = [1, 5, 10, 20, 30]
 BASE_THROTTLE_SECONDS = 0.4
 REQUEST_TIMEOUT = 30
 EXPECTED_INTERVALS_PER_DAY = 288
+# KPX 원천 자체가 5분 슬롯을 드물게 빠뜨린다(예: 2026-08-05 287/288).
+# 재시도로 메꿀 수 없는 결손이므로 이 하한 이상이면 수용하고 넘어간다.
+# ponytail: 하한 282(=30분 결손)는 경험적 값 — 대량 결손 오탐이 생기면 조정
+MIN_VALID_INTERVALS_PER_DAY = 282
 COLUMN_MAPPING = {
     "기준일시": "timestamp",
     "현재수요(MW)": "current_demand",
@@ -162,9 +166,14 @@ async def download_range(
 
             merged = _merge_attempts(attempts)
             valid_intervals = _valid_demand_intervals(merged, current)
-            if valid_intervals < EXPECTED_INTERVALS_PER_DAY and current != date.today():
+            if valid_intervals < MIN_VALID_INTERVALS_PER_DAY and current != date.today():
                 raise RuntimeError(
                     f"incomplete KPX demand data for {current.isoformat()}: "
+                    f"{valid_intervals}/{EXPECTED_INTERVALS_PER_DAY} valid rows"
+                )
+            if valid_intervals < EXPECTED_INTERVALS_PER_DAY and current != date.today():
+                print(
+                    f"[demand] {current.isoformat()} 원천 결손 수용: "
                     f"{valid_intervals}/{EXPECTED_INTERVALS_PER_DAY} valid rows"
                 )
             frames.append(merged)

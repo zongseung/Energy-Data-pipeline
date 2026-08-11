@@ -145,7 +145,8 @@ def test_download_range_rejects_incomplete_historical_day(monkeypatch):
         asyncio.run(collect.download_range(historic_day, historic_day, max_retries=2))
 
 
-def test_download_range_rejects_historical_day_with_blank_demand(monkeypatch):
+def test_download_range_accepts_minor_source_gap(monkeypatch):
+    """원천(KPX) 자체 소량 결손(287/288)은 수용하고 넘어간다 — 2026-08-05 장애 회귀 방지."""
     from fetch_data.demand import collect
 
     historic_day = date.today() - pd.Timedelta(days=1)
@@ -166,8 +167,9 @@ def test_download_range_rejects_historical_day_with_blank_demand(monkeypatch):
     monkeypatch.setattr(collect, "download_segment", download_segment)
     monkeypatch.setattr(collect.asyncio, "sleep", _no_sleep)
 
-    with pytest.raises(RuntimeError, match="incomplete KPX demand data"):
-        asyncio.run(collect.download_range(historic_day, historic_day, max_retries=2))
+    result = asyncio.run(collect.download_range(historic_day, historic_day, max_retries=2))
+
+    assert len(result) == 288  # 결손 슬롯은 NaN 으로 남고, 예외 없이 통과한다
 
 
 def test_later_attempt_can_replace_a_blank_historical_demand(monkeypatch):
