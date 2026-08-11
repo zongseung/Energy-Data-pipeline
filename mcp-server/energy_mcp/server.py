@@ -49,10 +49,11 @@ KNOWN_PITFALLS_MD = """\
 4. **`research.plants.is_aggregate`**: true인 행(plant_id 140, 영암태양광_합계)은
    실제 발전소가 아니라 다른 두 발전소(141·142)의 합계 계열이다. 전체 발전량을
    합산할 때 포함하면 이중계상된다.
-5. **일사량(`research.weather_asos.solar_radiation`)은 95개 지점 중 63개만
-   관측한다.** 나머지 32개는 항상 NULL이며 이는 결측이 아니라 정상이다
-   (`has_solar_sensor` 컬럼으로 구분). 이 컬럼의 시간 라벨이 구간시작/구간종료
-   중 무엇인지는 아직 "추정" 단계라 보정되지 않았다.
+5. **일사량(`research.weather_asos.solar_radiation`)은 일부 지점만 관측한다.**
+   관측 여부는 `has_solar_sensor` 컬럼으로 판별하라 — `solar_radiation IS
+   NOT NULL`로 세지 마라(미관측 지점에도 0값 이상치가 극소수 섞여 있다).
+   미관측 지점의 `solar_radiation`은 사실상 전부 NULL이다. 이 컬럼의 시간
+   라벨이 구간시작/구간종료 중 무엇인지는 아직 "추정" 단계라 보정되지 않았다.
 6. **풍력 발전량의 시간 규약은 미확정이다.** `research.plants.data_quality`가
    `미검증`으로 뜨고, `research.generation.timestamp`는 풍력(`fuel_type='wind'`)에
    한해 보정을 적용하지 않았다 — 실제 값과 ±1시간 어긋날 수 있다.
