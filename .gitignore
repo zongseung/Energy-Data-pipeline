@@ -116,3 +116,7 @@ docs/
 *.pem
 *.parquet
 backups/
+
+# Codex isolated workspaces and temporary review artifacts
+.worktrees/
+.superpowers/
