@@ -211,6 +211,9 @@ def run_sql(query: str) -> dict[str, Any]:
       거부한다.
     - 행 수는 기본 10,000행으로 제한된다. 응답의 `truncated`가 true면 결과가
       잘린 것이다 — `note`를 확인하라.
+    - 코드성 컬럼 값은 **한국어**다. 영어로 번역하지 마라. 예:
+      `data_quality IN ('정상','시간별무효','전면무효','미검증')`,
+      `fuel_type IN ('solar','wind','hydro','thermal','fuel_cell')` (이건 영어).
     - 먼저 `energy://schema` 리소스를 읽고 테이블/컬럼과 함정을 파악한 뒤
       쿼리를 작성하라.
     """
