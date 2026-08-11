@@ -1,0 +1,27 @@
+# 시범용 로컬 LLM 스택 — 보안(Tailscale) 적용 전 로컬 시연 전용.
+#
+#   MODEL_PATH=<Qwen3-4B-Q4_K_M.gguf 절대경로> docker compose -f docker/llm-demo/compose.yml up -d --build
+#   브라우저: http://localhost:8099  (내장 웹 UI가 MCP 툴 호출을 처리)
+#
+# 주의: 8099가 0.0.0.0 으로 열린다 — LAN 시연용. 외부 공개 금지.
+# DSN은 운영 스택 내부 별칭(pv-db)을 쓴다. pv/pv 자격증명은 개발용(운영 compose와 동일).
+services:
+  llm-demo:
+    build:
+      context: ../..
+      dockerfile: docker/llm-demo/Dockerfile
+    container_name: llm-demo
+    environment:
+      ENERGY_MCP_DSN: postgresql://pv:pv@pv-db:5432/pv
+    volumes:
+      - ${MODEL_PATH:?Qwen3-4B-Q4_K_M.gguf 경로를 MODEL_PATH 로 지정하세요}:/models/model.gguf:ro
+    ports:
+      - "8099:8080"
+    networks:
+      - pvnet
+    restart: unless-stopped
+
+networks:
+  pvnet:
+    external: true
+    name: pv-pipeline-network
