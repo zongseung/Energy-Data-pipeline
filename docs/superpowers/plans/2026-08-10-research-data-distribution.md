@@ -163,57 +163,88 @@ Task 3의 뷰 보정식을 쓰려면 **operator × fuel_type 조합별로 정확
 
 ## Task 3: research 스키마 · 뷰 · 읽기전용 role
 
-**선행: Task 1(시간규약 확정), Task 2(`weather_asos` 존재)**
+**선행: Task 1(시간규약), Task 2(`weather_asos`), Task 6(등급), Task 8(좌표)**
 
 ### 목적
 
-연구원이 보는 유일한 면을 만든다. 운영 테이블은 감추고, `research` 스키마의 뷰만 노출한다.
+연구원이 보는 유일한 면을 만든다. 운영 테이블은 감추고 `research` 스키마의 뷰만 노출한다.
 
-### 해야 할 일
+### 산출물은 파일 2개다. 그 이상 만들지 마라.
 
-1. `sql/research/pv_research_schema.sql` (pv DB 대상):
-   - `CREATE SCHEMA IF NOT EXISTS research;`
-   - 뷰 생성:
-     | 뷰 | 원본 | 비고 |
-     |---|---|---|
-     | `research.plants` | `public.plants` | 마스터. 전 컬럼 노출 가능 |
-     | `research.generation` | `public.generation` + `plants` 조인 | **`source` 컬럼 제외**, 시간 구간시작 통일 |
-     | `research.smp_hourly` | `public.smp_hourly` | `id` 제외 |
-     | `research.smp_realtime_jeju` | `public.smp_realtime_jeju` | `id` 제외 |
-     | `research.smp_weighted_avg` | `public.smp_weighted_avg` | `id` 제외 |
-     | `research.weather_asos` | `public.weather_asos` | Task 2 산출 |
-   - `research.generation`은 **Task 1의 `docs/time-convention-audit.md`가 제시한 보정 규칙**을
-     그대로 적용한다. 보정이 필요한 조합만 `timestamp - INTERVAL '1 hour'` 한다.
-   - `research.generation`은 `plant_id`뿐 아니라 `plant_name`·`operator`·`fuel_type`을 함께
-     내보내 연구원이 조인 없이 쓸 수 있게 한다.
-2. `sql/research/demand_research_schema.sql` (demand DB 대상):
-   - `research` 스키마 + 뷰: `demand_5min`, `jeju_supply_demand`, `heat_demand`,
-     `heat_demand_location`, `demand_weather_1h` (각각 `id`·`created_at` 제외)
-   - 이 DB의 테이블들도 시간 규약을 Task 1 문서 기준으로 확인해 필요하면 보정한다
-3. `sql/research/create_research_role.sql` — role 발급 템플릿:
-   - `CREATE ROLE :role_name LOGIN PASSWORD :'password';` (psql 변수 사용, 값 하드코딩 금지)
-   - `REVOKE ALL ON SCHEMA public FROM :role_name;`
-   - `GRANT USAGE ON SCHEMA research TO :role_name;`
-   - `GRANT SELECT ON ALL TABLES IN SCHEMA research TO :role_name;`
-   - `ALTER ROLE :role_name SET statement_timeout = '60s';`
-   - `ALTER ROLE :role_name CONNECTION LIMIT 5;`
-   - `ALTER ROLE :role_name SET log_statement = 'all';` (개인별 감사 추적)
-   - `ALTER DEFAULT PRIVILEGES IN SCHEMA research GRANT SELECT ON TABLES TO :role_name;`
-4. `sql/research/revoke_research_role.sql` — 회수 스크립트(과제 종료·이탈 시)
-5. `sql/research/verify_research_access.sql` — 검증 쿼리:
-   - research role로 `public` 테이블 SELECT가 **거부**되는지
-   - `research` 뷰 SELECT가 **허용**되는지
-   - 뷰에 `source` 컬럼이 **없는지**
-   - 각 뷰의 행수·기간이 원본과 일치하는지(보정 뷰는 1시간 시프트 감안)
-6. `README.md` 또는 `sql/research/README.md`에 실행 순서를 적는다.
+```
+sql/research/pv_research.sql        # 스키마 + 뷰 + role 발급/회수/검증을 한 파일에
+sql/research/demand_research.sql    # 같은 구조, demand DB 대상
+```
+
+role 회수는 `DROP ROLE x;` 한 줄이고, 검증은 한 번 돌리고 버릴 쿼리다. 파일을 나눌 이유가 없다.
+`README.md`도 만들지 마라 — GitBook(Task 5)이 그 역할을 한다.
+
+### 선행 태스크가 확정한 것 (그대로 가져다 쓸 것)
+
+세 문서의 SQL 조각을 **읽고 복사**하라. 다시 유도하지 마라.
+
+| 문서 | 가져올 것 |
+|---|---|
+| `docs/time-convention-audit.md` §7 | `research.generation`의 시간 보정 규칙 |
+| `docs/broken-plants-audit.md` §6 | `data_quality`(4단계) · `hourly_valid_from` · `daily_valid_from`/`_to` CASE 식 |
+| `docs/plant-coordinates-audit.md` | 좌표 신뢰도 — 뷰에 노출할지 판단 |
+
+**함정 셋, 문서가 명시적으로 경고한다:**
+
+1. `data_quality`만 가져가면 `영흥태양광 #3` 3기(plant_id 20/29/32)의 2025-07-01 이후 정상 구간
+   약 13개월이 통째로 버려진다. **`hourly_valid_from`을 반드시 함께 내보내라.**
+2. 비태양광 46기는 `정상`이 아니라 `미검증`이다. 시간 규약 미확정 풍력 358,176행이 포함된다.
+3. `plant_id 140 영암태양광_합계`는 141·142의 합계 행이다. **뷰에서 배제하거나 플래그하라** —
+   실제 발전소처럼 조인되면 이중계상된다.
+
+### 뷰 목록
+
+**pv DB** — `research.plants`, `generation`, `smp_hourly`, `smp_realtime_jeju`,
+`smp_weighted_avg`, `weather_asos`
+
+- `generation`: **`source` 컬럼 제외**(전역 제약 #4), 시간 구간시작 통일,
+  `plant_name`·`operator`·`fuel_type`을 함께 내보내 연구원이 조인 없이 쓰게 한다
+- `plants`: `data_quality`·`hourly_valid_from` 포함
+- `smp_*`: `id` 제외
+- `weather_asos`: 일사량은 63개 지점만 관측한다(`docs/asos-solar-radiation-stations.md`).
+  나머지는 NULL이며, 시간 라벨 규약은 아직 **추정**이다 — 뷰에서 시프트하지 마라
+
+**demand DB** — `demand_5min`, `jeju_supply_demand`, `heat_demand`, `heat_demand_location`,
+`demand_weather_1h` (각각 `id`·`created_at` 제외). 시간 규약을 Task 1 문서 기준으로 확인해
+보정이 필요하면 하되, **근거 없으면 손대지 말고 그 사실을 주석에 남겨라.**
+
+### role
+
+한 파일 안에 psql 변수로:
+
+```sql
+CREATE ROLE :role_name LOGIN PASSWORD :'password';
+REVOKE ALL ON SCHEMA public FROM :role_name;
+GRANT USAGE ON SCHEMA research TO :role_name;
+GRANT SELECT ON ALL TABLES IN SCHEMA research TO :role_name;
+ALTER DEFAULT PRIVILEGES IN SCHEMA research GRANT SELECT ON TABLES TO :role_name;
+ALTER ROLE :role_name SET statement_timeout = '60s';
+ALTER ROLE :role_name CONNECTION LIMIT 5;
+ALTER ROLE :role_name SET log_statement = 'all';   -- 개인별 감사 추적
+```
+
+비밀번호를 하드코딩하지 마라. 회수는 같은 파일 하단에 `DROP ROLE` 한 줄.
+
+### 검증
+
+같은 파일 하단 주석 블록에 검증 쿼리를 넣어라. 최소한:
+- research role로 `public` 테이블 SELECT가 **거부**되는가
+- `research` 뷰에 `source` 컬럼이 **없는가**
+- 각 뷰의 행수가 원본과 맞는가 (보정 뷰는 시프트 감안)
+
+**실제로 DB에 적용해 검증하라.** 검증용 role은 끝나고 `DROP ROLE`로 정리하라.
 
 ### 완료 기준
 
-- 위 SQL 파일들이 존재하고 문법 오류가 없음 (`psql -f ... --dry-run` 대신
-  실제 DB에 적용해 검증하되, **role 생성 시 비밀번호는 psql 변수로 주입**한다)
-- `research.generation`에 `source` 컬럼이 없음
-- Task 1의 보정 규칙이 뷰에 정확히 반영됨
-- 검증 SQL이 통과함
+- 파일 2개. 그 이상 없음
+- `research.generation`에 `source` 없음
+- 세 선행 문서의 규칙이 정확히 반영됨 (특히 `hourly_valid_from`)
+- 실제 DB에서 검증 통과, 검증용 role 정리됨
 - **운영 테이블은 한 줄도 바뀌지 않음**
 
 ---
