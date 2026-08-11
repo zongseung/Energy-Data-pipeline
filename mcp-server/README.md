@@ -63,7 +63,7 @@ uvx --from /path/to/Energy-Data-pipeline/mcp-server energy-mcp
 남기지 마라.
 
 ```bash
-export ENERGY_MCP_DSN="postgresql://<본인_role>:<비밀번호>@<tailscale_호스트>:5432/<db>"
+export ENERGY_MCP_DSN="postgresql://<본인_role>:<비밀번호>@<tailscale_호스트>:5436/<db>"  # pv DB 예시. demand DB는 5433
 ```
 
 pv DB와 demand DB는 서로 다른 Postgres 인스턴스다. 하나의 서버 프로세스는 DSN
@@ -90,7 +90,7 @@ pv DB와 demand DB는 서로 다른 Postgres 인스턴스다. 하나의 서버 �
       "command": "uvx",
       "args": ["energy-mcp"],
       "env": {
-        "ENERGY_MCP_DSN": "postgresql://<본인_role>:<비밀번호>@<tailscale_호스트>:5432/pv"
+        "ENERGY_MCP_DSN": "postgresql://<본인_role>:<비밀번호>@<tailscale_호스트>:5436/pv"
       }
     },
     "energy-demand": {
@@ -116,7 +116,7 @@ pv DB와 demand DB는 서로 다른 Postgres 인스턴스다. 하나의 서버 �
       "command": "uvx",
       "args": ["energy-mcp"],
       "env": {
-        "ENERGY_MCP_DSN": "postgresql://<본인_role>:<비밀번호>@<tailscale_호스트>:5432/pv"
+        "ENERGY_MCP_DSN": "postgresql://<본인_role>:<비밀번호>@<tailscale_호스트>:5436/pv"
       }
     }
   }
