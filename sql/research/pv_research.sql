@@ -12,7 +12,8 @@
 --   (비밀번호는 파일에 쓰지 말고 변수로 넘긴다. 셸 히스토리에 남지 않게 할 것.)
 --
 -- 근거 문서 — 아래 SQL 조각은 여기서 그대로 가져왔다. 임의로 고치지 말 것.
---   docs/time-convention-audit.md          §7 — generation 시간 보정 규칙
+--   (시간 보정 규칙 §7 은 P8에서 public.v_generation_hourly 로 이동 —
+--    scripts/migrations/p8_time_convention_views.sql 참조. 이 파일은 그 위에 얹는다)
 --   docs/broken-plants-audit.md            §6 — data_quality / *_valid_* 등급
 --   docs/asos-solar-radiation-stations.md     — 일사 관측 63지점 / 미관측 32지점
 --   docs/plant-coordinates-audit.md           — 좌표 신뢰도(전부 근사)
@@ -157,35 +158,21 @@ COMMENT ON COLUMN research.plants.hourly_valid_from IS
 --   ※ source 컬럼은 노출하지 않는다. 아래 SELECT 목록에 추가하지 말 것.
 --   ※ 연구원이 조인 없이 쓰도록 plants 속성과 품질 등급을 펼쳐 둔다.
 -- -----------------------------------------------------------------------------
+-- 시간 보정은 public.v_generation_hourly 한 곳에만 있다
+-- (scripts/migrations/p8_time_convention_views.sql — P8 선행 적용 필수).
 CREATE VIEW research.generation AS
 SELECT
-    g.plant_id,
-    p.plant_name,
-    p.unit_no,
-    p.operator,
-    p.fuel_type,
-    g.timestamp - CASE
-        -- 남부 태양광: 2025-12-31 이전 레거시 적재분만 1시간 늦다.
-        --             2026-01-01 00:00 이후는 이미 구간시작이므로 건드리지 않는다.
-        WHEN p.operator = 'nambu'  AND p.fuel_type = 'solar'
-             AND g.timestamp < TIMESTAMP '2026-01-01 00:00'          THEN INTERVAL '1 hour'
-
-        -- 남동 비태양광(KOEN CSV 경로): hour-ending 라벨을 무보정 적재.
-        WHEN p.operator = 'namdong'
-             AND p.fuel_type IN ('thermal', 'fuel_cell', 'hydro')    THEN INTERVAL '1 hour'
-
-        -- 풍력 3계열(namdong/seobu/hangyoung)은 원천 라벨 의미 미확정 → 보정하지 않는다.
-        -- 확정되면 아래를 살린다 (docs/time-convention-audit.md §5):
-        -- WHEN p.operator IN ('namdong', 'hangyoung') AND p.fuel_type = 'wind'
-        --                                                          THEN INTERVAL '1 hour'
-
-        ELSE INTERVAL '0'
-    END AS "timestamp",
-    g.gen_kwh,
+    v.plant_id,
+    v.plant_name,
+    v.unit_no,
+    v.operator,
+    v.fuel_type,
+    v."timestamp",
+    v.gen_kwh,
     p.is_aggregate,
     p.data_quality,
     p.hourly_valid_from
-FROM generation g
+FROM v_generation_hourly v
 JOIN research.plants p USING (plant_id);
 
 COMMENT ON VIEW research.generation IS
