@@ -312,43 +312,56 @@ ALTER ROLE :role_name SET log_statement = 'all';   -- 개인별 감사 추적
 `docs/gitbook/` 아래에 작성한다.
 
 1. `docs/gitbook/README.md` — 개요 + 목차
-2. `docs/gitbook/01-data-catalog.md` — **데이터 카탈로그**
-   데이터셋별 행수·기간·발전소 수·갱신 주기·알려진 결측.
-   실제 수치는 DB에서 조회해 채운다(`docker exec pv-data-postgres psql ...`).
+2. `docs/gitbook/01-data.md` — **데이터 카탈로그 + 스키마 사전 (한 문서로 합친다)**
+   뷰별로 "무엇이 얼마나 있는가"와 "컬럼이 무슨 뜻인가"를 같이 놓는다. 나누면 연구원이
+   두 문서를 왔다갔다 해야 한다.
+
+   뷰마다: 행수·기간·발전소(지점) 수·갱신 주기·알려진 결측 + 컬럼별 의미·단위·시간 규약.
+   **실제 수치는 DB에서 조회해 채운다** (`docker exec pv-data-postgres psql ...`).
    갱신 주기는 `prefect_flows/deploy.py`의 스케줄에서 가져온다.
-3. `docs/gitbook/02-schema-dictionary.md` — **스키마 사전**
-   `research` 뷰별 컬럼·의미·단위·시간 규약.
+
    반드시 명시할 함정:
+   - 모든 시각은 **KST 구간시작**으로 통일되어 있다 (뷰에서 보정 완료)
    - `gen_kwh`의 단위 (KOEN 원천은 MWh 라벨이지만 실제 kWh — 확인 후 정확히 기술)
-   - 모든 시각은 **KST 구간시작**으로 통일되어 있다는 점
-   - `capacity_confidence`(확실/근사/불확실)의 의미
+   - **`data_quality` 4단계**: 정상(태양광 33기) / 시간별무효(10기) / 전면무효(2기) /
+     미검증(비태양광 46기). `미검증`은 "깨졌다"가 아니라 "감사하지 않았다"는 뜻
+   - **`hourly_valid_from`**: 영흥태양광 #3 3기는 2025-07-01부터 시간별도 정상.
+     `data_quality`만 보고 거르면 13개월치를 버린다
+   - **`is_aggregate`**: `plant_id 140 영암태양광_합계`는 141·142의 합계 — 이중계상 주의
+   - **일사량**: `has_solar_sensor`로 관측 지점을 판별하라.
+     `solar_radiation IS NOT NULL`로 세지 마라(미관측 지점에 0값 이상치가 극소수 섞여 있다).
+     시간 라벨 규약은 아직 **추정**
+   - **풍력 시간 규약 미확정** — ±1시간 불확실
+   - **좌표**: 태양광 45기 중 44기만 검증됐다. 비태양광 40기는 신뢰도 불명.
+     `capacity_confidence`는 뷰에 없다(의미 오염 컬럼이라 제외)
+   - `capacity_mw`는 태양광 45기 중 3기만 값이 있다 — fuel_type별 보유율을 적어라
    - `smp_weighted_avg`의 `period_type`·`price_type` 값 종류
-4. `docs/gitbook/03-access-guide.md` — **접속 가이드 + 예제 쿼리**
+3. `docs/gitbook/02-access.md` — **접속 가이드 + 예제 쿼리**
    - Tailscale 설치·로그인
    - psql / pandas(`read_sql`) / R 접속 예시
    - MCP 서버 설치 및 클라이언트 설정 (Claude Desktop, VS Code, Continue)
    - 자주 쓰는 예제 쿼리 5~10개 (월별 집계, 발전소별 비교, 발전량×일사량 결합 등)
    - **비밀번호는 `<발급받은_비밀번호>` 플레이스홀더로 둔다. 실제 값 금지.**
    - tailnet 주소도 `<tailnet-host>` 플레이스홀더로 둔다
-5. `docs/gitbook/04-terms.md` — **이용약관·서약서**
+4. `docs/gitbook/03-terms.md` — **이용약관·서약서**
    - 과제 목적 외 사용 금지, 재배포 금지
    - 논문·보고서 인용 의무 (인용 문구 예시 포함)
    - 전체 쿼리가 감사 로그로 기록된다는 고지
    - 과제 종료 시 접근 회수 및 사본 파기
    - **초안임을 명시한다** — 법적 검토 전
-6. `docs/gitbook/SUMMARY.md` — GitBook 목차 파일
-7. `docs/gitbook/appendix-local-llm.md` — **부록: 로컬 LLM (선택)**
+5. `docs/gitbook/SUMMARY.md` — GitBook 목차 파일
+6. `docs/gitbook/appendix-local-llm.md` — **부록: 로컬 LLM (선택)**
    외부 LLM 서버로 조회 결과가 나가는 것이 꺼려지는 연구원용 오프라인 경로.
    - mistral.rs 설치: `pip install mistralrs` (CPU 전용 prebuilt wheel, GPU·Rust 툴체인 불필요)
    - 모델: Qwen3 4B Q4_K_M (RAM ~3GB). Qwen3.5 GGUF는 arch 미인식 이슈가 있으므로 피할 것
    - `mcp.json` 설정 예시 (Process transport로 `uvx energy-mcp` 기동)
    - **한계를 명시한다**: 4B 모델은 다단계·중첩 쿼리에서 정확도가 떨어진다.
      탐색·스키마 파악용이며 최종 분석 쿼리는 사람이 확인해야 한다
-   - 본문 흐름을 방해하지 않게 부록으로 분리하고 `03-access-guide.md`에서 링크만 건다
+   - 본문 흐름을 방해하지 않게 부록으로 분리하고 `02-access.md`에서 링크만 건다
 
 ### 완료 기준
 
-- 위 6개 파일이 존재하고 상호 링크가 맞음
+- 위 6개 파일이 존재하고 상호 링크가 맞음 (그 이상 만들지 마라)
 - 카탈로그 수치가 실제 DB 조회 결과와 일치
 - 스키마 사전이 Task 3의 실제 뷰 정의와 일치
 - **어떤 파일에도 실제 비밀번호·DSN·tailnet 주소가 없음**
