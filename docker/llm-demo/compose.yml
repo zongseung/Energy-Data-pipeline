@@ -16,6 +16,8 @@ services:
       # 채팅 미리보기 행 수 — 컨텍스트 절약. 초과분은 CSV 다운로드로 제공된다.
       ENERGY_MCP_ROW_LIMIT: "10"
       ENERGY_MCP_EXPORT_DIR: /exports
+      # 2026년 전체 태양광이 ~20만 행이라 기본 상한(10만)으로는 잘린다
+      ENERGY_MCP_EXPORT_ROW_LIMIT: "300000"
       # LAN 시연 시 접속 PC 기준 주소로 바꿀 것 (예: http://<서버IP>:8098)
       ENERGY_MCP_EXPORT_URL: http://localhost:8098
     volumes:

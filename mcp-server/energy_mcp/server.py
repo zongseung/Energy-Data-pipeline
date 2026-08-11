@@ -36,7 +36,8 @@ EXPORT_URL_ENV = "ENERGY_MCP_EXPORT_URL"
 
 DEFAULT_TIMEOUT_S = 60
 DEFAULT_ROW_LIMIT = 10_000
-EXPORT_ROW_LIMIT = 100_000  # CSV 파일 상한 — 연구용 대량 추출은 DB 직접 접속이 정답
+EXPORT_ROW_LIMIT_ENV = "ENERGY_MCP_EXPORT_ROW_LIMIT"
+DEFAULT_EXPORT_ROW_LIMIT = 100_000  # CSV 파일 상한 — 초대량 추출은 DB 직접 접속이 정답
 
 # 스키마 리소스에 항상 고정으로 박아 넣는 함정 요약. research 스키마의 COMMENT가
 # 바뀌거나 누락되더라도 이 6개는 반드시 LLM에게 전달돼야 한다.
@@ -203,8 +204,9 @@ def _execute(query: str) -> dict[str, Any]:
 
         export_dir = os.environ.get(EXPORT_DIR_ENV)
         if export_dir and fetched:
+            export_limit = _env_int(EXPORT_ROW_LIMIT_ENV, DEFAULT_EXPORT_ROW_LIMIT)
             remainder = (
-                cur.fetchmany(EXPORT_ROW_LIMIT - len(fetched)) if truncated else []
+                cur.fetchmany(export_limit - len(fetched)) if truncated else []
             )
             name = f"export-{uuid.uuid4().hex[:8]}.csv"
             # utf-8-sig: 엑셀이 한글 컬럼을 바로 읽도록 BOM 포함
@@ -215,12 +217,15 @@ def _execute(query: str) -> dict[str, Any]:
                 writer.writerows(fetched)
                 writer.writerows(remainder)
             total = len(fetched) + len(remainder)
+            capped = total >= export_limit
             base = os.environ.get(EXPORT_URL_ENV, "http://localhost:8098").rstrip("/")
             result["download_url"] = f"{base}/{name}"
             result["download_rows"] = total
             result["note"] = (
-                f"미리보기 {len(rows)}행. 전체 {total}행은 download_url 에서 "
-                "CSV 파일로 받을 수 있다. pandas 로 읽을 때는 "
+                f"미리보기 {len(rows)}행. 전체 {total}행"
+                + (" (파일 상한 도달 — 기간을 나눠 조회하면 나머지를 받을 수 있다)"
+                   if capped else "")
+                + "은 download_url 에서 CSV 파일로 받을 수 있다. pandas 로 읽을 때는 "
                 "read_csv(경로, parse_dates=['timestamp'], index_col='timestamp') "
                 "처럼 시간 컬럼을 지정하라고 함께 안내하라."
             )
@@ -245,6 +250,8 @@ def run_sql(query: str) -> dict[str, Any]:
       double 에 `round(x, n)` 을 쓰면 에러난다.
     - "발전소별/월별/지역별 …" 같은 집계 질문에는 반드시 GROUP BY 로 합산하라.
       원시 행을 ORDER BY 로 자르면 같은 발전소가 반복돼 틀린 답이 된다.
+    - 데이터 추출/다운로드/CSV 요청에는 컬럼을 고르지 말고 `SELECT *` 를 써라 —
+      timestamp·plant_name 같은 식별 컬럼이 빠진 CSV 는 쓸모가 없다.
     - 코드성 컬럼 값은 **한국어**다. 영어로 번역하지 마라. 예:
       `data_quality IN ('정상','시간별무효','전면무효','미검증')`,
       `fuel_type IN ('solar','wind','hydro','thermal','fuel_cell')` (이건 영어).
