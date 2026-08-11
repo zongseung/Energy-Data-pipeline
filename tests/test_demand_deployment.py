@@ -4,6 +4,12 @@ from datetime import datetime
 import pytest
 
 
+def _unified_spec():
+    from prefect_flows import deploy
+
+    return next(s for s in deploy.DEPLOYMENTS if s["name"] == "unified-demand-collection")
+
+
 def test_unified_demand_deployment_registers_complete_contract(monkeypatch):
     from prefect_flows import deploy
 
@@ -21,7 +27,7 @@ def test_unified_demand_deployment_registers_complete_contract(monkeypatch):
     monkeypatch.setattr(deploy, "import_object", lambda path: flow)
     monkeypatch.setattr(deploy.Deployment, "build_from_flow", build_from_flow)
 
-    asyncio.run(deploy.deploy_unified_demand_flow())
+    asyncio.run(deploy.register(_unified_spec()))
 
     schedule = captured["schedules"][0]
     assert captured["flow"] is flow
@@ -46,35 +52,18 @@ def test_all_deployments_register_unified_demand_and_list_it(monkeypatch, capsys
     async def no_op(*args, **kwargs):
         return None
 
-    async def deploy_unified():
-        called.append("unified-demand-collection")
+    async def fake_register(spec):
+        called.append(spec["name"])
 
-    for name in (
-        "wait_for_api",
-        "ensure_work_pool",
-        "deploy_weather_flow",
-        "deploy_namdong_flow",
-        "deploy_nambu_flow",
-        "deploy_namdong_wind_flow",
-        "deploy_gen_monthly_flow",
-        "deploy_smp_flow",
-        "deploy_smp_aggregate_flow",
-        "deploy_smp_realtime_jeju_flow",
-        "deploy_smp_legacy_sync_flow",
-        "deploy_jeju_realtime_flow",
-        "deploy_jeju_sukub_monthly_flow",
-        "deploy_jeju_gen_monthly_flow",
-        "deploy_jeju_demand_flow",
-        "deploy_jeju_supply_demand_db_flow",
-        "deploy_ekr_pv_flow",
-    ):
-        monkeypatch.setattr(deploy, name, no_op)
-    monkeypatch.setattr(deploy, "deploy_unified_demand_flow", deploy_unified)
+    monkeypatch.setattr(deploy, "wait_for_api", no_op)
+    monkeypatch.setattr(deploy, "ensure_work_pool", no_op)
+    monkeypatch.setattr(deploy, "register", fake_register)
 
     asyncio.run(deploy.create_all_deployments())
 
-    assert called == ["unified-demand-collection"]
-    assert "17. unified-demand-collection" in capsys.readouterr().out
+    assert "unified-demand-collection" in called
+    assert len(called) == len(deploy.DEPLOYMENTS)
+    assert "unified-demand-collection" in capsys.readouterr().out
 
 
 def test_unified_flow_skips_hourly_work_outside_first_ten_minutes(monkeypatch):

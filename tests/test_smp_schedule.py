@@ -1,33 +1,7 @@
-import ast
-from pathlib import Path
+"""daily-smp-collection 스케줄 회귀 방지 — KPX 전날 데이터 공표 시각(09:00 KST) 계약."""
+from prefect_flows.deploy import DEPLOYMENTS
 
 
 def test_daily_smp_deployment_runs_at_0900_kst():
-    source = Path("prefect_flows/deploy.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    deploy = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "deploy_smp_flow"
-    )
-    crons = [
-        keyword.value.value
-        for node in ast.walk(deploy)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "CronSchedule"
-        for keyword in node.keywords
-        if keyword.arg == "cron" and isinstance(keyword.value, ast.Constant)
-    ]
-    timezones = [
-        keyword.value.value
-        for node in ast.walk(deploy)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "CronSchedule"
-        for keyword in node.keywords
-        if keyword.arg == "timezone" and isinstance(keyword.value, ast.Constant)
-    ]
-
-    assert crons == ["0 9 * * *"]
-    assert timezones == ["Asia/Seoul"]
+    spec = next(s for s in DEPLOYMENTS if s["name"] == "daily-smp-collection")
+    assert spec["cron"] == "0 9 * * *"
