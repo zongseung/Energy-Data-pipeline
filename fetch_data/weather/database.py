@@ -91,13 +91,6 @@ def init_db():
     logger.info("기상(ASOS) 테이블 생성 완료")
 
 
-def drop_all_tables():
-    """Drop all weather tables (use with caution)."""
-    engine = get_engine()
-    Base.metadata.drop_all(engine)
-    logger.info("기상(ASOS) 테이블 삭제 완료")
-
-
 # ========================================
 # 적재 (UPSERT)
 # ========================================
