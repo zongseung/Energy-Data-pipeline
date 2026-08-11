@@ -136,9 +136,9 @@ FROM plants p;
 COMMENT ON VIEW research.plants IS
     '발전소 마스터. 품질 등급 근거: docs/broken-plants-audit.md';
 COMMENT ON COLUMN research.plants.lat IS
-    '위도. 45기 중 44기 보유(율치태양광만 NULL). 전부 부지 POI·행정구역 중심 근사값(대략 ±2km)이며 정밀 지번 좌표가 아니다 — ASOS 최근접 지점 매칭에는 충분하나 그 이상은 재검증 필요. 근거: docs/plant-coordinates-audit.md';
+    '위도. 검증된 것은 태양광 45기뿐이며(44기 보유, 율치태양광만 NULL) 그 44기는 전부 부지 POI·행정구역 중심 근사값(대략 ±2km)이라 정밀 지번 좌표가 아니다 — ASOS 최근접 지점 매칭에는 충분하나 그 이상은 재검증 필요. 비태양광 40기(화력 24·연료전지 8·수력 4·풍력 4) 좌표는 검증 대상이 아니었다 — 신뢰도 불명. 근거: docs/plant-coordinates-audit.md';
 COMMENT ON COLUMN research.plants.lon IS
-    '경도. lat 과 동일한 근사 수준.';
+    '경도. lat 과 동일 — 태양광만 검증됐고 비태양광은 신뢰도 불명.';
 COMMENT ON COLUMN research.plants.capacity_mw IS
     '정격용량 MW. 91기 중 41기만 값이 있고 공시값과 추정값이 섞여 있다. 정밀도를 보장하지 않는다.';
 COMMENT ON COLUMN research.plants.is_aggregate IS
@@ -273,8 +273,11 @@ COMMENT ON COLUMN research.weather_asos.has_solar_sensor IS
 
 -- -----------------------------------------------------------------------------
 -- 권한 — 그룹 role 에 모아 둔다.
---   뷰를 DROP/CREATE 하면 개별 GRANT 가 사라진다. 개인 role 에 직접 주지 않고
---   그룹에 주고 개인 role 을 그룹에 넣으면, 이 파일을 다시 돌릴 때 권한이 복구된다.
+--   뷰를 DROP/CREATE 하면 개별 GRANT 가 사라지지만, 아래 ALTER DEFAULT PRIVILEGES
+--   가 이미 그걸 복구한다(pg_default_acl 에 research_ro=r 로 등록됨).
+--   그럼에도 그룹으로 모으는 이유는, 기본권한은 "그 권한을 설정한 실행 주체가
+--   만든 객체"에만 붙기 때문이다. 누가 뷰를 다시 만들든 아래 GRANT 두 줄이
+--   매번 권한을 되돌려 놓는다.
 -- -----------------------------------------------------------------------------
 DO $$
 BEGIN
@@ -283,6 +286,11 @@ BEGIN
     END IF;
 END
 $$;
+
+-- PG14 의 public 스키마는 PUBLIC 의사롤에 CREATE 가 붙어 있다(=UC/pv).
+-- 개인 role 에서 REVOKE 해도 이 경로가 남아 연구원이 운영 DB 에 테이블을 만들 수 있다.
+-- 소유자(pv)는 UC/pv 를 따로 갖고 있어 영향 없다.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 GRANT USAGE ON SCHEMA research TO research_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA research TO research_ro;
@@ -294,11 +302,17 @@ COMMIT;
 -- =============================================================================
 -- 개인 role 발급 —  -v role_name=<이름> -v password=<비밀번호> 를 준 경우에만 실행
 -- =============================================================================
+-- 같은 role_name 으로 다시 돌리면 비밀번호만 갱신한다(멱등).
 \if :{?role_name}
   \if :{?password}
+SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role_name') AS role_exists \gset
 BEGIN;
+  \if :role_exists
+ALTER ROLE :role_name LOGIN PASSWORD :'password';
+  \else
 CREATE ROLE :role_name LOGIN PASSWORD :'password';
-REVOKE ALL ON SCHEMA public FROM :role_name;   -- public 은 뷰 뒤에 숨긴다
+  \endif
+REVOKE ALL ON SCHEMA public FROM :role_name;   -- PUBLIC 경유 CREATE 는 위 상시 블록에서 막았다
 GRANT research_ro TO :role_name;
 ALTER ROLE :role_name SET search_path = research;
 ALTER ROLE :role_name SET statement_timeout = '60s';

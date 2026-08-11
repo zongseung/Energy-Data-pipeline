@@ -145,13 +145,16 @@ FROM demand_weather_1h d;
 COMMENT ON VIEW research.demand_weather_1h IS
     'demand_5min 시간평균 × ASOS 관측을 시각으로 조인한 파생 테이블. 지점 수만큼 수요값이 반복되므로 수요만 필요하면 research.demand_5min 을 쓸 것.';
 COMMENT ON COLUMN research.demand_weather_1h."timestamp" IS
-    '구간시작 KST. demand_avg 는 [H, H+1) 구간의 5분값 평균이라 구간시작이 확정적이다. 기상 컬럼은 ASOS 관측값을 같은 시각에 붙인 것이라 ASOS 라벨 규약을 따른다.';
+    '구간시작 KST. demand_avg 는 demand_5min 의 5분 라벨 기준 [H, H+1) 평균이다 — 버킷 경계는 확정적이지만 5분 라벨 자체의 의미가 미확정이라 최대 5분 오차가 남을 수 있다. 기상 컬럼은 ASOS 관측값을 같은 시각에 붙인 것이라 ASOS 라벨 규약을 따른다.';
 COMMENT ON COLUMN research.demand_weather_1h.demand_avg IS
     '해당 1시간 구간 전국 수요(MW)의 5분값 평균.';
 
 
 -- -----------------------------------------------------------------------------
--- 권한 — pv DB 와 같은 그룹 role 패턴 (뷰 재생성 시 권한이 복구된다)
+-- 권한 — pv DB 와 같은 그룹 role 패턴.
+--   ALTER DEFAULT PRIVILEGES 가 이미 뷰 재생성 시 권한을 복구하지만, 기본권한은
+--   그것을 설정한 실행 주체가 만든 객체에만 붙는다. 누가 뷰를 다시 만들든
+--   아래 GRANT 두 줄이 매번 권한을 되돌려 놓는다.
 -- -----------------------------------------------------------------------------
 DO $$
 BEGIN
@@ -160,6 +163,11 @@ BEGIN
     END IF;
 END
 $$;
+
+-- PG14 의 public 스키마는 PUBLIC 의사롤에 CREATE 가 붙어 있다(=UC/demand).
+-- 개인 role 에서 REVOKE 해도 이 경로가 남아 연구원이 운영 DB 에 테이블을 만들 수 있다.
+-- 소유자(demand)는 UC/demand 를 따로 갖고 있어 영향 없다.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
 GRANT USAGE ON SCHEMA research TO research_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA research TO research_ro;
@@ -171,11 +179,17 @@ COMMIT;
 -- =============================================================================
 -- 개인 role 발급 —  -v role_name=<이름> -v password=<비밀번호> 를 준 경우에만 실행
 -- =============================================================================
+-- 같은 role_name 으로 다시 돌리면 비밀번호만 갱신한다(멱등).
 \if :{?role_name}
   \if :{?password}
+SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role_name') AS role_exists \gset
 BEGIN;
+  \if :role_exists
+ALTER ROLE :role_name LOGIN PASSWORD :'password';
+  \else
 CREATE ROLE :role_name LOGIN PASSWORD :'password';
-REVOKE ALL ON SCHEMA public FROM :role_name;   -- public 은 뷰 뒤에 숨긴다
+  \endif
+REVOKE ALL ON SCHEMA public FROM :role_name;   -- PUBLIC 경유 CREATE 는 위 상시 블록에서 막았다
 GRANT research_ro TO :role_name;
 ALTER ROLE :role_name SET search_path = research;
 ALTER ROLE :role_name SET statement_timeout = '60s';
