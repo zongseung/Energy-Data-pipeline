@@ -1,6 +1,6 @@
 # 부록: 로컬 LLM으로 MCP 서버 쓰기 (선택)
 
-[02-access.md](02-access.md)의 MCP 서버(`energy-mcp`)는 Claude Desktop 같은
+[LLM·MCP 가이드](03-llm-mcp.md)의 MCP 서버(`energy-mcp`)는 Claude Desktop 같은
 외부 LLM 클라이언트와 함께 쓰는 것이 기본 경로다. 조회 결과(SQL 응답)가
 외부 LLM 서버로 나가는 것 자체가 꺼려지는 연구원을 위해, 완전히 로컬에서
 도는 경로도 남겨둔다. **이 경로는 선택이며, 없어도 psql/pandas/R로 연구에
@@ -50,7 +50,7 @@ Cursor 호환 형식의 JSON 파일(`mcp-servers.json`)로 저장한다:
 }
 ```
 
-`ENERGY_MCP_DSN`의 값은 [02-access.md](02-access.md)에서 안내한 본인의
+`ENERGY_MCP_DSN`의 값은 [직접 SQL 가이드](02-direct-sql.md)에서 안내한 본인의
 role 자격증명으로 바꿔 쓴다. **실제 비밀번호·tailnet 주소는 절대 이 파일이나
 저장소, 채팅에 남기지 말고 플레이스홀더로 둔다.**
 
@@ -105,7 +105,7 @@ srv llama_server: listening on http://127.0.0.1:8080
   것이 곤란할 때. **그렇지 않으면 본문의 psql/pandas나 Claude Desktop 같은
   클라이언트가 훨씬 빠르고 정확하다.**
 
-[01-data.md](01-data.md)의 함정(단위, 시간 규약, 품질 등급)은 모델이
+[데이터 카탈로그](04-data-catalog.md)의 함정(단위, 시간 규약, 품질 등급)은 모델이
 자동으로 챙겨주지 않는다 — 결과를 그대로 믿지 말고 직접 검증하는 습관이
 필요하다.
 
