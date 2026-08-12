@@ -1,45 +1,33 @@
-# 에너지 연구 데이터 안내
+# 에너지 연구 데이터 이용 안내
 
-이 문서는 남부발전·남동발전 태양광, KOEN 비태양광(화력·연료전지·해양소수력),
-풍력, 전국/제주 전력수급, 지역난방 열수요, SMP(계통한계가격), ASOS 기상
-데이터를 연구 목적으로 조회하는 방법을 안내한다.
+발전량·SMP·기상·전력수요 데이터를 연구 목적으로 안전하게 조회하는 방법을 안내합니다.
 
-데이터는 **Tailscale 폐쇄망 안에서 읽기전용 PostgreSQL 직접 접속**으로
-제공된다. 별도 API 서버나 대시보드를 거치지 않는다 — psql, pandas, R 등
-익숙한 도구로 SQL을 바로 실행하면 된다.
+> 이 GitBook은 누구나 읽을 수 있는 공개 안내서입니다. 실제 데이터는 Tailscale 폐쇄망과 연구원별(개인별) 읽기전용 PostgreSQL 계정으로 보호됩니다.
 
-## 이 문서가 다루는 것
+## 처음 한 번만 준비하세요
 
-| 파일 | 내용 |
-|---|---|
-| [01-data.md](01-data.md) | 데이터 카탈로그(뷰별 행수·기간·갱신주기)와 스키마 사전(컬럼 의미·단위·함정)을 합친 문서. **가장 먼저 읽어야 할 문서** |
-| [02-access.md](02-access.md) | Tailscale 연결부터 psql/pandas/R/MCP 접속, 예제 쿼리까지 |
-| [03-terms.md](03-terms.md) | 이용약관·서약서 (법적 검토 전 초안) |
-| [appendix-local-llm.md](appendix-local-llm.md) | 외부 LLM에 조회 결과를 보내고 싶지 않은 경우를 위한 로컬 LLM 경로 (선택) |
+1. [이용조건](05-terms.md)을 읽고 서약합니다.
+2. 관리자가 보낸 초대로 Tailscale(폐쇄망 VPN)에 가입합니다.
+3. 개인별 DB 계정을 별도 채널로 받습니다.
+4. 직접 SQL 또는 LLM·MCP 중 조회 방법을 선택합니다.
 
-## 데이터베이스 2개
+## 어떤 방법을 사용할까요?
 
-운영 테이블은 감춰져 있고 `research` 스키마의 뷰만 노출된다. 뷰 컬럼에는
-한국어 설명이 DB 레벨(`COMMENT`)로 붙어 있어 `psql`의 `\d+`나
-`col_description()`으로도 바로 확인할 수 있다.
-
-| DB | 접속 대상(포트/DB명은 [02-access.md](02-access.md) 참고) | 뷰 6개 |
+| 구분 | 직접 SQL | LLM·MCP |
 |---|---|---|
-| **pv** | 발전량·발전소·SMP·기상 | `generation`, `plants`, `smp_hourly`, `smp_realtime_jeju`, `smp_weighted_avg`, `weather_asos` |
-| **demand** | 전국/제주 수급·열수요 | `demand_5min`, `jeju_supply_demand`, `heat_demand`, `heat_demand_location`, `demand_weather_1h` |
+| 추천 대상 | 재현 가능한 분석·통계·그래프 | 스키마 탐색·간단한 자연어 조회 |
+| 사용하는 도구 | psql, pandas, R, DBeaver | Claude Desktop 등 LLM 클라이언트와 로컬 `energy-mcp` |
+| 공통 조건 | Tailscale + 개인 DB 계정 | Tailscale + 같은 개인 DB 계정 |
+| 결과 확인 | SQL과 원자료를 직접 확인 | 생성된 SQL과 데이터 규칙을 반드시 재확인 |
 
-## 시작하는 순서
+두 방법 모두 같은 Tailscale 폐쇄망과 같은 개인 계정을 사용합니다. 어느 쪽을
+선택해도 보안 경계는 동일합니다 — [데이터 제공 구조](01-architecture.md)에서
+전체 흐름을 확인하세요.
 
-1. [03-terms.md](03-terms.md)를 읽고 서약한다 (전체 쿼리가 감사 로그에 남는다는 점 포함).
-2. [02-access.md](02-access.md)로 Tailscale에 연결하고 발급받은 role로 접속을 확인한다.
-3. [01-data.md](01-data.md)에서 쓰려는 뷰의 함정(시간 규약, 단위, 품질 등급)을 먼저 읽는다.
-   특히 `research.plants.data_quality`와 `research.generation.gen_kwh` 단위는 결과를
-   완전히 뒤집을 수 있는 함정이니 반드시 확인한다.
-4. [02-access.md](02-access.md)의 예제 쿼리를 자신의 분석에 맞게 고쳐 쓴다.
+## 다음으로 읽을 페이지
 
-## 참고 — 수집 방법에 대하여
-
-이 문서는 데이터의 **의미·단위·품질·시간 규약**을 다룬다. 어떤 사이트에서
-어떤 방식으로 데이터를 긁어오는지는 이 문서의 범위가 아니며, 보안상 다루지
-않는다. 원천은 대체로 공공데이터포털·발전사 공개 자료 기반이라고만
-알아두면 된다.
+- [데이터 제공 구조](01-architecture.md) — 두 조회 방법이 공유하는 보안 경계
+- [직접 SQL로 조회](02-direct-sql.md) — Tailscale 연결부터 첫 쿼리까지
+- [LLM·MCP로 조회](03-llm-mcp.md) — 로컬 MCP 설치부터 자연어 질문까지
+- [데이터 카탈로그 · 스키마 사전](04-data-catalog.md) — 뷰별 기간·단위·품질·시간 규약
+- [이용조건 · 보안 서약](05-terms.md) — 허용·금지 행위, 감사 로그, 계정 회수
