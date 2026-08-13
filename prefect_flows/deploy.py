@@ -280,6 +280,14 @@ DEPLOYMENTS = [
         "tags": ["pv", "ekr", "yearly"],
         "description": "매년 1월 한국농어촌공사 영암/율치 PV(odcloud 15005796) 전체 연도 멱등 수집 → generation 코어",
     },
+    {
+        "flow": "prefect_flows.oil_flow.hourly_oil_flow",
+        "name": "hourly-oil-price",
+        "cron": "5 * * * *",  # 정각 직후 — 진행 중 캔들이 확정된 뒤 받는다
+        "label": "매시 05분 (Hyperliquid 브렌트·WTI 1h OHLCV → CSV, file_fdw 로 즉시 노출)",
+        "tags": ["oil", "hourly"],
+        "description": "Hyperliquid XYZ builder DEX 시간별 유가 캔들 수집 → data/oil/oil_hourly_all.csv (research.oil_hourly 가 file_fdw 로 직접 읽음)",
+    },
 ]
 
 
