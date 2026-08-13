@@ -47,39 +47,68 @@ SLOTS = SMPAPI.REALTIME_SLOTS_PER_DAY  # 96
 def _header_dates(header: List[str], ref: date) -> List[Optional[date]]:
     """헤더 각 셀의 MM.DD를 실제 date로 변환. MM.DD가 아닌 셀은 None.
 
-    날짜 열은 좌->우로 '연속된 매일'이다(KPX 실시간 표). 그래서 첫 날짜 열의
-    절대날짜(date0)만 정하고, 이후 날짜 열은 +1일씩 순차 증가시킨다.
-    이렇게 하면 한 창이 1년을 넘겨도(예: 2024-03~2025-05) 연도 경계가
-    자동으로 맞는다. (MM.DD를 셀마다 ref로 추정하면 1년 초과 창에서 어긋남.)
+    날짜 열은 좌->우로 시간순이지만 **연속된 매일이 아니다.** KPX 는 열을
+    통째로 건너뛰고 준다 (2026-08-13 실측: '08.07(금), 08.10(월), 08.11(화)'
+    — 주말 두 칸이 없다).
 
-    date0 결정: 첫 MM.DD를 ref.year에 붙이되, ref보다 미래면 작년으로(연말 창 대비).
+    예전 구현은 첫 열에서 +1일씩 증가시키며 MM.DD 가 어긋나면 예외를 던졌다.
+    주말이 낀 창이 오면 수집 전체가 죽었고, 실제로 2026-08-07 부터 매일 실패했다.
+
+    연도는 셀마다 ref 로 추정할 수 없다 — 창이 1년을 넘기 때문이다
+    (실측 852열 = 2024-03-01 ~ 2026-08-11). 그래서 **MM.DD 가 뒤로 감기는
+    지점에서 연도를 +1** 하고, 마지막 열을 ref 에 맞춰 기준연도를 역산한다.
+    이러면 결번과 연도 경계를 동시에 견딘다.
     """
-    # 첫 MM.DD 위치/값
-    first_idx = next((i for i, c in enumerate(header) if _MMDD_RE.match(c)), None)
-    if first_idx is None:
+    parsed: List[tuple[int, tuple[int, int]]] = []
+    for i, c in enumerate(header):
+        m = _MMDD_RE.match(c)
+        if m:
+            parsed.append((i, (int(m.group(1)), int(m.group(2)))))
+    if not parsed:
         return [None] * len(header)
-    m = _MMDD_RE.match(header[first_idx])
-    mm0, dd0 = int(m.group(1)), int(m.group(2))
-    try:
-        date0 = date(ref.year, mm0, dd0)
-    except ValueError:
-        return [None] * len(header)
-    if date0 > ref:  # 첫 열이 ref보다 미래면 직전 해가 시작
-        date0 = date(ref.year - 1, mm0, dd0)
 
-    out: List[Optional[date]] = []
-    seq = 0  # 날짜 열 순번
-    for c in header:
-        match = _MMDD_RE.match(c)
-        if match:
-            expected = date0 + timedelta(days=seq)
-            actual = (int(match.group(1)), int(match.group(2)))
-            if actual != (expected.month, expected.day):
-                raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
-            out.append(expected)
-            seq += 1
-        else:
-            out.append(None)
+    # 좌->우로 훑으며 롤오버 누적 횟수를 기록한다.
+    offsets: List[int] = []
+    rollovers = 0
+    prev: Optional[tuple[int, int]] = None
+    for _, md in parsed:
+        if prev is not None and md < prev:
+            rollovers += 1
+        offsets.append(rollovers)
+        prev = md
+
+    # 마지막(가장 최근) 열의 연도를 ref 기준으로 확정한 뒤 기준연도를 역산한다.
+    last_md = parsed[-1][1]
+    last_year = ref.year
+    try:
+        if date(last_year, *last_md) > ref:
+            last_year -= 1
+    except ValueError:
+        pass  # 2/29 같은 경우 — 아래 개별 변환에서 걸러진다
+    base_year = last_year - rollovers
+
+    out: List[Optional[date]] = [None] * len(header)
+    resolved: List[date] = []
+    for (idx, (mm, dd)), off in zip(parsed, offsets):
+        try:
+            d = date(base_year + off, mm, dd)
+        except ValueError:
+            continue  # 존재하지 않는 날짜(2/29 등)는 그 열만 버린다
+        out[idx] = d
+        resolved.append(d)
+
+    # 결번은 허용하되 **순서·중복·과대점프는 막는다.** 연속성 가정을 걷어내면서
+    # 이 방어까지 잃으면 두 가지 사고가 난다.
+    #   (1) 같은 날짜 열이 두 번 오면 그 날 96슬롯이 중복 적재된다.
+    #   (2) 'MM.DD 가 뒤로 감기면 +1년' 규칙이 오작동한다. 예컨대 08.05 뒤에
+    #       08.04 가 오면 진짜 롤오버가 아니라 원천이 깨진 것인데, 그대로 두면
+    #       365일을 통째로 건너뛴 날짜가 만들어진다.
+    # 진짜 연도 경계(12.31 -> 01.01)는 간격이 1일이므로, 상한을 넉넉히 둬도
+    # 정상 데이터는 걸리지 않는다(휴일·점검으로 며칠씩 비는 것은 정상).
+    MAX_GAP_DAYS = 60
+    for a, b in zip(resolved, resolved[1:]):
+        if b <= a or (b - a).days > MAX_GAP_DAYS:
+            raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
     return out
 
 
@@ -138,6 +167,7 @@ def parse_realtime_grid(grid: List[List[str]], ref: date) -> pd.DataFrame:
                     raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
 
     records = []
+    confirmed_dates = []
     for d in date_list:
         prices = by_date[d]
         if any(price is _UNCONFIRMED for price in prices) and all(
@@ -146,13 +176,23 @@ def parse_realtime_grid(grid: List[List[str]], ref: date) -> pd.DataFrame:
             continue
         if any(price is _UNCONFIRMED or price is _EMPTY or price is None for price in prices):
             raise RuntimeError("제주 실시간 SMP 원천 데이터 형식이 올바르지 않습니다")
+        confirmed_dates.append(d)
         day_start = datetime(d.year, d.month, d.day)
         for slot_idx, price in enumerate(prices):
             ts = day_start + timedelta(minutes=15 * slot_idx)
             records.append(
                 {"timestamp": ts, "region": "jeju", "price": price, "is_confirmed": True}
             )
-    return pd.DataFrame(records)
+
+    df = pd.DataFrame(records)
+    # 원천 진단을 결과에 실어 보낸다. 0행일 때 "우리 파서가 깨졌나 / KPX 가
+    # 확정을 멈췄나" 를 로그만 보고 구분할 수 있어야 한다 — 이 구분이 없어서
+    # 2026-06~08 에 72회 연속 0행 수집이 '성공'으로 보고됐다.
+    df.attrs["source_first"] = date_list[0]
+    df.attrs["source_last"] = date_list[-1]
+    df.attrs["confirmed_last"] = confirmed_dates[-1] if confirmed_dates else None
+    df.attrs["unconfirmed_days"] = len(date_list) - len(confirmed_dates)
+    return df
 
 
 def run_realtime_collection(db_url: Optional[str] = None) -> int:
@@ -169,7 +209,18 @@ def run_realtime_collection(db_url: Optional[str] = None) -> int:
         raise RuntimeError("제주 실시간 SMP 원천 데이터가 비어 있습니다")
     df = parse_realtime_grid(grid, ref=date.today())
     if df.empty:
-        logger.info("[realtime] 확정된 신규 데이터 없음")
+        # 0행은 정상일 수도(아직 D+1 18시 전) 비정상일 수도(원천이 확정을 멈춤) 있다.
+        # 어느 쪽인지 로그만 보고 판별되게 원천 상태를 함께 남긴다.
+        last_conf = df.attrs.get("confirmed_last")
+        stale = (date.today() - last_conf).days if last_conf else None
+        logger.warning(
+            "[realtime] 확정된 신규 데이터 없음 — 원천 게시 %s~%s, "
+            "마지막 확정 %s(%s일 전), 미확정 %s일치. "
+            "며칠 이상 지속되면 KPX 가 확정 공표를 중단한 것이다(우리 쪽 버그 아님).",
+            df.attrs.get("source_first"), df.attrs.get("source_last"),
+            last_conf or "없음", stale if stale is not None else "?",
+            df.attrs.get("unconfirmed_days"),
+        )
         return 0
     n = C.upsert_realtime_jeju(df, db_url=db_url)
     logger.info(
