@@ -31,6 +31,11 @@ services:
       - POSTGRES_DB=pv
     volumes:
       - /mnt/iscsi-renewable/postgres/pv-data-postgres:/var/lib/postgresql/data
+      # 기상청 동네예보 3종(단기예보·초단기예보·초단기실황) NAS SMB 마운트.
+      # research.forecast() 가 호출 시점에 필요한 파일만 읽는다 — 적재하지 않는다
+      # (전량은 약 225억 행이라 이 LUN 에 들어가지도 않는다).
+      # :ro 필수 — DB 가 NAS 원본을 건드릴 이유가 없다.
+      - /mnt/nvme/weather-data/nas-weather:/nas-weather:ro
     ports:
       - "5436:5432"  # 호스트에서 localhost:5436으로 접속
     healthcheck:
