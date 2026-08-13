@@ -13,6 +13,10 @@
 ## 데이터 이해
 
 * [데이터 카탈로그 · 스키마 사전](04-data-catalog.md)
+  * [발전소와 발전량](catalog/generation.md)
+  * [SMP 가격](catalog/smp.md)
+  * [기상 관측과 예보](catalog/weather.md)
+  * [전력수요와 수급](catalog/demand.md)
 
 ## 정책과 참고
 

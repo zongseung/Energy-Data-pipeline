@@ -1,6 +1,6 @@
 # LLM·MCP로 조회
 
-`energy-mcp`는 인터넷에 공개된 서버가 아니라 연구원 PC에서 실행되는 로컬 stdio 프로그램입니다. LLM·MCP 방식도 먼저 Tailscale에 연결하며 직접 SQL 방식과 같은 개인 DB 계정을 사용합니다.
+`energy-mcp`는 인터넷에 공개된 서버가 아니라 연구원 PC에서 실행되는 로컬 stdio 프로그램입니다. LLM·MCP 방식도 Tailscale에 먼저 연결해야 하며, 직접 SQL 방식과 같은 개인 DB 계정을 씁니다.
 
 ## 이 방법이 적합한 경우
 
@@ -15,7 +15,7 @@
 1. 연구원이 LLM 클라이언트(Claude Desktop 등)에 자연어로 질문
 2. LLM이 SQL을 생성해 로컬 `energy-mcp`의 `run_sql` 툴 호출을 요청
 3. `energy-mcp`가 Tailscale 폐쇄망을 거쳐 **연구원 본인의 개인 role**로 DB에 접속해 실행
-4. 결과가 LLM으로 돌아가 답변으로 정리됨
+4. LLM이 결과를 받아 답변으로 정리
 
 이 서버가 대신 인증하지 않습니다 — 본인 role의 권한과 감사 로그를 그대로 씁니다.
 
@@ -28,7 +28,7 @@
 
 ## 1. 로컬 energy-mcp 실행
 
-이 패키지는 **아직 PyPI에 올라가 있지 않습니다** — `uvx energy-mcp`는 지금
+이 패키지는 **아직 PyPI에 올라가 있지 않습니다** — 지금 `uvx energy-mcp`를
 실행하면 package not found로 실패합니다. 현재는 저장소 로컬 체크아웃에서
 실행합니다 (경로는 관리자에게 문의):
 
@@ -36,17 +36,17 @@
 uvx --from /path/to/Energy-Data-pipeline/mcp-server energy-mcp
 ```
 
-제공 기능은 두 가지입니다.
+기능은 두 가지입니다.
 
-- 툴 `run_sql` — `research` 스키마에 대한 **읽기전용** SQL 실행. 기본 60초
-  시간 제한, 기본 10,000행 제한이 있고 잘리면 응답에 `truncated: true`로
-  표시됩니다.
+- 툴 `run_sql` — `research` 스키마를 **읽기전용**으로 조회하는 SQL 실행. 기본
+  시간 제한 60초, 행 제한 10,000행이며 결과가 잘리면 응답에 `truncated: true`가
+  붙습니다.
 - 리소스 `energy://schema` — 뷰·컬럼·설명을 DB에서 직접 읽어 보여줍니다.
 
 ## 2. pv와 demand 서버 등록
 
 Claude Desktop 기준 `claude_desktop_config.json`에 pv와 demand 서버를 각각
-등록합니다. DSN(접속 문자열)의 값은 전부 플레이스홀더입니다 — 본인 발급
+등록합니다. 아래 DSN(접속 문자열) 값은 전부 플레이스홀더입니다 — 본인 발급
 정보로 바꿔 쓰되 실제 값을 저장소나 채팅에 남기지 마세요.
 
 ```json
@@ -88,10 +88,15 @@ Claude Desktop 기준 `claude_desktop_config.json`에 pv와 demand 서버를 각
 LLM 답변은 분석의 최종 근거가 아닙니다. 다음을 연구원이 직접 확인하세요.
 
 1. **실행 SQL** — 의도한 발전소·기간·조건이 맞는지
-2. **단위** — `gen_kwh`는 kWh ([데이터 카탈로그](04-data-catalog.md) 참고)
-3. **시간 규약** — 모두 KST 구간시작
-4. **품질 등급** — `data_quality = '정상'` 필터 여부, `is_aggregate` 이중계상 제외 여부
-5. **잘림 여부** — 응답에 `truncated: true`가 있으면 집계가 불완전할 수 있음
+2. **연료 필터** — `research.generation`에는 태양광·풍력·수력·화력·연료전지가
+   모두 섞여 있다. 태양광을 물었는데 `fuel_type = 'solar'`가 없으면 화력이
+   섞인 답이다
+3. **단위** — `gen_kwh`는 kWh ([데이터 카탈로그](04-data-catalog.md) 참고)
+4. **시간 규약** — 모두 KST 구간시작
+5. **과잉 필터** — `data_quality = '정상'`이나 `is_aggregate = false`를
+   **덧붙이지 않았는지**. 뷰가 이미 걸러 놨기 때문에 다시 걸면 멀쩡한 데이터가
+   사라진다 ([이유](catalog/generation.md#함정--is_aggregate-지금은-빼면-안-된다))
+6. **잘림 여부** — 응답에 `truncated: true`가 있으면 집계가 불완전할 수 있음
 
 ## 좋은 질문과 피해야 할 질문
 
@@ -114,12 +119,12 @@ LLM 답변은 분석의 최종 근거가 아닙니다. 다음을 연구원이 �
 | 인증 실패 | 개인 role·비밀번호 | 재발급 요청 (비밀번호를 채팅에 남기지 말 것) |
 | 답변이 이상함 | 실행 SQL | SQL을 [데이터 카탈로그](04-data-catalog.md)의 단위·시간·품질 규칙과 대조 |
 
-조회 결과를 외부 LLM 서버로 보내는 것이 꺼려지면
+조회 결과를 외부 LLM 서버로 보내기 꺼려지면
 [부록: 로컬 LLM](appendix-local-llm.md)의 완전 로컬 경로를 쓰세요.
 
 ## 직접 SQL로 전환
 
 MCP가 계속 실패하거나 복잡한 쿼리가 필요하면 [직접 SQL](02-direct-sql.md)로
-전환하세요. 같은 Tailscale 연결과 같은 개인 계정을 그대로 쓰므로 추가 발급
-절차가 없습니다. LLM이 생성한 SQL을 psql에 붙여 넣어 재현하는 것부터 시작하면
+전환하세요. Tailscale 연결과 개인 계정을 그대로 쓰므로 추가 발급 절차가
+없습니다. LLM이 만든 SQL을 psql에 붙여 넣어 재현해 보는 것부터 시작하면
 됩니다.
