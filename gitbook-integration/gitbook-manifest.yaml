@@ -1,0 +1,20 @@
+name: energy-plant-map
+title: 발전소 지도
+organization: ORG_ID          # ← GitBook 조직 ID 로 교체 (아래 README 2단계)
+description: research.plants 91기를 지도에서 찾고, 고른 부지의 조회 SQL을 바로 얻는다.
+visibility: private           # 조직 내부 전용. 공개 배포 전에는 바꾸지 말 것.
+script: ./src/index.tsx
+scopes:
+  - space:content:read
+categories:
+  - visualization
+contentSecurityPolicy:
+  # webframe 을 띄울 출처. 아래 README 3단계에서 정한 호스팅 주소로 교체한다.
+  # 여기에 없는 출처는 GitBook 이 차단한다 — 지도 페이지가 빈 칸으로 뜨면 이 값부터 확인.
+  frame-src: https://YOUR-HOST.example.com
+blocks:
+  - id: plant-map
+    title: 발전소 지도
+    description: 연료별 필터·이름 검색·부지별 조회 SQL
+    urlUnfurl:
+      - /^https:\/\/YOUR-HOST\.example\.com\/plant-map/
