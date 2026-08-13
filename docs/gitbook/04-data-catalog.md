@@ -22,6 +22,7 @@ WHERE table_schema='research' AND table_name='generation';
 <tr><td><strong>SMP 가격</strong></td><td>하루전시장·제주 실시간·가중평균</td><td><a href="catalog/smp.md">catalog/smp.md</a></td></tr>
 <tr><td><strong>기상 관측과 예보</strong></td><td>ASOS 실측 95개 지점과 동네예보 3종</td><td><a href="catalog/weather.md">catalog/weather.md</a></td></tr>
 <tr><td><strong>전력수요와 수급</strong></td><td>전국·제주 계통과 지역난방 열수요</td><td><a href="catalog/demand.md">catalog/demand.md</a></td></tr>
+<tr><td><strong>국제유가</strong></td><td>브렌트·WTI 시간별 OHLCV</td><td><a href="catalog/oil.md">catalog/oil.md</a></td></tr>
 </tbody>
 </table>
 
@@ -53,6 +54,12 @@ WHERE table_schema='research' AND table_name='generation';
 |---|---|---|---|---|
 | `research.weather_asos` | ASOS 시간별 관측 95개 지점 | 4,743,936 | 2019-01-01 ~ 2026-08-11 | 매일 09:00 |
 | `research.forecast()` | 기상청 동네예보 3종 (NAS 직독) | 적재 없음 | 2023-01 ~ 2025-06 | 정적 |
+
+### [국제유가](catalog/oil.md)
+
+| 뷰 | 내용 | 행수 | 기간 | 갱신 |
+|---|---|---|---|---|
+| `research.oil_hourly` | 브렌트·WTI 시간별 OHLCV | 9,116 | WTI 2026-01-07 ~ / 브렌트 2026-03-05 ~ | 매시 05분 |
 
 ### [전력수요와 수급](catalog/demand.md)
 

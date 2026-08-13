@@ -17,6 +17,7 @@
   * [SMP 가격](catalog/smp.md)
   * [기상 관측과 예보](catalog/weather.md)
   * [전력수요와 수급](catalog/demand.md)
+  * [국제유가](catalog/oil.md)
 
 ## 정책과 참고
 

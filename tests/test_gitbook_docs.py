@@ -79,6 +79,7 @@ CATALOG_PAGES = {
     "smp.md",
     "weather.md",
     "demand.md",
+    "oil.md",
 }
 
 
