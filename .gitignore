@@ -104,7 +104,13 @@ dist/
 ############################
 # 📁 문서 / Claude 작업파일 (추적 제외)
 ############################
-docs/
+# GitBook 게시본만 추적한다 — 이게 연구원에게 나가는 산출물이다.
+# 'docs/' 로 통째로 제외하면 안 된다. git 은 부모 디렉터리가 제외되면 하위를
+# ! 로 되살릴 수 없어서, 새로 만든 페이지가 조용히 커밋에서 빠진다
+# (실제로 카탈로그를 하위 폴더로 쪼갤 때 4개 페이지가 통째로 누락됐다).
+# 'docs/*' 로 항목만 제외해야 git 이 docs/gitbook/ 안으로 들어갈 수 있다.
+docs/*
+!docs/gitbook/
 .claude/
 
 ############################
@@ -114,3 +120,16 @@ docs/
 !config/*.csv
 
 *.pem
+*.parquet
+backups/
+
+# Codex isolated workspaces and temporary review artifacts
+.worktrees/
+.superpowers/
+
+# humanize-korean 중간 산출물 (원본·윤문본 대조용, 결과는 docs/gitbook 에 반영됨)
+_workspace/
+
+# 데모 쿼리 배터리 실행 결과 — 실행할 때마다 갱신되는 카탈로그
+battery_round*.md
+battery_round*.log

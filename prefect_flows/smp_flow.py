@@ -1,7 +1,7 @@
 """
 Prefect Flows: SMP(계통한계가격) 수집
 
-- daily_smp_collection_flow   : 매일 06:00  하루전시장 시간별 + 일별 가중평균(육지/제주)
+- daily_smp_collection_flow   : 매일 09:00  전날 하루전시장 시간별 + 일별 가중평균(육지/제주)
 - monthly_smp_aggregate_flow  : 매월 2일 07:00  월별/연도별 공식 가중평균
 - daily_smp_realtime_jeju_flow: 매일 19:00  제주 실시간 15분(전일 확정)
 - weekly_smp_legacy_sync_flow : 매주 월 07:00  공통 DB -> 개인 DB 백업 동기화
@@ -74,7 +74,20 @@ def run_smp_realtime_task() -> int:
 def daily_smp_realtime_jeju_flow() -> int:
     try:
         inserted = run_smp_realtime_task()
-        notify_slack_success.submit("SMP Realtime Jeju", f"- 실시간 적재 행수: {inserted}")
+        if inserted == 0:
+            # 0행을 "- 실시간 적재 행수: 0" 으로만 보내면 정상 성공과 구별되지 않는다.
+            # 실제로 2026-06~08 에 72회 연속 0행이 성공 알림으로 나가 아무도 눈치채지
+            # 못했고, 원천(KPX)이 확정 공표를 멈춘 사실이 두 달간 묻혔다.
+            notify_slack_success.submit(
+                "SMP Realtime Jeju",
+                "- ⚠ 신규 확정 데이터 0행. D+1 18시 전이면 정상이지만, "
+                "며칠 이상 이어지면 원천이 확정 공표를 멈춘 것이다. "
+                "flow 로그의 '[realtime] 확정된 신규 데이터 없음' 줄에 "
+                "원천 게시 범위와 마지막 확정일이 찍힌다.",
+            )
+        else:
+            notify_slack_success.submit(
+                "SMP Realtime Jeju", f"- 실시간 적재 행수: {inserted}")
         return inserted
     except Exception as e:
         notify_slack_failure.submit("SMP Realtime Jeju", f"{type(e).__name__}: {e}")

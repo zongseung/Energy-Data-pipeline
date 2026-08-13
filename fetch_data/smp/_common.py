@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -57,7 +58,8 @@ def parse_price(raw: Optional[str]) -> Optional[float]:
     if not s:
         return None
     try:
-        return float(s)
+        value = float(s)
+        return value if math.isfinite(value) else None
     except ValueError:
         return None  # "확정가격은 D+1일..." 같은 플레이스홀더
 

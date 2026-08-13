@@ -14,8 +14,12 @@ import pandas as pd
 # 상위 디렉토리를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fetch_data.weather.asos_collect import select_data_async, station_ids
-from fetch_data.common.impute_missing import impute_missing_values
+from fetch_data.weather.asos_collect import (
+    normalize_weather_data,
+    select_data_async,
+    station_ids,
+)
+from fetch_data.weather.database import load_asos_df
 from prefect_flows.merge_to_all import merge_to_all_csv
 from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
@@ -41,38 +45,19 @@ async def collect_weather_data(date_str: str) -> pd.DataFrame:
     if missing_cols:
         raise ValueError(f"필요한 컬럼이 없습니다: {missing_cols}")
 
-    df = df[needed_cols]
+    # icsr(일사량)은 필수 컬럼에서 제외 — 없어도 기온/습도 수집은 그대로 성공해야 한다.
+    # 있으면 함께 가져가고, normalize_weather_data가 NULL 처리를 맡는다.
+    select_cols = needed_cols + (["icsr"] if "icsr" in df.columns else [])
+    df = df[select_cols]
     print(f"수집된 데이터: {len(df)}건")
 
     return df
 
 
-@task(name="결측치 처리", retries=2)
+@task(name="기상 컬럼 정규화", retries=2)
 def process_missing_values(df: pd.DataFrame) -> pd.DataFrame:
-    """결측치를 처리합니다."""
-    print("\n결측치 처리 시작...")
-
-    result = impute_missing_values(
-        df,
-        columns=["ta", "hm"],
-        date_col="tm",
-        station_col="stnNm",
-        debug=True,
-    )
-
-    if isinstance(result, tuple):
-        df_imputed, _ = result
-    else:
-        df_imputed = result
-
-    df_imputed = df_imputed.rename(columns={
-        "tm": "date",
-        "hm": "humidity",
-        "ta": "temperature",
-        "stnNm": "station_name",
-    })
-
-    return df_imputed
+    """Normalize raw ASOS columns without inventing missing measurements."""
+    return normalize_weather_data(df)
 
 
 @task(name="기상 데이터 저장", retries=2)
@@ -92,6 +77,19 @@ def merge_weather_to_all(output_path: str) -> str:
     """새로 저장된 CSV를 통합 파일에 병합합니다."""
     merged_path = merge_to_all_csv(output_path)
     return merged_path
+
+
+@task(name="기상 데이터 DB 적재", retries=2, retry_delay_seconds=60)
+def load_weather_to_db(df: pd.DataFrame) -> int:
+    """정규화된 기상 데이터를 weather_asos 테이블에 적재합니다.
+
+    예외를 여기서 삼키지 않는다 — 삼키면 retries가 발동하지 않고 Prefect UI에서도
+    Failed로 안 보여 조용히 데이터가 누락된다. CSV 저장 결과를 지키는 일은
+    (플로우가 output_path를 반환해 이 태스크의 실패 상태가 플로우 상태에
+    반영되지 않는 것과) 호출부의 `db_rows_future.result(raise_on_failure=False)`가
+    맡는다.
+    """
+    return load_asos_df(df)
 
 
 # ==============================
@@ -135,7 +133,7 @@ def daily_weather_collection_flow(target_date: str | None = None):
         # 1. 데이터 수집
         df_future = collect_weather_data.submit(target_date)
 
-        # 2. 결측치 처리
+        # 2. 원본 컬럼 정규화
         df_processed_future = process_missing_values.submit(df_future)
 
         # 3. 데이터 저장
@@ -144,15 +142,22 @@ def daily_weather_collection_flow(target_date: str | None = None):
         # 4. 통합 파일에 병합
         merged_path_future = merge_weather_to_all.submit(output_path_future)
 
+        # 5. DB 적재 (CSV 저장/병합과 별개로 병렬 진행, 실패해도 플로우에 영향 없음)
+        db_rows_future = load_weather_to_db.submit(df_processed_future)
+
         output_path = output_path_future.result()
         merged_path = merged_path_future.result()
+        # DB 적재는 재시도까지 다 실패해도 CSV 결과를 되돌리지 않는다 — 예외를
+        # 올리지 않고 결과만 받는다. 실패 시 Slack 문자열에 예외가 그대로 찍혀
+        # 눈에 띈다(태스크 런 자체는 Prefect UI에 Failed로 관측 가능).
+        db_rows = db_rows_future.result(raise_on_failure=False)
 
         print("\n플로우 완료!")
 
-        # 5. Slack 알림
+        # 6. Slack 알림
         notify_slack_success.submit(
             "Weather ETL",
-            f"- 날짜: {target_date}\n- 파일: {output_path}\n- 통합: {merged_path}"
+            f"- 날짜: {target_date}\n- 파일: {output_path}\n- 통합: {merged_path}\n- DB 적재: {db_rows}행"
         )
 
         return output_path
@@ -161,41 +166,4 @@ def daily_weather_collection_flow(target_date: str | None = None):
         error_msg = f"{type(e).__name__}: {e}"
         print(f"\n플로우 실행 중 에러 발생: {error_msg}")
         notify_slack_failure.submit("Weather ETL", error_msg)
-        raise
-
-
-@flow(name="full-etl-flow", log_prints=True)
-def full_etl_flow(target_date: str | None = None):
-    """
-    전체 ETL 플로우
-
-    기상 데이터 수집을 수행합니다.
-    """
-    print(f"\n{'='*60}")
-    print("전체 ETL 플로우 시작")
-    print(f"실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}\n")
-
-    results = {}
-
-    try:
-        # 기상 데이터 수집
-        print("\n[1/1] 기상 데이터 수집...")
-        weather_path = daily_weather_collection_flow(target_date)
-        results["weather"] = weather_path
-
-        print(f"\n전체 ETL 완료!")
-        print(f"- 기상 데이터: {weather_path}")
-
-        notify_slack_success.submit(
-            "Full ETL",
-            f"- 기상: {weather_path}"
-        )
-
-        return results
-
-    except Exception as e:
-        error_msg = f"{type(e).__name__}: {e}"
-        print(f"\nETL 중 에러 발생: {error_msg}")
-        notify_slack_failure.submit("Full ETL", error_msg)
         raise

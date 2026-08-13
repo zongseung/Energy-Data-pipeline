@@ -144,13 +144,13 @@ def save_datasets(
     datasets: Dict[str, pd.DataFrame],
     out_dir: Path = DEFAULT_OUT_DIR,
 ) -> Dict[str, Path]:
-    """{category: long} 을 gen_data/{category}_long.csv 로 저장."""
+    """{category: long} 을 gen_data/{category}_long.parquet 로 저장 (CSV 대비 ~10배 축소)."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     paths: Dict[str, Path] = {}
     for category, df in datasets.items():
-        out_path = out_dir / f"{category}_long.csv"
-        df.to_csv(out_path, index=False, encoding="utf-8-sig")
+        out_path = out_dir / f"{category}_long.parquet"
+        df.to_parquet(out_path, index=False, compression="zstd")
         paths[category] = out_path
         logger.info(f"saved: {out_path}  ({len(df):,} rows)")
     return paths

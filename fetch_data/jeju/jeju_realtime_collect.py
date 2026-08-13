@@ -31,6 +31,7 @@ import aiohttp
 import pandas as pd
 
 from fetch_data.common.logger import get_logger
+from fetch_data.jeju import jeju_csv_store
 
 logger = get_logger(__name__)
 
@@ -70,12 +71,20 @@ def _parse(body: bytes) -> Optional[pd.DataFrame]:
     return df if not df.empty else None
 
 
-def _load_existing(path: Path) -> pd.DataFrame:
+def _load_existing(path: Path) -> Optional[pd.DataFrame]:
     if not path.exists():
         return pd.DataFrame(columns=["timestamp"])
-    df = pd.read_csv(path, dtype=str)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-    return df
+    try:
+        df = pd.read_csv(path, dtype=str)
+        if "timestamp" not in df.columns:
+            raise ValueError("timestamp 컬럼 없음")
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        if df["timestamp"].isna().any():
+            raise ValueError("유효하지 않은 timestamp")
+        return df
+    except Exception as e:
+        logger.warning(f"[실시간] 기존 파일 읽기 실패, 저장 생략: {e}")
+        return None
 
 
 def _merge_and_save(existing: pd.DataFrame, fresh: pd.DataFrame, path: Path) -> int:
@@ -86,7 +95,7 @@ def _merge_and_save(existing: pd.DataFrame, fresh: pd.DataFrame, path: Path) -> 
         return 0
     merged = pd.concat([existing, new_rows], ignore_index=True)
     merged = merged.sort_values("timestamp").reset_index(drop=True)
-    merged.to_csv(path, index=False, encoding="utf-8-sig")
+    jeju_csv_store.atomic_to_csv(merged, path)
     return len(new_rows)
 
 
@@ -120,8 +129,11 @@ async def _poll_once(session: aiohttp.ClientSession) -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path = _out_path(today)
-    existing = _load_existing(path)
-    added = _merge_and_save(existing, fresh, path)
+    with jeju_csv_store.file_lock(path):
+        existing = _load_existing(path)
+        if existing is None:
+            return 0
+        added = _merge_and_save(existing, fresh, path)
 
     if added:
         latest = fresh["timestamp"].max()

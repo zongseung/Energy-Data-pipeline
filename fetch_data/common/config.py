@@ -10,22 +10,9 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parents[2] / ".env", override=False)
 
 
-def get_db_url() -> str:
-    """실행 환경(Docker/로컬)에 관계없이 올바른 PostgreSQL DB URL 반환."""
-    for key in ("PV_DATABASE_URL", "DB_URL", "LOCAL_DB_URL"):
-        url = os.getenv(key)
-        if url:
-            return url
-    # Docker 내부 기본값
-    if Path("/.dockerenv").exists():
-        return "postgresql+psycopg2://pv:pv@pv-db:5432/pv"
-    # 로컬 기본값
-    return "postgresql+psycopg2://pv:pv@localhost:5436/pv"
-
-
 def get_nambu_api_key() -> str:
     return os.getenv("NAMBU_API_KEY", "")
 
 
 def get_service_key() -> str:
-    return os.getenv("SERVICE_KEY", "")
+    return os.getenv("SERVICE_KEY") or os.getenv("NAMDONG_WIND_KEY", "")

@@ -13,7 +13,7 @@ services:
     ports:
       - "5435:5432"
     volumes:
-      - pv_postgres_data:/var/lib/postgresql/data
+      - /mnt/iscsi-renewable/postgres/pv-db-data:/var/lib/postgresql/data
     networks:
       - pv-net
     healthcheck:

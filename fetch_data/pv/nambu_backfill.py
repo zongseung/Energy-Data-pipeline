@@ -6,19 +6,21 @@ import asyncio
 import re
 import xml.etree.ElementTree as ET
 from urllib.parse import urlencode
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 import aiohttp
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 from fetch_data.common.config import get_nambu_api_key
 from fetch_data.common.db_utils import resolve_db_url, redact_db_url
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import parse_hour_column
 from fetch_data.constants import NamebuAPI
+from fetch_data.common.generation_core import upsert_generation
+from fetch_data.pv.nambu_state import find_incomplete_days, get_nambu_targets
 from notify.slack_notifier import send_slack_message
 
 logger = get_logger(__name__)
@@ -120,60 +122,6 @@ async def _fetch_api_days(
         return []
 
 
-def _iter_dates(start: date, end: date) -> Iterable[date]:
-    cur = start
-    while cur <= end:
-        yield cur
-        cur += timedelta(days=1)
-
-
-def _get_targets(engine, gencd: Optional[str], hogi: Optional[int]) -> list[dict]:
-    q = """
-    SELECT
-      gencd,
-      hogi,
-      MAX(plant_name) AS plant_name
-    FROM nambu_generation
-    GROUP BY gencd, hogi
-    ORDER BY gencd, hogi
-    """
-    df = pd.read_sql(text(q), engine.connect())
-    targets = []
-    for row in df.itertuples(index=False):
-        tgencd = str(row.gencd).strip()
-        thogi = int(row.hogi)
-        if gencd and tgencd != gencd:
-            continue
-        if hogi is not None and thogi != hogi:
-            continue
-        targets.append({"gencd": tgencd, "hogi": thogi, "plant_name": getattr(row, "plant_name", None)})
-    return targets
-
-
-def _find_incomplete_days(engine, gencd: str, hogi: int, start: date, end: date) -> list[date]:
-    q = text(
-        """
-        SELECT
-          DATE(datetime) AS d,
-          COUNT(DISTINCT EXTRACT(HOUR FROM datetime)) AS hours
-        FROM nambu_generation
-        WHERE gencd = :gencd
-          AND hogi = :hogi
-          AND datetime >= :start_dt
-          AND datetime < :end_dt
-        GROUP BY DATE(datetime)
-        """
-    )
-    start_dt = datetime.combine(start, datetime.min.time())
-    end_dt = datetime.combine(end + timedelta(days=1), datetime.min.time())
-    with engine.connect() as conn:
-        rows = conn.execute(q, {"gencd": gencd, "hogi": hogi, "start_dt": start_dt, "end_dt": end_dt}).fetchall()
-
-    complete = {r[0] for r in rows if int(r[1] or 0) >= 24}
-    incomplete = [d for d in _iter_dates(start, end) if d not in complete]
-    return incomplete
-
-
 def _rows_from_api_payload(payloads: list[dict]) -> pd.DataFrame:
     df_raw = pd.DataFrame(payloads)
     v_vars = [c for c in df_raw.columns if c.startswith("qhorgen")]
@@ -227,7 +175,7 @@ async def backfill(
             hogi = t["hogi"]
             name = t.get("plant_name") or f"{gencd}_{hogi}"
 
-            missing_days = _find_incomplete_days(engine, gencd, hogi, start, end)
+            missing_days = find_incomplete_days(engine, t["plant_id"], start, end)
             if not missing_days:
                 print(f"✅ {name}: 누락 없음")
                 continue
@@ -271,23 +219,12 @@ async def backfill(
                     await asyncio.sleep(sleep_sec)
                     continue
 
-                day_start = datetime.combine(d, datetime.min.time())
-                day_end = day_start + timedelta(days=1)
-
-                with engine.begin() as conn:
-                    conn.execute(
-                        text(
-                            """
-                            DELETE FROM nambu_generation
-                            WHERE gencd = :gencd
-                              AND hogi = :hogi
-                              AND datetime >= :day_start
-                              AND datetime < :day_end
-                            """
-                        ),
-                        {"gencd": gencd, "hogi": hogi, "day_start": day_start, "day_end": day_end},
-                    )
-                    df.to_sql("nambu_generation", con=conn, if_exists="append", index=False)
+                # 신규 코어(plants/generation)에 직접 UPSERT
+                core_df = df.rename(
+                    columns={"datetime": "timestamp", "gencd": "plant_code", "hogi": "unit_no"}
+                )[["timestamp", "plant_name", "unit_no", "plant_code", "generation"]].copy()
+                core_df["plant_name"] = t["plant_name"]
+                upsert_generation(core_df, operator="nambu", fuel_type="solar", engine=engine)
 
                 total_days += 1
                 total_rows += len(df)
@@ -309,7 +246,7 @@ def main() -> None:
     parser.add_argument(
         "--db-url",
         default=None,
-        help="DB 접속 문자열 직접 지정 (예: postgresql+psycopg2://user:pass@localhost:5435/pv_data)",
+        help="DB 접속 문자열 직접 지정 (예: postgresql+psycopg2://user:pass@localhost:5436/pv)",
     )
     parser.add_argument("--debug", action="store_true", help="API 응답 디버그 로그 출력")
     parser.add_argument("--debug-slack", action="store_true", help="디버그 로그를 Slack으로 전송 (최대 50줄)")
@@ -334,9 +271,9 @@ def main() -> None:
 
     logger.info(f"DB_URL: {redact_db_url(db_url)}")
     engine = create_engine(db_url)
-    targets = _get_targets(engine, args.gencd, args.hogi)
+    targets = get_nambu_targets(engine, args.gencd, args.hogi)
     if not targets:
-        raise RuntimeError("대상 발전소(gencd/hogi)를 찾지 못했습니다. (nambu_generation에 기존 데이터가 있어야 합니다.)")
+        raise RuntimeError("plants에서 Nambu 대상 발전소(gencd/hogi)를 찾지 못했습니다.")
 
     title = f"Nambu backfill {start_str}~{_to_yyyymmdd(end)}"
     if args.slack:

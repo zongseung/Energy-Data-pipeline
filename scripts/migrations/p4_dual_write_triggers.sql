@@ -48,11 +48,15 @@ CREATE TRIGGER dualwrite_nambu AFTER INSERT ON nambu_generation
 FOR EACH ROW EXECUTE FUNCTION trg_nambu_to_generation();
 
 -- ── 남동 태양광 ──
+-- 시각은 datetime 의 '날짜' + (hour-1)시 로 복원한다(= 구간시작).
+-- namdong_generation 의 datetime 포맷이 혼재(과거=자정+hour 컬럼, 라이브=구간시작)해도
+-- 이 식이면 양쪽 모두 올바른 hourly timestamp 를 만든다. NEW.datetime 만 쓰면
+-- 자정포맷에서 하루 24시간이 1행으로 붕괴되므로 반드시 hour 를 합성해야 한다.
 CREATE OR REPLACE FUNCTION trg_namdong_to_generation() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     INSERT INTO generation (timestamp, plant_id, gen_kwh, source)
-    VALUES (NEW.datetime,
+    VALUES (date_trunc('day', NEW.datetime) + ((NEW.hour - 1) * interval '1 hour'),
             _ensure_plant(NULL, NEW.plant_name, '1', 'solar', 'namdong'),
             NEW.generation, 'api')
     ON CONFLICT (timestamp, plant_id) DO UPDATE

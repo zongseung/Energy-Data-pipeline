@@ -1,7 +1,7 @@
 """
 Prefect Flow: Nambu PV collection/backfill
 
-남부발전 PV 데이터(nambu_generation)를 마지막 적재 시점 이후부터 어제까지 백필합니다.
+남부발전 PV 데이터를 core plants/generation의 마지막 적재 시점 이후부터 어제까지 백필합니다.
 """
 
 from __future__ import annotations
@@ -26,4 +26,3 @@ def daily_nambu_collection_flow() -> None:
         error_msg = f"{type(e).__name__}: {e}"
         notify_slack_failure.submit("Nambu PV", error_msg)
         raise
-

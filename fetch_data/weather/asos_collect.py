@@ -9,7 +9,6 @@ import pandas as pd
 
 from fetch_data.common.config import get_service_key
 from fetch_data.common.logger import get_logger
-from fetch_data.common.impute_missing import impute_missing_values
 from fetch_data.constants import WeatherAPI
 from prefect_flows.merge_to_all import merge_to_all_csv, DATA_DIR
 
@@ -20,9 +19,7 @@ logger = get_logger(__name__)
 # 프로젝트 루트: /app
 
 # ===== 환경변수 / API 키 =====
-SERVICE_KEY = get_service_key()
-
-if not SERVICE_KEY:
+if not get_service_key():
     logger.warning("[WARN] SERVICE_KEY 환경변수가 설정되지 않았습니다. 기상 데이터 수집 시 오류가 발생합니다.")
 
 API_URL = WeatherAPI.ENDPOINT
@@ -58,11 +55,11 @@ MAX_CONCURRENT = 10
 
 
 async def fetch_city(
-    session, city_id, start, end, semaphore: asyncio.Semaphore, max_retries: int = 3
+    session, city_id, start, end, semaphore: asyncio.Semaphore, service_key: str, max_retries: int = 3
 ) -> pd.DataFrame:
     """단일 지점 데이터를 비동기 수집 (semaphore로 동시 요청 제한, 429 시 재시도)"""
     params = {
-        "serviceKey": SERVICE_KEY,
+        "serviceKey": service_key,
         "pageNo": "1",
         "numOfRows": "999",
         "dataType": "JSON",
@@ -129,9 +126,13 @@ async def fetch_city(
 
 async def select_data_async(city_list, start: str, end: str) -> pd.DataFrame:
     """모든 지점 데이터를 비동기로 수집 (동시 요청 수 제한)"""
+    service_key = get_service_key()
+    if not service_key:
+        raise RuntimeError("SERVICE_KEY 또는 NAMDONG_WIND_KEY가 설정되지 않았습니다.")
+
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     async with aiohttp.ClientSession() as session:
-        tasks = [fetch_city(session, city, start, end, semaphore) for city in city_list]
+        tasks = [fetch_city(session, city, start, end, semaphore, service_key) for city in city_list]
         results = await asyncio.gather(*tasks)
 
     # 비어있는 DF가 섞여 있어도 concat 가능하게 필터링
@@ -142,6 +143,32 @@ async def select_data_async(city_list, start: str, end: str) -> pd.DataFrame:
 
     logger.info(f"총 {len(results)}개 지점에서 데이터 수집 완료")
     return pd.concat(results, ignore_index=True)
+
+
+def normalize_weather_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize raw ASOS columns while preserving missing source values.
+
+    일사량(icsr)은 기온/습도와 달리 일부 지점(관측 장비 미설치)이나 야간 시간대에
+    API가 빈 문자열("")을 준다 — pd.to_numeric(errors="coerce")로 NaN이 되어
+    weather_asos에는 NULL로 적재된다(정상). icsr 컬럼 자체가 없는 입력(예: 이
+    필드를 추가하기 전 호출부, 기존 테스트)도 KeyError 없이 NaN으로 채운다.
+    """
+    result = df.copy()
+    result["ta"] = pd.to_numeric(result["ta"], errors="coerce")
+    result["hm"] = pd.to_numeric(result["hm"], errors="coerce")
+    if "icsr" in result.columns:
+        result["icsr"] = pd.to_numeric(result["icsr"], errors="coerce")
+    else:
+        result["icsr"] = float("nan")
+    return result.rename(
+        columns={
+            "tm": "date",
+            "hm": "humidity",
+            "ta": "temperature",
+            "stnNm": "station_name",
+            "icsr": "solar radiation",
+        }
+    )
 
 
 # ===== 스크립트 직접 실행 시 =====
@@ -164,33 +191,11 @@ if __name__ == "__main__":
         logger.warning("다운로드된 데이터가 없어 종료합니다.")
         sys.exit(0)
 
-    # 원하는 컬럼만 남기기
-    df = df[["tm", "hm", "ta", "stnNm"]]
+    # 원하는 컬럼만 남기기 (icsr=일사량은 응답에 없을 수도 있어 방어적으로 처리)
+    keep_cols = ["tm", "hm", "ta", "stnNm"] + (["icsr"] if "icsr" in df.columns else [])
+    df = df[keep_cols]
 
-    # 결측치 처리 (원본 컬럼명 사용: ta, hm, tm, stnNm)
-    logger.info("결측치 처리 중...")
-    result = impute_missing_values(
-        df,
-        columns=["ta", "hm"],
-        date_col="tm",
-        station_col="stnNm",
-        debug=True,
-    )
-    if isinstance(result, tuple):
-        df, debug_info = result
-    else:
-        df = result
-
-    # 컬럼 이름 변경
-    df.rename(
-        columns={
-            "tm": "date",          # 실제로는 datetime(시각 포함)
-            "hm": "humidity",
-            "ta": "temperature",
-            "stnNm": "station_name",
-        },
-        inplace=True,
-    )
+    df = normalize_weather_data(df)
 
     # 일별 CSV 저장 (컨테이너 기준: /app/data/asos_YYYYMMDD_YYYYMMDD.csv)
     daily_path = OUTPUT_DIR / f"asos_{start}_{end}.csv"
