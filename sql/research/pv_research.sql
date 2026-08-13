@@ -69,10 +69,14 @@ SELECT
     p.lat,
     p.lon,
 
-    -- 실제 발전소가 아니라 다른 행들의 합계 계열.
-    -- 140(영암태양광_합계)은 141·142 와 같은 사업을 합산한 계열이다.
-    -- 현재 적재분은 140=2019~2021, 141·142=2022~2025 로 시간대가 겹치지 않지만,
-    -- 향후 백필로 겹치면 즉시 이중계상된다. 전체 합산 시 is_aggregate 를 제외할 것.
+    -- 사업 단위 통합 계열(개별 호기가 아니다).
+    -- 140(영암태양광)은 141·142 와 같은 사업이며, 원천이 2019~2021 구간에
+    -- 1차/2차를 구분해 주지 않아 통합값으로만 존재한다.
+    -- **현재 적재분은 140=2019~2021, 141·142=2022~2025 로 겹치지 않는다.**
+    -- 따라서 지금은 그대로 합산해도 이중계상되지 않으며, 오히려 제외하면
+    -- 2019~2021 영암 발전량이 통째로 사라진다. 이 플래그는 "지금 중복"이 아니라
+    -- "겹치면 중복될 계열"이라는 표시다 — 2019~2021 에 141·142 가 백필되는
+    -- 순간부터는 반드시 제외해야 한다.
     (p.plant_id = 140) AS is_aggregate,
 
     CASE
@@ -124,7 +128,7 @@ SELECT
             WHEN 47  THEN '시각 ±1시간 불확실(시간 규약 미확정). 2022-07-31까지는 plant_id 49(장흥 풍력 발전소)에 있다'
             WHEN 50  THEN '시각 ±1시간 불확실(시간 규약 미확정). 2022-08-01부터는 plant_id 48(화순풍력)로 이어진다 — 시계열 연결 시 병합 필요'
             WHEN 48  THEN '시각 ±1시간 불확실(시간 규약 미확정). 2022-07-31까지는 plant_id 50(화순 풍력 발전소)에 있다'
-            WHEN 140 THEN '141·142 의 합계 계열(2019~2021 구간만 적재). 개별 발전소가 아니다 — 합산 시 제외할 것'
+            WHEN 140 THEN '영암 사업 전체 계열(2019~2021). 원천이 이 기간에 1차/2차를 구분해 주지 않아 통합값으로만 존재한다. 141·142(2022~)와 기간이 겹치지 않으므로 그대로 합산해도 이중계상되지 않는다 — 오히려 제외하면 2019~2021 영암 발전량이 사라진다'
             ELSE NULL
         END,
         CASE
@@ -173,10 +177,22 @@ SELECT
     p.data_quality,
     p.hourly_valid_from
 FROM v_generation_hourly v
-JOIN research.plants p USING (plant_id);
+JOIN research.plants p USING (plant_id)
+-- 시간별로 믿을 수 없는 구간은 여기서 잘라낸다. 등급을 컬럼으로 보여주기만 하면
+-- 연구원도 LLM 도 필터를 걸지 않아, 한밤중 태양광 발전 같은 물리적으로 불가능한
+-- 값이 그대로 답에 실렸다(야간 21~04시 태양광 9,981,569 kWh 중 99.98% 가
+-- 아래 두 조건에 걸리는 행이었다). 근거: docs/broken-plants-audit.md
+WHERE p.data_quality <> '전면무효'
+  AND (p.data_quality <> '시간별무효'
+       OR (p.hourly_valid_from IS NOT NULL
+           AND v."timestamp" >= p.hourly_valid_from));
 
 COMMENT ON VIEW research.generation IS
-    '시간별 발전량. 시간 보정 근거: docs/time-convention-audit.md §7';
+    '시간별 발전량. 시간 보정 근거: docs/time-convention-audit.md §7. '
+    '시간별로 신뢰할 수 없는 구간(data_quality=''전면무효'' 전체, ''시간별무효''의 '
+    'hourly_valid_from 이전)은 이 뷰에서 제외돼 있다 — 시간별 분석에 그대로 써도 안전하다. '
+    '제외된 구간의 일별 합계가 필요하면 research.plants 의 daily_valid_from/to 를 확인하고 '
+    '관리자에게 요청하라.';
 COMMENT ON COLUMN research.generation."timestamp" IS
     '구간시작 KST. 값 09:00 은 [09:00, 10:00) 구간을 뜻한다. 원천의 hour-ending 라벨은 여기서 이미 보정됐다. 단 풍력(fuel_type=''wind'')은 원천 라벨 의미가 미확정이라 무보정 — ±1시간 불확실.';
 COMMENT ON COLUMN research.generation.gen_kwh IS

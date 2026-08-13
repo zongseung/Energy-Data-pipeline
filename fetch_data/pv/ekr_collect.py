@@ -100,8 +100,13 @@ def _to_long(rows: list[dict], year: int) -> pd.DataFrame:
     if plant_col is not None:
         df["plant_name"] = df[plant_col].map(_norm_plant)
     else:
-        # 2019~2021 파일은 시설명 없는 통합(합계) 단일계열
-        df["plant_name"] = "영암태양광_합계"
+        # 2019~2021 파일에는 시설명 컬럼이 아예 없다 — 원천이 1차/2차를 구분해
+        # 주지 않아 사업 전체가 한 계열로만 온다. '_합계' 같은 접미사를 붙이면
+        # "다른 행과 중복되니 빼야 할 줄"로 읽히는데, 141·142(2022~)와 기간이
+        # 겹치지 않아 실제로는 이 기간의 유일한 원천이다. 사업명 그대로 둔다.
+        # (upsert_generation 이 (plant_name, unit_no) 로 plant_id 를 찾으므로
+        #  이 문자열을 바꾸면 DB의 plants.plant_name 도 함께 바꿔야 한다.)
+        df["plant_name"] = "영암태양광"
 
     if "날짜" in df.columns:
         df["date"] = pd.to_datetime(df["날짜"], errors="coerce")
