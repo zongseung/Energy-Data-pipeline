@@ -153,12 +153,12 @@ LIMIT 20;
 ```
 
 {% hint style="warning" %}
-**`data_quality`와 `is_aggregate`를 여기서 또 거를 필요는 없다.**
+**`data_quality`와 `is_aggregate`를 여기서 또 거를 필요는 없습니다.**
 `research.generation`은 시간별로 믿을 수 없는 구간을 **이미 제외한 상태**라
 `data_quality = '정상'`을 덧붙이면 영흥태양광 #3의 정상 구간(2025-07-01 이후)까지
-날아가고, 비태양광 46기(`미검증`)도 통째로 사라진다.
-`is_aggregate = false`는 2019~2021년 영암 발전량을 지운다 — 자세한 이유는
-[데이터 카탈로그의 is_aggregate 절](catalog/generation.md#함정--is_aggregate-지금은-빼면-안-된다)에 있다.
+날아가고, 비태양광 46기(`미검증`)도 통째로 사라집니다.
+`is_aggregate = false`는 2019~2021년 영암 발전량을 지웁니다 — 자세한 이유는
+[데이터 카탈로그의 is_aggregate 절](catalog/generation.md#함정--is_aggregate-지금은-빼면-안-됩니다)에 있습니다.
 {% endhint %}
 
 ### 4-4. 발전량 × 일사량 결합
