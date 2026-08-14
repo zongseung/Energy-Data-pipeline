@@ -4,7 +4,7 @@
 
 ## 루트 (상시 사용 / 외부 참조)
 - `backup_pv_db.sh` / `restore_pv_db.sh` — pv-data-postgres(5436) → NAS 백업/복원
-- `init_wind_tables.py` — 풍력 테이블 초기화 (루트 `docker-compose.yml`의 `wind-init` 서비스가 참조)
+- `init_wind_tables.py` — 풍력 테이블 초기화
 
 ## migrations/ (일회성·기록용 — 상시 실행 안 함, 재현/증적용 보존)
 - `schema_migration.py` — plants/generation 코어 마이그레이션 (P1~P3, 멱등 재실행 안전)

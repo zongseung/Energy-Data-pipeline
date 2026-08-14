@@ -60,7 +60,7 @@ Energy-Data-pipeline/
 ├── inputs/wind/                        # 풍력 백필 원본 CSV (gitignore)
 ├── scripts/
 │   ├── backup_pv_db.sh · restore_pv_db.sh   # DB 백업/복원 (→ NAS)
-│   ├── init_wind_tables.py             # 풍력 테이블 초기화(compose wind-init)
+│   ├── init_wind_tables.py             # 풍력 테이블 초기화
 │   └── migrations/                     # 일회성·기록용 (직접 실행 안 함)
 │       ├── schema_migration.py         #   plants/generation 코어 마이그레이션
 │       └── *.sql                       #   dual-write 트리거 등
@@ -102,7 +102,7 @@ make ps
 make db        # psql 접속
 ```
 
-> 별도의 루트 `docker-compose.yml`(pv-main-db:5432·pv-main-grafana:3002)도 존재하나, 이는 옛 스택입니다. 운영은 `docker/` 스택을 기준으로 하세요.
+> 과거 루트에 있던 옛 `docker-compose.yml`은 2026-08 에 제거했습니다. 운영은 `docker/docker-compose.yml` 스택을 기준으로 하세요.
 
 ---
 
@@ -250,7 +250,7 @@ scripts/restore_pv_db.sh <백업파일>
 
 1. **호스트에서 `pv-db` DNS를 못 찾음** → 스크립트에 `--db-url`을 `localhost:5436`으로 지정 (또는 `resolve_db_url`이 자동 전환).
 2. **Grafana(3006) “No data”** → Grafana가 보는 메인 DB(`localhost:5436`)에 적재했는지 확인.
-3. **Prefect 배포는 됐는데 실행 안 됨** → `docker logs -f pv-pipeline-worker`로 워커가 `pv-pool` 구독 중인지 확인. (루트스택 `pv-worker`는 docker.sock 없는 옛 워커이므로 띄우지 말 것.)
+3. **Prefect 배포는 됐는데 실행 안 됨** → `docker logs -f pv-pipeline-worker`로 워커가 `pv-pool` 구독 중인지 확인.
 4. **koenergy.kr SSL 오류** → 중간 인증서 누락 사이트로, 수집기가 `get_koen_ssl_context`로 체인을 보충합니다.
 5. **코드/스케줄 변경 반영** → `make rebuild` (flow는 `pv-pipeline:latest` 이미지로 실행되므로 재빌드 필요).
 

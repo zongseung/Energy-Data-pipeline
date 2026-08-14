@@ -14,7 +14,11 @@ from fetch_data.common.db_utils import resolve_db_url
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import now_kst
 from fetch_data.constants import NamdongAPI
-from fetch_data.gen.namdong_collect import get_koen_ssl_context
+from fetch_data.common.koen import (
+    get_koen_ssl_context,
+    is_probably_csv,
+    split_by_month as koen_split_by_month,
+)
 from fetch_data.pv.namdong_transform import read_csv_flexible, hour_columns, extract_hour
 from fetch_data.common.generation_core import upsert_generation
 from notify.slack_notifier import send_slack_message
@@ -49,7 +53,6 @@ def _sanitize_filename(s: str) -> str:
 
 
 from fetch_data.common.date_utils import (
-    month_end as _month_end,
     to_yyyymmdd as _to_yyyymmdd,
     to_date_yyyymmdd as _to_date_yyyymmdd,
     validate_yyyymmdd as _validate_yyyymmdd,
@@ -60,19 +63,7 @@ from fetch_data.common.date_utils import prev_month_range
 
 
 def split_by_month(date_s: str, date_e: str) -> List[Tuple[str, str]]:
-    start = _to_date_yyyymmdd(date_s)
-    end = _to_date_yyyymmdd(date_e)
-    if end < start:
-        raise ValueError("종료일이 시작일보다 빠릅니다.")
-
-    ranges: List[Tuple[str, str]] = []
-    cur = start
-    while cur <= end:
-        me = _month_end(cur)
-        chunk_end = me if me <= end else end
-        ranges.append((_to_yyyymmdd(cur), _to_yyyymmdd(chunk_end)))
-        cur = chunk_end + timedelta(days=1)
-    return ranges
+    return koen_split_by_month(_to_date_yyyymmdd(date_s), _to_date_yyyymmdd(date_e))
 
 
 def build_main_url(page_index: str, org_no: str, hoki_s: str, hoki_e: str, date_s: str, date_e: str) -> str:
@@ -94,20 +85,6 @@ def tag_for_filename(org_no: str, hoki_s: str, hoki_e: str) -> str:
         he = hoki_e if hoki_e else "ALL"
         parts.append(f"H{hs}-{he}")
     return "_".join(parts)
-
-
-def is_probably_csv(body: bytes) -> bool:
-    # HTML 에러 페이지/너무 작은 응답 방지
-    head = body.lstrip()[:80].lower()
-    if head.startswith(b"<!doctype") or head.startswith(b"<html") or b"<head" in head:
-        return False
-    # 너무 작으면 실패로 간주(경험상 476 bytes 같은 경우)
-    if len(body) < 2000:
-        return False
-    # 쉼표가 거의 없으면 CSV 아닐 가능성
-    if body[:2000].count(b",") < 5:
-        return False
-    return True
 
 
 # -------------------------
@@ -234,7 +211,7 @@ async def download_monthly_csvs(
                     await asyncio.sleep(sleep_sec)
                 continue
 
-            if "csv" not in content_type or not is_probably_csv(body):
+            if "csv" not in content_type or not is_probably_csv(body, min_len=2000):
                 logger.warning(f"비정상 응답 ({idx}/{len(month_ranges)}) {ds}~{de} "
                                f"| Content-Type={content_type} | Size={len(body)}B | Head={body[:200]}")
             else:

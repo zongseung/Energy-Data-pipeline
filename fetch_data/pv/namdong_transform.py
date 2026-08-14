@@ -2,55 +2,17 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import pandas as pd
 
+from fetch_data.common.koen import read_csv_flexible  # noqa: F401  (기존 소비자 호환 재-export)
 from fetch_data.common.logger import get_logger
 
 logger = get_logger(__name__)
 
 DEFAULT_INPUT_DIR = Path.cwd() / "pv_data_raw"   # 수집 스크립트 OUTPUT_DIR과 맞추기
 DEFAULT_OUT_PATH  = Path.cwd() / "pv_data" / "south_pv_all_long.csv"
-
-
-def normalize_columns(cols: List[str]) -> List[str]:
-    s = pd.Index(cols).astype(str)
-    s = (
-        s.str.replace("\n", " ", regex=False)
-         .str.replace("\r", " ", regex=False)
-         .str.replace("\t", " ", regex=False)
-         .str.strip()
-         .str.replace(r"\s+", " ", regex=True)
-    )
-    return list(s)
-
-
-def read_csv_flexible(fp: Path) -> pd.DataFrame:
-    """
-    - cp949/euc-kr/utf-8-sig/utf-8 순서로 시도
-    - 콤마 뒤 공백 자동 제거(skipinitialspace=True) -> ' 호기' 같은 문제 해결
-    - python engine 사용(깨진 행이 섞인 경우가 있어 C엔진보다 안전)
-    """
-    encodings = ["cp949", "euc-kr", "utf-8-sig", "utf-8"]
-
-    last_err: Optional[Exception] = None
-    for enc in encodings:
-        try:
-            df = pd.read_csv(
-                fp,
-                encoding=enc,
-                sep=",",
-                engine="python",
-                index_col=False,
-                skipinitialspace=True,   # ★ 핵심: 콤마 뒤 공백 제거
-            )
-            df.columns = normalize_columns(df.columns.tolist())
-            return df
-        except Exception as e:
-            last_err = e
-
-    raise RuntimeError(f"CSV 읽기 실패: {fp} / last_err={last_err}")
 
 
 def hour_columns(df: pd.DataFrame) -> List[str]:

@@ -34,22 +34,21 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import re
-import ssl
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
-from urllib.request import urlopen
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
-import pandas as pd
 
+from fetch_data.common.koen import (
+    get_koen_ssl_context,
+    is_probably_csv,
+    split_by_month,
+)
 from fetch_data.common.logger import get_logger
 from fetch_data.constants import NamdongGenAPI
-from fetch_data.gen.capacities import resolve_capacity
-from fetch_data.gen.locations import resolve_location
-from fetch_data.pv.namdong_transform import read_csv_flexible
+from fetch_data.gen.master_data import build_plant_capacities, rebuild_locations_from_raw
 
 logger = get_logger(__name__)
 
@@ -59,61 +58,6 @@ DEFAULT_LOC_PATH = PROJECT_ROOT / "gen_data" / "namdong_gen_plant_locations.csv"
 DEFAULT_CAP_PATH = PROJECT_ROOT / "gen_data" / "namdong_gen_plant_capacities.csv"
 
 USER_AGENT = "Mozilla/5.0"
-
-# koenergy.kr 는 TLS 핸드셰이크에서 leaf 인증서만 보내고 중간 인증서를 누락한다.
-# (issuer: TuringSign RSA Secure CA 2 -> root: OISTE WISeKey Global Root GB CA)
-# leaf 인증서 AIA 확장의 CA Issuers URL 에서 중간 인증서를 받아 보충하면
-# TLS 검증을 끄지 않고도 정상 연결된다. 받은 인증서는 모듈 옆에 캐시한다.
-KOEN_INTERMEDIATE_AIA_URL = "http://public.wisekey.com/crt/tsrsasecureca2.cer"
-_INTERMEDIATE_CACHE = Path(__file__).resolve().parent / "_koen_intermediate.pem"
-_SSL_CTX: Optional[ssl.SSLContext] = None
-
-
-def _ensure_intermediate_pem() -> Optional[Path]:
-    """서버가 누락한 중간 인증서를 AIA URL에서 받아 PEM으로 캐시."""
-    if _INTERMEDIATE_CACHE.exists():
-        return _INTERMEDIATE_CACHE
-    url = os.getenv("KOEN_INTERMEDIATE_AIA_URL", KOEN_INTERMEDIATE_AIA_URL)
-    try:
-        der = urlopen(url, timeout=30).read()  # noqa: S310 (http AIA endpoint)
-        pem = ssl.DER_cert_to_PEM_cert(der)
-        _INTERMEDIATE_CACHE.write_text(pem)
-        logger.info(f"[SSL] 중간 인증서 캐시 저장: {_INTERMEDIATE_CACHE.name}")
-        return _INTERMEDIATE_CACHE
-    except Exception as e:
-        logger.warning(f"[SSL] 중간 인증서 다운로드 실패: {e}")
-        return None
-
-
-def get_koen_ssl_context() -> Union[ssl.SSLContext, bool]:
-    """koenergy.kr 연결용 SSL 컨텍스트.
-
-    기본: certifi 루트 + 보충한 중간 인증서로 정상 검증.
-    KOEN_SSL_NO_VERIFY=1 이면 검증을 끈다(비권장, 명시적 탈출구).
-    """
-    global _SSL_CTX
-    if os.getenv("KOEN_SSL_NO_VERIFY", "").strip().lower() in ("1", "true", "yes"):
-        logger.warning("[SSL] KOEN_SSL_NO_VERIFY 활성화 -> TLS 검증 비활성화(비권장)")
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        return ctx
-
-    if _SSL_CTX is None:
-        try:
-            import certifi
-
-            ctx = ssl.create_default_context(cafile=certifi.where())
-        except Exception:
-            ctx = ssl.create_default_context()
-        pem = _ensure_intermediate_pem()
-        if pem:
-            try:
-                ctx.load_verify_locations(str(pem))
-            except Exception as e:
-                logger.warning(f"[SSL] 중간 인증서 로드 실패: {e}")
-        _SSL_CTX = ctx
-    return _SSL_CTX
 
 
 # -------------------------
@@ -144,20 +88,6 @@ def recent_n_months(n: int, ref: Optional[date] = None) -> Tuple[date, date]:
     return start, end
 
 
-def split_by_month(start: date, end: date) -> List[Tuple[str, str]]:
-    """[start, end] 를 월 단위 (YYYYMMDD, YYYYMMDD) 구간으로 분할."""
-    if end < start:
-        raise ValueError("종료일이 시작일보다 빠릅니다.")
-    ranges: List[Tuple[str, str]] = []
-    cur = start
-    while cur <= end:
-        me = _month_end(cur)
-        chunk_end = me if me <= end else end
-        ranges.append((_to_str(cur), _to_str(chunk_end)))
-        cur = chunk_end + timedelta(days=1)
-    return ranges
-
-
 # koenergy.kr 가 데이터를 제공하는 하한(이 이전 월은 빈 응답). 탐지 시작점.
 EARLIEST_FLOOR = date(2021, 1, 1)
 
@@ -166,17 +96,6 @@ EARLIEST_FLOOR = date(2021, 1, 1)
 # 응답 검증 / 디코딩
 # -------------------------
 from fetch_data.common.utils import decode_bytes as decode_csv_bytes
-
-
-def is_probably_csv(body: bytes) -> bool:
-    head = body.lstrip()[:80].lower()
-    if head.startswith(b"<!doctype") or head.startswith(b"<html") or b"<head" in head:
-        return False
-    if len(body) < 1000:
-        return False
-    if body[:2000].count(b",") < 5:
-        return False
-    return True
 
 
 # -------------------------
@@ -404,167 +323,6 @@ async def download_all(
 
     await asyncio.gather(*(run_one(k) for k in gen_keys))
     return results
-
-
-# -------------------------
-# 발전소 위치 CSV 생성
-# -------------------------
-def build_plant_locations(
-    results: Dict[str, List[Path]],
-    out_path: Path,
-) -> pd.DataFrame:
-    """수집 CSV들의 '발전구분'을 위경도/주소에 매핑해 위치 CSV로 저장.
-
-    Returns:
-        DataFrame[gen_type, plant, lat, lon, address, site, matched]
-    """
-    rows: List[dict] = []
-    seen: set = set()
-
-    for gen_key, files in results.items():
-        label = NamdongGenAPI.GEN_TYPES[gen_key]["label"]
-        for fp in files:
-            try:
-                df = read_csv_flexible(fp)
-            except Exception as e:
-                logger.warning(f"[위치] 읽기 실패 {fp.name}: {e}")
-                continue
-            if "발전구분" not in df.columns:
-                continue
-            for plant in df["발전구분"].astype(str).str.strip().unique():
-                key = (gen_key, plant)
-                if not plant or key in seen:
-                    continue
-                seen.add(key)
-                loc = resolve_location(plant)
-                rows.append(
-                    {
-                        "gen_type": label,
-                        "plant": plant,
-                        "lat": loc["lat"] if loc else None,
-                        "lon": loc["lon"] if loc else None,
-                        "address": loc["address"] if loc else None,
-                        "site": loc["site"] if loc else None,
-                        "matched": bool(loc),
-                    }
-                )
-
-    loc_df = pd.DataFrame(
-        rows, columns=["gen_type", "plant", "lat", "lon", "address", "site", "matched"]
-    ).sort_values(["gen_type", "plant"]).reset_index(drop=True)
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    loc_df.to_csv(out_path, index=False, encoding="utf-8-sig")
-
-    unmatched = loc_df.loc[~loc_df["matched"], "plant"].tolist()
-    logger.info(f"[위치] 발전소 {len(loc_df)}개 -> {out_path}")
-    if unmatched:
-        logger.warning(f"[위치] 미매핑(좌표 없음) {len(unmatched)}개: {unmatched}")
-    return loc_df
-
-
-def rebuild_locations_from_raw(
-    raw_dir: Path = DEFAULT_RAW_DIR,
-    loc_path: Path = DEFAULT_LOC_PATH,
-    gen_keys: Optional[List[str]] = None,
-) -> pd.DataFrame:
-    """디스크에 저장된 '모든' 원본 CSV에서 위치 CSV를 재생성한다.
-
-    build_plant_locations 는 단일 수집 run 의 메모리 결과(results)만 반영하므로,
-    일부 발전원만 수집한 run 이 위치 CSV를 덮어쓰면 나머지 발전원이 사라진다.
-    이 함수는 raw_dir 의 발전원별 원본을 전부 스캔해 항상 완전한 위치 CSV를 만든다.
-    """
-    gen_keys = gen_keys or list(NamdongGenAPI.GEN_TYPES.keys())
-    results: Dict[str, List[Path]] = {}
-    for key in gen_keys:
-        cat_dir = Path(raw_dir) / key
-        files = sorted(cat_dir.glob("koen_*.csv")) if cat_dir.exists() else []
-        results[key] = files
-        logger.info(f"[위치재생성] {key}: 원본 {len(files)}개")
-    return build_plant_locations(results, loc_path)
-
-
-# -------------------------
-# 호기별 위치 + 정격용량 CSV 생성
-# -------------------------
-def build_plant_capacities(
-    raw_dir: Path = DEFAULT_RAW_DIR,
-    out_path: Path = DEFAULT_CAP_PATH,
-    gen_keys: Optional[List[str]] = None,
-) -> pd.DataFrame:
-    """디스크의 원본 CSV에서 (발전구분, 호기) 조합을 모아, 호기 단위로
-    위치(locations) + 정격용량(capacities)을 결합한 CSV를 생성한다.
-
-    plant_name(= 발전구분_호기)은 transform_gen 의 규칙과 동일하므로
-    시간별 long CSV(gen_data/{category}_long.csv)와 plant_name 으로 바로 조인된다.
-
-    Returns:
-        DataFrame[gen_type, plant_name, plant, hogi, lat, lon, address, site,
-                  capacity_mw, capacity_confidence, capacity_source]
-    """
-    gen_keys = gen_keys or list(NamdongGenAPI.GEN_TYPES.keys())
-    rows: List[dict] = []
-    seen: set = set()
-
-    for gen_key in gen_keys:
-        label = NamdongGenAPI.GEN_TYPES[gen_key]["label"]
-        cat_dir = Path(raw_dir) / gen_key
-        files = sorted(cat_dir.glob("koen_*.csv")) if cat_dir.exists() else []
-        for fp in files:
-            try:
-                df = read_csv_flexible(fp)
-            except Exception as e:
-                logger.warning(f"[용량] 읽기 실패 {fp.name}: {e}")
-                continue
-            if "발전구분" not in df.columns or "호기" not in df.columns:
-                continue
-            combos = (
-                df[["발전구분", "호기"]]
-                .astype(str)
-                .apply(lambda s: s.str.strip())
-                .drop_duplicates()
-            )
-            for plant, hogi in combos.itertuples(index=False):
-                plant_name = f"{plant}_{hogi}"
-                key = (gen_key, plant_name)
-                if not plant or not hogi or key in seen:
-                    continue
-                seen.add(key)
-                loc = resolve_location(plant)
-                cap = resolve_capacity(plant_name)
-                rows.append(
-                    {
-                        "gen_type": label,
-                        "plant_name": plant_name,
-                        "plant": plant,
-                        "hogi": hogi,
-                        "lat": loc["lat"] if loc else None,
-                        "lon": loc["lon"] if loc else None,
-                        "address": loc["address"] if loc else None,
-                        "site": loc["site"] if loc else None,
-                        "capacity_mw": cap["capacity_mw"] if cap else None,
-                        "capacity_confidence": cap["confidence"] if cap else "미확인",
-                        "capacity_source": cap["source"] if cap else None,
-                    }
-                )
-
-    cap_df = pd.DataFrame(
-        rows,
-        columns=[
-            "gen_type", "plant_name", "plant", "hogi",
-            "lat", "lon", "address", "site",
-            "capacity_mw", "capacity_confidence", "capacity_source",
-        ],
-    ).sort_values(["gen_type", "plant_name"]).reset_index(drop=True)
-
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    cap_df.to_csv(out_path, index=False, encoding="utf-8-sig")
-
-    no_cap = cap_df.loc[cap_df["capacity_mw"].isna(), "plant_name"].tolist()
-    logger.info(f"[용량] 호기 {len(cap_df)}개 -> {out_path}")
-    if no_cap:
-        logger.warning(f"[용량] 용량 미확정 {len(no_cap)}개: {no_cap}")
-    return cap_df
 
 
 # -------------------------
