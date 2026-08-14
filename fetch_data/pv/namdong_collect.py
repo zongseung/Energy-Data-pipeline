@@ -14,7 +14,11 @@ from fetch_data.common.db_utils import resolve_db_url
 from fetch_data.common.logger import get_logger
 from fetch_data.common.utils import now_kst
 from fetch_data.constants import NamdongAPI
-from fetch_data.common.koen import get_koen_ssl_context, is_probably_csv
+from fetch_data.common.koen import (
+    get_koen_ssl_context,
+    is_probably_csv,
+    split_by_month as koen_split_by_month,
+)
 from fetch_data.pv.namdong_transform import read_csv_flexible, hour_columns, extract_hour
 from fetch_data.common.generation_core import upsert_generation
 from notify.slack_notifier import send_slack_message
@@ -49,7 +53,6 @@ def _sanitize_filename(s: str) -> str:
 
 
 from fetch_data.common.date_utils import (
-    month_end as _month_end,
     to_yyyymmdd as _to_yyyymmdd,
     to_date_yyyymmdd as _to_date_yyyymmdd,
     validate_yyyymmdd as _validate_yyyymmdd,
@@ -60,19 +63,7 @@ from fetch_data.common.date_utils import prev_month_range
 
 
 def split_by_month(date_s: str, date_e: str) -> List[Tuple[str, str]]:
-    start = _to_date_yyyymmdd(date_s)
-    end = _to_date_yyyymmdd(date_e)
-    if end < start:
-        raise ValueError("종료일이 시작일보다 빠릅니다.")
-
-    ranges: List[Tuple[str, str]] = []
-    cur = start
-    while cur <= end:
-        me = _month_end(cur)
-        chunk_end = me if me <= end else end
-        ranges.append((_to_yyyymmdd(cur), _to_yyyymmdd(chunk_end)))
-        cur = chunk_end + timedelta(days=1)
-    return ranges
+    return koen_split_by_month(_to_date_yyyymmdd(date_s), _to_date_yyyymmdd(date_e))
 
 
 def build_main_url(page_index: str, org_no: str, hoki_s: str, hoki_e: str, date_s: str, date_e: str) -> str:

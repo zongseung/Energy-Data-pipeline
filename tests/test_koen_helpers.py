@@ -42,3 +42,23 @@ def test_pv_collector_imports_from_common():
     src = (PROJECT_ROOT / "fetch_data/pv/namdong_collect.py").read_text(encoding="utf-8")
     assert "from fetch_data.gen.namdong_collect import" not in src
     assert "from fetch_data.common.koen import" in src
+
+
+def test_split_by_month_spans_months():
+    from datetime import date
+    from fetch_data.common.koen import split_by_month
+    ranges = split_by_month(date(2026, 1, 15), date(2026, 3, 10))
+    assert ranges == [
+        ("20260115", "20260131"),
+        ("20260201", "20260228"),
+        ("20260301", "20260310"),
+    ]
+
+
+def test_read_csv_flexible_cp949(tmp_path):
+    from fetch_data.common.koen import read_csv_flexible
+    fp = tmp_path / "koen.csv"
+    fp.write_bytes("날짜, 호기,발전량\n20260101,1,2.5\n".encode("cp949"))
+    df = read_csv_flexible(fp)
+    assert list(df.columns) == ["날짜", "호기", "발전량"]  # skipinitialspace 로 ' 호기' 정리
+    assert len(df) == 1

@@ -30,9 +30,9 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from fetch_data.common.koen import read_csv_flexible
 from fetch_data.common.logger import get_logger
 from fetch_data.constants import NamdongGenAPI
-from fetch_data.pv.namdong_transform import read_csv_flexible
 
 logger = get_logger(__name__)
 

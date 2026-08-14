@@ -42,12 +42,16 @@ from typing import Dict, List, Optional, Tuple
 import aiohttp
 import pandas as pd
 
-from fetch_data.common.koen import get_koen_ssl_context, is_probably_csv
+from fetch_data.common.koen import (
+    get_koen_ssl_context,
+    is_probably_csv,
+    read_csv_flexible,
+    split_by_month,
+)
 from fetch_data.common.logger import get_logger
 from fetch_data.constants import NamdongGenAPI
 from fetch_data.gen.capacities import resolve_capacity
 from fetch_data.gen.locations import resolve_location
-from fetch_data.pv.namdong_transform import read_csv_flexible
 
 logger = get_logger(__name__)
 
@@ -85,20 +89,6 @@ def recent_n_months(n: int, ref: Optional[date] = None) -> Tuple[date, date]:
     sy, sm = divmod(months_total, 12)
     start = date(sy, sm + 1, 1)
     return start, end
-
-
-def split_by_month(start: date, end: date) -> List[Tuple[str, str]]:
-    """[start, end] 를 월 단위 (YYYYMMDD, YYYYMMDD) 구간으로 분할."""
-    if end < start:
-        raise ValueError("종료일이 시작일보다 빠릅니다.")
-    ranges: List[Tuple[str, str]] = []
-    cur = start
-    while cur <= end:
-        me = _month_end(cur)
-        chunk_end = me if me <= end else end
-        ranges.append((_to_str(cur), _to_str(chunk_end)))
-        cur = chunk_end + timedelta(days=1)
-    return ranges
 
 
 # koenergy.kr 가 데이터를 제공하는 하한(이 이전 월은 빈 응답). 탐지 시작점.
