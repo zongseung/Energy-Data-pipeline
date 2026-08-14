@@ -11,11 +11,8 @@ The codebase and all comments/docs are primarily in Korean.
 ## Build & Run Commands
 
 ```bash
-# Start all services (PostgreSQL, Grafana, Prefect worker, deployer)
-docker-compose up -d --build
-
-# Start standalone Prefect stack (includes its own Prefect server)
-docker-compose -f docker/docker-compose.yml up -d --build
+# Start all services (PostgreSQL, Grafana, Prefect server/worker, deployer)
+docker compose -f docker/docker-compose.yml up -d --build
 
 # Install dependencies locally with uv
 uv sync
@@ -63,16 +60,19 @@ Three independent data pipelines, each on its own schedule:
 
 ### Network Topology
 
-The main `docker-compose.yml` does **not** include a Prefect server. The PV pipeline containers join an external Prefect network (`weather-pipeline_prefect-new`) to communicate with a separately running Prefect server. See `ARCHITECTURE.md` for details.
+운영 스택은 `docker/docker-compose.yml` 하나다. Prefect 서버·워커·DB·Grafana 를
+모두 포함하며 `pv-pipeline-network` 브리지 네트워크를 만든다. (과거 루트에 있던
+docker-compose.yml 은 외부 Prefect 네트워크를 쓰는 구 스택이었고 2026-08 에 제거했다.)
 
-### Key Services (docker-compose.yml)
+### Key Services (docker/docker-compose.yml)
 
-| Service | Image | Port | Purpose |
-|---------|-------|------|---------|
-| pv-db | postgres:15 | 5432 | PV data storage |
-| pv-grafana | grafana/grafana | 3002 | Dashboard UI |
-| pv-worker | custom (Dockerfile) | - | Prefect worker |
-| pv-deploy | custom (Dockerfile) | - | One-shot deployment registrar |
+| Service | Container | Port | Purpose |
+|---------|-----------|------|---------|
+| pv-db | pv-data-postgres | 5436 | PV data storage (iSCSI) |
+| pv-grafana | pv-pipeline-grafana | 3006 | Dashboard UI |
+| pv-prefect-server | pv-prefect-server | 4400 | Prefect API/UI |
+| pv-worker | pv-pipeline-worker | - | Prefect docker worker |
+| pv-deployer | pv-deployer | - | One-shot deployment registrar |
 
 ### Database Models (`fetch_data/pv/database.py`)
 

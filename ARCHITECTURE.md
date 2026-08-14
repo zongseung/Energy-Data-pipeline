@@ -4,13 +4,8 @@
 
 ## 네트워크 토폴로지
 
-이 저장소의 `docker-compose.yml`은 Prefect Server를 포함하지 않습니다.
-
-- PV 파이프라인 컨테이너들은 **외부 Prefect 네트워크**(`prefect-network`)에 붙어서 Prefect Server와 통신합니다.
-- `docker-compose.yml`의 기본값은 아래처럼 외부 네트워크를 참조합니다.
-  - `prefect-network.name = weather-pipeline_prefect-new`
-
-Prefect Server가 다른 네트워크에 떠 있다면, `docker-compose.yml`의 `prefect-network.name`을 Prefect Server가 붙어있는 네트워크명으로 바꿔야 합니다.
+운영 compose 는 `docker/docker-compose.yml` 하나이며 Prefect Server 를 포함한다.
+과거 루트 `docker-compose.yml`(외부 Prefect 네트워크 참조)은 2026-08 에 제거했다.
 
 ## 컴포넌트
 

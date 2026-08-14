@@ -66,7 +66,6 @@ Energy-Data-pipeline/
 │       └── *.sql                       #   dual-write 트리거 등
 │
 ├── docker/                             # ★ 운영 스택 (정본)
-│   ├── docker-compose.yml · Dockerfile
 │   └── grafana/                        # provisioning + 대시보드
 ├── notify/slack_notifier.py            # Slack Webhook 알림
 ├── Makefile · pyproject.toml · uv.lock · .env
