@@ -12,23 +12,25 @@
 ```mermaid
 flowchart TB
   subgraph Ext[External]
-    PrefectServer["Prefect Server"]
     Slack["Slack Incoming Webhook\n(optional)"]
     NambuAPI["남부발전 API"]
     NamdongCSV["남동발전 CSV"]
   end
 
   subgraph Stack["Energy-Data-pipeline (docker compose)"]
-    DB[(Postgres pv-db)]
-    Worker["Prefect Worker (pv-worker)"]
-    Deploy["Deployer (pv-deploy)\nregister deployments"]
-    Grafana["Grafana (pv-grafana)"]
+    PrefectServer["Prefect Server\n(pv-prefect-server)"]
+    PrefectDB[(Prefect Meta DB\n(pv-prefect-postgres))]
+    DataDB[(Postgres\n(pv-data-postgres))]
+    Worker["Prefect Worker\n(pv-pipeline-worker)"]
+    Deploy["Deployer\n(pv-deployer)"]
+    Grafana["Grafana\n(pv-pipeline-grafana)"]
   end
 
   Deploy --> PrefectServer
+  PrefectServer --> PrefectDB
   PrefectServer --> Worker
-  Worker --> DB
-  DB --> Grafana
+  Worker --> DataDB
+  DataDB --> Grafana
   NambuAPI --> Worker
   NamdongCSV --> Worker
   Worker --> Slack

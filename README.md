@@ -60,12 +60,13 @@ Energy-Data-pipeline/
 ├── inputs/wind/                        # 풍력 백필 원본 CSV (gitignore)
 ├── scripts/
 │   ├── backup_pv_db.sh · restore_pv_db.sh   # DB 백업/복원 (→ NAS)
-│   ├── init_wind_tables.py             # 풍력 테이블 초기화(compose wind-init)
+│   ├── init_wind_tables.py             # 풍력 테이블 초기화
 │   └── migrations/                     # 일회성·기록용 (직접 실행 안 함)
 │       ├── schema_migration.py         #   plants/generation 코어 마이그레이션
 │       └── *.sql                       #   dual-write 트리거 등
 │
 ├── docker/                             # ★ 운영 스택 (정본)
+│   ├── docker-compose.yml · Dockerfile
 │   └── grafana/                        # provisioning + 대시보드
 ├── notify/slack_notifier.py            # Slack Webhook 알림
 ├── Makefile · pyproject.toml · uv.lock · .env

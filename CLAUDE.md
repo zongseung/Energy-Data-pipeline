@@ -53,7 +53,7 @@ Three independent data pipelines, each on its own schedule:
 
 ### Orchestration (Prefect 2)
 
-- **Deployment registration**: `pv-deploy` container runs `prefect_flows/deploy.py` once at startup to register all flows/schedules with the Prefect server
+- **Deployment registration**: `pv-deployer` container runs `prefect_flows/deploy.py` once at startup to register all flows/schedules with the Prefect server
 - **Execution**: `pv-worker` subscribes to `pv-pool` work pool and executes scheduled flow runs
 - **Flows defined in**: `prefect_flows/prefect_pipeline.py` (weather), `prefect_flows/nambu_pv_flow.py` (Nambu wrapper), `fetch_data/pv/namdong_collect_pv.py` (Namdong flow)
 - **Deploy config**: `prefect_flows/deploy.py` creates a Docker-type work pool (`pv-pool`) and registers 4 deployments
