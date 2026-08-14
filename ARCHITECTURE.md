@@ -19,8 +19,8 @@ flowchart TB
 
   subgraph Stack["Energy-Data-pipeline (docker compose)"]
     PrefectServer["Prefect Server\n(pv-prefect-server)"]
-    PrefectDB[(Prefect Meta DB\n(pv-prefect-postgres))]
-    DataDB[(Postgres\n(pv-data-postgres))]
+    PrefectDB[("Prefect Meta DB\n(pv-prefect-postgres)")]
+    DataDB[("Postgres\n(pv-data-postgres)")]
     Worker["Prefect Worker\n(pv-pipeline-worker)"]
     Deploy["Deployer\n(pv-deployer)"]
     Grafana["Grafana\n(pv-pipeline-grafana)"]
