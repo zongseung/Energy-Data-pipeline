@@ -12,22 +12,32 @@ services:
       dockerfile: docker/llm-demo/Dockerfile
     container_name: llm-demo
     environment:
+      # 웹UI를 LAN/Tailscale IP 로 열면 브라우저 오리진이 localhost 가 아니라서
+      # API 호출이 CORS 로 전부 막힌다("Failed to connect to server"). 시연용
+      # 폐쇄망 전제이므로 전체 허용.
+      LLAMA_ARG_CORS_ORIGINS: "*"
       ENERGY_MCP_DSN: postgresql://pv:pv@pv-db:5432/pv
       # 채팅 미리보기 행 수 — 컨텍스트 절약. 초과분은 CSV 다운로드로 제공된다.
       ENERGY_MCP_ROW_LIMIT: "10"
       ENERGY_MCP_EXPORT_DIR: /exports
       # 2026년 전체 태양광이 ~20만 행이라 기본 상한(10만)으로는 잘린다
       ENERGY_MCP_EXPORT_ROW_LIMIT: "300000"
-      # LAN 시연 시 접속 PC 기준 주소로 바꿀 것 (예: http://<서버IP>:8098)
-      ENERGY_MCP_EXPORT_URL: http://localhost:8098
+      # 다운로드 링크는 접속하는 PC 기준 주소여야 한다 — localhost 로 두면 서버
+      # 밖에서 링크를 눌렀을 때 연결 실패한다. 기본값은 이 서버의 Tailscale IP.
+      ENERGY_MCP_EXPORT_URL: http://${DEMO_HOST:-100.127.20.105}:8098
     volumes:
       - ${MODEL_PATH:?Qwen3-4B-Q4_K_M.gguf 경로를 MODEL_PATH 로 지정하세요}:/models/model.gguf:ro
+      # 컨테이너를 다시 만들어도 이미 나눠준 CSV 링크가 살아 있어야 한다
+      - exports:/exports
     ports:
       - "8099:8080"
       - "8098:8098"  # CSV 다운로드
     networks:
       - pvnet
     restart: unless-stopped
+
+volumes:
+  exports:
 
 networks:
   pvnet:
