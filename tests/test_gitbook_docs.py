@@ -80,6 +80,7 @@ CATALOG_PAGES = {
     "weather.md",
     "demand.md",
     "oil.md",
+    "grid.md",
 }
 
 
@@ -147,13 +148,22 @@ def test_internal_link_anchors_exist() -> None:
 
 
 def test_public_docs_contain_no_live_credentials() -> None:
-    combined = "\n".join(read(name) for name in FINAL_PAGES)
+    # 카탈로그 하위 페이지까지 전부 훑는다 — 최상위만 보던 시절 03-llm-mcp 에
+    # 데모 서버의 Tailscale·LAN 주소가 그대로 실려 공개된 적이 있다.
+    combined = "\n".join(page.read_text(encoding="utf-8") for page in _pages())
     assert "GITBOOK_API_TOKEN" not in combined
     assert not re.search(
         r"postgresql(?:\+\w+)?://(?!<)[^\s:/]+:[^<\s@]+@",
         combined,
     )
     assert not re.search(r"\b100\.(?:\d{1,3}\.){2}\d{1,3}\b", combined)
+    # 접속 주소는 플레이스홀더로만 적는다. 루프백만 예외 — 연구원 PC 에서
+    # 자기 로컬 서버를 가리키는 주소라 유출될 내부 정보가 없다.
+    literal_hosts = [
+        host for host in re.findall(r"https?://(\d{1,3}(?:\.\d{1,3}){3})", combined)
+        if host != "127.0.0.1"
+    ]
+    assert not literal_hosts, f"공개 문서에 실주소가 있다: {literal_hosts}"
 
 
 # GitBook 전용 블록은 여닫이가 안 맞으면 에러가 아니라 '{% endhint %}' 같은
