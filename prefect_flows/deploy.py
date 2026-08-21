@@ -20,7 +20,7 @@ from prefect.utilities.importtools import import_object
 # 환경 설정
 # =======================================================================
 
-PREFECT_API_URL = os.getenv("PREFECT_API_URL", "http://prefect-server-new:4200/api")
+PREFECT_API_URL = os.getenv("PREFECT_API_URL", "http://pv-prefect-server:4200/api")
 DOCKER_NETWORK = os.getenv("PREFECT_DOCKER_NETWORK", "pv-pipeline-network")
 PV_DATABASE_URL = os.getenv(
     "PV_DATABASE_URL",

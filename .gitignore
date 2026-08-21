@@ -61,9 +61,9 @@ Untitled
 # 🗃 Large Data Directories
 # (auto-generated, DO NOT COMMIT)
 ############################
-pv_data_raw/          # nambu_bulk_sync.py
-pv_data_processed/    # nambu_merge_pv_data.py
-pv_start_dates.csv    # nambu_probe_date.py
+pv_data_raw/
+pv_data_processed/
+pv_start_dates.csv
 
 pv_data/
 data/

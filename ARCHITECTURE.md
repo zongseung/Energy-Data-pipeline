@@ -23,14 +23,12 @@ flowchart TB
     DataDB[("Postgres\n(pv-data-postgres)")]
     Worker["Prefect Worker\n(pv-pipeline-worker)"]
     Deploy["Deployer\n(pv-deployer)"]
-    Grafana["Grafana\n(pv-pipeline-grafana)"]
   end
 
   Deploy --> PrefectServer
   PrefectServer --> PrefectDB
   PrefectServer --> Worker
   Worker --> DataDB
-  DataDB --> Grafana
   NambuAPI --> Worker
   NamdongCSV --> Worker
   Worker --> Slack

@@ -22,10 +22,10 @@ DB 적재는 추후. 현재는 CSV 저장까지만 수행한다.
 
 사용 예:
     # 최근 5개월, 3개 발전원 전체
-    uv run python -m fetch_data.gen.namdong_gen_collect
+    uv run python -m fetch_data.gen.namdong_collect
 
     # 기간/발전원/동시성 지정
-    uv run python -m fetch_data.gen.namdong_gen_collect \
+    uv run python -m fetch_data.gen.namdong_collect \
         --start 20251201 --end 20260430 \
         --types ocean_hydro,fuel_cell --concurrency 4
 """

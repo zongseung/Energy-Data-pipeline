@@ -2,7 +2,7 @@
 남동발전(KOEN) 비태양광 발전원 자동화 파이프라인: 수집 -> 변환.
 
 이 모듈은 두 단계를 하나로 잇는 오케스트레이터다.
-  1) 수집  : fetch_data.gen.namdong_gen_collect (gen_data_raw/{category}/koen_*.csv)
+  1) 수집  : fetch_data.gen.namdong_collect (gen_data_raw/{category}/koen_*.csv)
   2) 변환  : fetch_data.gen.transform_gen        (gen_data/{category}_long.csv, wind 패턴)
 
 수집 모드:

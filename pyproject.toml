@@ -2,9 +2,9 @@
 package = false
 
 [project]
-name = "weather-pipeline"
+name = "energy-data-pipeline"
 version = "0.2.0"
-description = "Weather and Power Demand ETL Pipeline"
+description = "Energy data ETL pipeline (PV/wind/thermal generation, SMP, weather, demand)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -21,7 +21,6 @@ dependencies = [
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
     "requests>=2.32.5",
-    "scipy>=1.15.3",
     "sqlalchemy[asyncio]>=2.0.0",
     "tqdm>=4.67.1",
     "workalendar>=17.0.0",

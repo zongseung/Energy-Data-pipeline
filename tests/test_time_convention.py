@@ -17,7 +17,6 @@
   · 라벨 N -> N시      (구간종료 그대로, 1시간 늦음 -> 뷰에서 -1h 필요)
       fetch_data/gen/transform_gen.py::transform_wide_to_long
       fetch_data/wind/namdong_collect.py::transform_wide_to_long
-      fetch_data/pv/nambu_transform.py::preprocess_nambu  (남부 레거시 매핑)
 
 **남부 경로는 공용 함수가 없다.** `nambu_collect.py:125-126` 과 `nambu_backfill.py:134-135` 는
 같은 계산의 독립된 인라인 복제본이고, `nambu_collect` 는 `parse_hour_column` 만 import 한다.
@@ -41,7 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from fetch_data.common.utils import parse_hour_column  # noqa: E402
 from fetch_data.gen import transform_gen  # noqa: E402
-from fetch_data.pv import ekr_collect, nambu_backfill, nambu_transform  # noqa: E402
+from fetch_data.pv import ekr_collect, nambu_backfill  # noqa: E402
 from fetch_data.pv.namdong_transform import extract_hour  # noqa: E402
 from fetch_data.wind import namdong_collect as wind_namdong  # noqa: E402
 
@@ -180,42 +179,6 @@ def test_wind_namdong_은_구간종료_라벨을_그대로_보존():
     assert ts[22.0] == pd.Timestamp(f"{DAY} 12:00")
     assert ts[33.0] == pd.Timestamp(f"{NEXT_DAY} 00:00")
     assert out["plant_name"].unique().tolist() == ["영흥풍력 1"]
-
-
-def test_nambu_레거시_transform_은_1시간_늦은_매핑(tmp_path, monkeypatch):
-    """남부 레거시 매핑(pv_nambu 시절): qhorgen01 -> 당일 01시.
-
-    2025-12-31 이전 남부 데이터가 1시간 늦게 적재된 원인이며,
-    현행 경로(test_nambu_백필경로는_구간시작으로_적재, test_nambu_라이브_수집기도_구간시작으로_적재)와 1시간 어긋난다.
-    """
-    raw_dir = tmp_path / "raw"
-    out_dir = tmp_path / "processed"
-    raw_dir.mkdir()
-    specs = tmp_path / "specs.csv"
-
-    pd.DataFrame([{"발전소명": "테스트태양광발전소", "설비용량": 1.0}]).to_csv(
-        specs, index=False, encoding="utf-8-sig"
-    )
-    pd.DataFrame([{
-        "ymd": DAY,
-        "ipptnm": "테스트태양광발전소",
-        "qhorgen01": 11,
-        "qhorgen12": 22,
-        "qhorgen24": 33,
-    }]).to_csv(raw_dir / "nambu_bulk_TEST_1.csv", index=False)
-
-    monkeypatch.setattr(nambu_transform, "RAW_DIR", raw_dir)
-    monkeypatch.setattr(nambu_transform, "PROCESSED_DIR", out_dir)
-    monkeypatch.setattr(nambu_transform, "SPECS_FILE", specs)
-
-    nambu_transform.preprocess_nambu()
-
-    out = pd.read_csv(out_dir / "nambu_processed_TEST_1.csv", parse_dates=["timestamp"])
-    ts = dict(zip(out["generation"], out["timestamp"]))
-
-    assert ts[11] == pd.Timestamp(f"{DAY} 01:00")
-    assert ts[22] == pd.Timestamp(f"{DAY} 12:00")
-    assert ts[33] == pd.Timestamp(f"{NEXT_DAY} 00:00")
 
 
 # =========================================================

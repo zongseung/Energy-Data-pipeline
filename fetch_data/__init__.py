@@ -7,13 +7,8 @@ Organized into submodules:
 - pv: PV generation data collection
 """
 
-from fetch_data.common.impute_missing import impute_missing_values
-
 __all__ = [
-    # Submodules
     "common",
     "weather",
     "pv",
-    # Utilities (backward compatibility)
-    "impute_missing_values",
 ]

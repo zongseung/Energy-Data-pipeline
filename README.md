@@ -1,6 +1,6 @@
 # Energy-Data-pipeline
 
-대한민국 발전·전력 데이터를 수집·전처리·적재하고 Grafana로 시각화하는 ETL 파이프라인입니다.
+대한민국 발전·전력 데이터를 수집·전처리·적재하는 ETL 파이프라인입니다. 조회는 직접 SQL 과 LLM 데모(LibreChat+MCP)로 제공합니다.
 Prefect 2로 오케스트레이션하고 PostgreSQL에 저장합니다.
 
 **수집 도메인**
@@ -24,7 +24,6 @@ Energy-Data-pipeline/
 │   │   ├── db_base.py                  #   ★ 엔진/세션 단일 팩토리 (get_engine/get_session)
 │   │   ├── db_utils.py                 #   resolve_db_url (컨테이너/호스트 자동 전환)
 │   │   ├── config.py · logger.py · utils.py · date_utils.py
-│   │   └── impute_missing.py           #   결측치 보간(스플라인+이력평균)
 │   ├── weather/  asos_collect.py       # ASOS 기상 수집
 │   ├── pv/
 │   │   ├── nambu_collect.py            # 남부 PV 일일 수집(라이브)
@@ -60,14 +59,12 @@ Energy-Data-pipeline/
 ├── inputs/wind/                        # 풍력 백필 원본 CSV (gitignore)
 ├── scripts/
 │   ├── backup_pv_db.sh · restore_pv_db.sh   # DB 백업/복원 (→ NAS)
-│   ├── init_wind_tables.py             # 풍력 테이블 초기화
 │   └── migrations/                     # 일회성·기록용 (직접 실행 안 함)
 │       ├── schema_migration.py         #   plants/generation 코어 마이그레이션
 │       └── *.sql                       #   dual-write 트리거 등
 │
 ├── docker/                             # ★ 운영 스택 (정본)
 │   ├── docker-compose.yml · Dockerfile
-│   └── grafana/                        # provisioning + 대시보드
 ├── notify/slack_notifier.py            # Slack Webhook 알림
 ├── Makefile · pyproject.toml · uv.lock · .env
 └── ARCHITECTURE.md · README.md
@@ -85,7 +82,6 @@ Energy-Data-pipeline/
 | 컨테이너 | 역할 | 포트(host) |
 |---|---|---|
 | **pv-data-postgres** | 메인 데이터 DB (PV·풍력·SMP·gen·plants·generation) | `5436` |
-| **pv-pipeline-grafana** | 대시보드 | `3006` |
 | **pv-prefect-server** | Prefect 오케스트레이션 | `4400` |
 | **pv-prefect-postgres** | Prefect 메타DB | 내부 |
 | **pv-pipeline-worker** | Docker 워크풀(`pv-pool`) 워커 — flow run 컨테이너 기동 | - |
@@ -215,13 +211,12 @@ uv run python -m fetch_data.smp.smp_collect            # SMP 시간별 + 일별 
 uv run python -m fetch_data.smp.smp_aggregate --period all
 uv run python -m fetch_data.smp.smp_realtime --backfill # 제주 실시간 과거 일괄
 
-# 남부 PV 백필 (Grafana 3006이 보는 메인 DB로 적재)
+# 남부 PV 백필 (메인 DB 5436 으로 적재)
 uv run python fetch_data/pv/nambu_backfill.py \
   --db-url "postgresql+psycopg2://pv:pv@localhost:5436/pv"
   # 옵션: --start --end --gencd --hogi --slack --debug
 
 # 풍력 테이블 초기화 + CSV 백필
-uv run python scripts/init_wind_tables.py
 
 # DB 백업 / 복원 (→ NAS)
 scripts/backup_pv_db.sh
@@ -249,7 +244,6 @@ scripts/restore_pv_db.sh <백업파일>
 ## 트러블슈팅
 
 1. **호스트에서 `pv-db` DNS를 못 찾음** → 스크립트에 `--db-url`을 `localhost:5436`으로 지정 (또는 `resolve_db_url`이 자동 전환).
-2. **Grafana(3006) “No data”** → Grafana가 보는 메인 DB(`localhost:5436`)에 적재했는지 확인.
 3. **Prefect 배포는 됐는데 실행 안 됨** → `docker logs -f pv-pipeline-worker`로 워커가 `pv-pool` 구독 중인지 확인.
 4. **koenergy.kr SSL 오류** → 중간 인증서 누락 사이트로, 수집기가 `get_koen_ssl_context`로 체인을 보충합니다.
 5. **코드/스케줄 변경 반영** → `make rebuild` (flow는 `pv-pipeline:latest` 이미지로 실행되므로 재빌드 필요).

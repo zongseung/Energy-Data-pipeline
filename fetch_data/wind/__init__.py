@@ -3,7 +3,6 @@
 
 Submodules:
 - namdong_collect: 남동발전 풍력 (API + CSV)
-- seobu_backfill: 서부발전 풍력 (CSV)
-- hangyoung_backfill: 한경풍력 (CSV)
-- database: 풍력 DB 모델
+
+(구 wind_* 테이블 모델·서부/한경 일회성 로더는 P6 이후 제거 — git 역사 참조)
 """
