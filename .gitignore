@@ -133,3 +133,4 @@ _workspace/
 # 데모 쿼리 배터리 실행 결과 — 실행할 때마다 갱신되는 카탈로그
 battery_round*.md
 battery_round*.log
+docker/llm-demo/librechat.env

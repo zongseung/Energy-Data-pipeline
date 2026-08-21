@@ -174,6 +174,35 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _summarize(columns: list[str], raw_rows: list[tuple]) -> dict[str, Any]:
+    """대량 결과의 미리보기 대체 — 컬럼별 최소/최대/중간값만 계산한다.
+
+    수치 컬럼: min/max/median, 시간 컬럼: min/max. 그 외 타입은 건너뛴다.
+    LLM 이 미리보기 행을 표로 다시 그리느라 느려지는 것을 막기 위한 것.
+    """
+    summary: dict[str, Any] = {}
+    for i, col in enumerate(columns):
+        values = [r[i] for r in raw_rows if r[i] is not None]
+        if not values:
+            continue
+        v = values[0]
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float, Decimal)):
+            values.sort()
+            summary[col] = {
+                "min": _jsonable(values[0]),
+                "max": _jsonable(values[-1]),
+                "median": _jsonable(values[len(values) // 2]),
+            }
+        elif isinstance(v, (datetime.datetime, datetime.date)):
+            summary[col] = {
+                "min": _jsonable(min(values)),
+                "max": _jsonable(max(values)),
+            }
+    return summary
+
+
 def _execute(query: str) -> dict[str, Any]:
     _reject_multi_statement(query)
 
@@ -233,11 +262,16 @@ def _execute(query: str) -> dict[str, Any]:
             base = os.environ.get(EXPORT_URL_ENV, "http://localhost:8098").rstrip("/")
             result["download_url"] = f"{base}/{name}"
             result["download_rows"] = total
+            if truncated:
+                # 대량 결과에는 컬럼별 요약통계를 함께 준다 — 미리보기 몇 행만
+                # 보고 전체 경향을 일반화하는 것을 막는다. 실데이터는 CSV 링크로.
+                result["summary"] = _summarize(columns, fetched + remainder)
             result["note"] = (
                 f"미리보기 {len(rows)}행. 전체 {total}행"
                 + (" (파일 상한 도달 — 기간을 나눠 조회하면 나머지를 받을 수 있다)"
                    if capped else "")
-                + "은 download_url 에서 CSV 파일로 받을 수 있다. pandas 로 읽을 때는 "
+                + "은 download_url 에서 CSV 파일로 받을 수 있다 — 답변에 이 "
+                "다운로드 링크를 반드시 포함하라. pandas 로 읽을 때는 "
                 "read_csv(경로, parse_dates=['timestamp'], index_col='timestamp') "
                 "처럼 시간 컬럼을 지정하라고 함께 안내하라."
             )
@@ -316,6 +350,15 @@ def run_sql(query: str) -> dict[str, Any]:
         지점 수만큼 수요값이 반복되므로 수요만 필요하면 demand_5min 을 써라.
       - `research.heat_demand` / `research.heat_demand_location` — 열수요
         (2023년까지의 정적 데이터셋).
+      - `research.substations` — OSM 기반 변전소 위치(name, voltage, operator,
+        sido, lon, lat). 전국 1,185개 — 공식 전수 아님.
+      - `research.power_lines` — OSM 기반 송전선로(name, power_type, voltage,
+        sido, length_km). 전국 4,685개.
+      - `research.kepco_grid` — 한전 배전망 접속 여유용량(2026-03 스냅샷,
+        리·지번 주소 단위 361만 행). **반드시 addr_do 로 필터**하라. 시군구는
+        addr_si(시)·addr_gu(군·구) 로 나뉘고 빈 쪽은 '-기타지역' 채움값이며
+        지역별 누락이 있다 — 먼저 DISTINCT 로 존재를 확인하라. 설비 기준
+        집계는 DISTINCT subst_cd·dl_nm 으로(주소 수만큼 반복됨).
     - **기상 질문의 90%는 예보가 아니라 관측이다.** "기온·습도·일사량이
       얼마였나", "발전량과 날씨를 같이 보자" 처럼 **실제로 어땠는지** 묻는
       질문에는 반드시 `research.weather_asos` 를 써라. 아래 `research.forecast`
@@ -415,7 +458,21 @@ def schema_dictionary() -> str:
 
 
 def main() -> None:
-    mcp.run(transport="stdio")
+    # stdio(기본) 외에 streamable-http 를 지원한다 — LibreChat 처럼 별도
+    # 컨테이너에서 접속하는 클라이언트용. (mcp SDK 1.29 는 FASTMCP_* 환경변수를
+    # 읽지 않아 settings 에 직접 넣는다. 기본 바인드는 127.0.0.1:8000)
+    transport = os.environ.get("ENERGY_MCP_TRANSPORT", "stdio")
+    if transport != "stdio":
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        mcp.settings.host = os.environ.get("ENERGY_MCP_HOST", "127.0.0.1")
+        mcp.settings.port = int(os.environ.get("ENERGY_MCP_PORT", "8000"))
+        # 기본 DNS rebinding 보호는 Host 가 localhost 가 아니면 421 을 준다.
+        # 이 포트는 도커 내부망 전용(호스트 미공개)이라 보호가 불필요하다.
+        mcp.settings.transport_security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=False
+        )
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

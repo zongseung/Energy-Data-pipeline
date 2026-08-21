@@ -1,0 +1,16 @@
+# LibreChat 설정 — MCP 연결만 정의한다. 모델·엔드포인트는 compose 의
+# 환경변수(ENDPOINTS, OPENAI_MODELS)로 제한한다.
+version: 1.2.1
+cache: true
+
+# SSRF 보호는 켜 둔 채, 도커 내부 서비스인 energy-mcp 만 예외로 허용한다.
+mcpSettings:
+  allowedAddresses:
+    - energy-mcp:8000
+
+mcpServers:
+  energy-db:
+    type: streamable-http
+    url: http://energy-mcp:8000/mcp
+    # 대량 CSV export 쿼리가 수십 초 걸릴 수 있다
+    timeout: 120000
