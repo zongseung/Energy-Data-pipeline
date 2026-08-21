@@ -34,10 +34,9 @@ deploy:
 ps:
 	$(COMPOSE) ps
 
-## Prefect UI / Grafana 접속 주소 출력
+## Prefect UI 접속 주소 출력 (localhost 전용 바인딩)
 ui:
 	@echo "Prefect UI: http://localhost:4400"
-	@echo "Grafana:    http://localhost:3006"
 
 ## DB 접속 (psql)
 db:

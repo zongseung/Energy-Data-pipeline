@@ -5,6 +5,7 @@ FROM python:3.11-slim
 
 COPY mcp-server /opt/mcp-server
 RUN pip install --no-cache-dir /opt/mcp-server
+COPY docker/llm-demo/serve_exports.py /serve_exports.py
 
 EXPOSE 8000 8098
-CMD ["sh", "-c", "mkdir -p /exports && python -m http.server 8098 --directory /exports & exec energy-mcp"]
+CMD ["sh", "-c", "mkdir -p /exports && python /serve_exports.py & exec energy-mcp"]

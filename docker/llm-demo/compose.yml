@@ -1,44 +1,110 @@
-# 시범용 로컬 LLM 스택 — 보안(Tailscale) 적용 전 로컬 시연 전용.
+# LLM 데모 스택 — LibreChat + OpenAI gpt-4o-mini + energy-mcp.
+# (로컬 Qwen 스택은 2026-08-21 제거 — GPU/CUDA 복구 시 git 역사에서 복원)
 #
-#   MODEL_PATH=<Qwen3-4B-Q4_K_M.gguf 절대경로> docker compose -f docker/llm-demo/compose.yml up -d --build
-#   브라우저: http://localhost:8099  (내장 웹 UI가 MCP 툴 호출을 처리)
+#   docker compose -f docker/llm-demo/compose.yml up -d --build
+#   브라우저: http://<서버IP>:8099  (첫 접속 시 계정 등록 후 로그인)
 #
-# 주의: 8099가 0.0.0.0 으로 열린다 — LAN 시연용. 외부 공개 금지.
-# DSN은 운영 스택 내부 별칭(pv-db)을 쓴다. pv/pv 자격증명은 개발용(운영 compose와 동일).
+# 외부 입구는 nginx 하나다: 8099(UI) / 8098(CSV). 내부 서비스는 포트 미공개.
+# DB 접속은 PgBouncer(session 풀링)를 거친다 — 동시 접속자가 늘어도 pv-db
+# 커넥션은 DEFAULT_POOL_SIZE 로 캡핑된다.
+#
+# OPENAI_API_KEY 는 같은 디렉토리의 librechat.env 에 넣는다(git 미추적).
+# user_provided 로 두면 각 사용자가 UI 설정에서 자기 키를 입력해야 한다.
+#
+# 주의: 질문·DB 조회 결과가 OpenAI 로 전송된다 — 폐쇄망 전제가 깨지는 지점.
 services:
-  llm-demo:
+  nginx:
+    image: nginx:alpine
+    container_name: llm-demo-nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8099:8099"  # 채팅 UI
+      - "8098:8098"  # CSV 다운로드
+    depends_on:
+      - librechat
+      - energy-mcp
+    networks:
+      - pvnet
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer
+    container_name: llm-demo-pgbouncer
+    environment:
+      DB_HOST: pv-db
+      DB_PORT: "5432"
+      DB_USER: pv
+      DB_PASSWORD: pv
+      DB_NAME: pv
+      # energy-mcp 가 세션 설정(read-only, statement_timeout)을 쓰므로
+      # transaction 풀링은 불가 — session 모드로 커넥션 재사용·캡핑만 얻는다.
+      POOL_MODE: session
+      DEFAULT_POOL_SIZE: "20"
+      MAX_CLIENT_CONN: "200"
+      # 내부 도커망 전용이라 평문 인증 (pv-db 의 scram 과의 불일치 회피)
+      AUTH_TYPE: plain
+    networks:
+      - pvnet
+    restart: unless-stopped
+
+  energy-mcp:
     build:
       context: ../..
-      dockerfile: docker/llm-demo/Dockerfile
-    container_name: llm-demo
+      dockerfile: docker/llm-demo/mcp.Dockerfile
+    container_name: energy-mcp
     environment:
-      # 웹UI를 LAN/Tailscale IP 로 열면 브라우저 오리진이 localhost 가 아니라서
-      # API 호출이 CORS 로 전부 막힌다("Failed to connect to server"). 시연용
-      # 폐쇄망 전제이므로 전체 허용.
-      LLAMA_ARG_CORS_ORIGINS: "*"
-      ENERGY_MCP_DSN: postgresql://pv:pv@pv-db:5432/pv
+      ENERGY_MCP_DSN: postgresql://pv:pv@pgbouncer:5432/pv
+      ENERGY_MCP_TRANSPORT: streamable-http
+      ENERGY_MCP_HOST: 0.0.0.0
       # 채팅 미리보기 행 수 — 컨텍스트 절약. 초과분은 CSV 다운로드로 제공된다.
       ENERGY_MCP_ROW_LIMIT: "10"
       ENERGY_MCP_EXPORT_DIR: /exports
       # 2026년 전체 태양광이 ~20만 행이라 기본 상한(10만)으로는 잘린다
       ENERGY_MCP_EXPORT_ROW_LIMIT: "300000"
-      # 다운로드 링크는 접속하는 PC 기준 주소여야 한다 — localhost 로 두면 서버
-      # 밖에서 링크가 죽는다. 기본값은 LAN IP (시연 PC 들이 Tailscale 없이 접속).
+      # 다운로드 링크는 접속하는 PC 기준 주소여야 한다. 기본값은 LAN IP,
       # Tailscale 로 보는 사람에게는 DEMO_HOST=100.127.20.105 로 띄울 것.
       ENERGY_MCP_EXPORT_URL: http://${DEMO_HOST:-192.9.65.58}:8098
     volumes:
-      - ${MODEL_PATH:?Qwen3-4B-Q4_K_M.gguf 경로를 MODEL_PATH 로 지정하세요}:/models/model.gguf:ro
-      # 컨테이너를 다시 만들어도 이미 나눠준 CSV 링크가 살아 있어야 한다
       - exports:/exports
-    ports:
-      - "8099:8080"
-      - "8098:8098"  # CSV 다운로드
+    depends_on:
+      - pgbouncer
+    networks:
+      - pvnet
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7
+    container_name: librechat-mongo
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - pvnet
+    restart: unless-stopped
+
+  librechat:
+    image: ghcr.io/danny-avila/librechat:v0.8.7
+    container_name: librechat
+    depends_on:
+      - mongodb
+      - energy-mcp
+    env_file: librechat.env
+    environment:
+      HOST: 0.0.0.0
+      MONGO_URI: mongodb://mongodb:27017/LibreChat
+      ENDPOINTS: openAI,agents
+      OPENAI_MODELS: gpt-4o-mini
+      SEARCH: "false"             # Meilisearch 미기동 — 데모에 검색 불필요
+      ALLOW_REGISTRATION: "true"  # 시연 배포 후 false 로 잠글 것
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
     networks:
       - pvnet
     restart: unless-stopped
 
 volumes:
   exports:
+  mongo-data:
 
 networks:
   pvnet:

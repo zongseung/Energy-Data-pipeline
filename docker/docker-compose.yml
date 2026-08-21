@@ -51,36 +51,14 @@ services:
       - pv-network
 
   # ==============================
-  # Grafana (대시보드)
-  # ==============================
-  pv-grafana:
-    image: grafana/grafana:latest
-    container_name: pv-pipeline-grafana
-    ports:
-      - "3006:3000"  # 호스트 3006 -> 컨테이너 3000
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - TZ=Asia/Seoul
-    volumes:
-      - pv_grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
-    depends_on:
-      pv-db:
-        condition: service_healthy
-    networks:
-      - pv-network
-
-  # ==============================
   # Prefect Server (PV 전용)
   # ==============================
   pv-prefect-server:
     image: prefecthq/prefect:2-python3.10
     container_name: pv-prefect-server
     ports:
-      - "4400:4200"   # 호스트에서 http://localhost:4400 으로 접속
+      # localhost 전용 — UI 는 이 호스트에서만 본다 (무인증이라 망 노출 금지)
+      - "127.0.0.1:4400:4200"
     environment:
       - PREFECT_SERVER_API_HOST=0.0.0.0
       - PREFECT_API_DATABASE_CONNECTION_URL=postgresql+asyncpg://prefect:prefect@pv-prefect-postgres:5432/prefect
@@ -163,7 +141,6 @@ services:
 volumes:
   pv_prefect_postgres_data:
   pv_data_postgres:
-  pv_grafana_data:
 
 networks:
   pv-network:
