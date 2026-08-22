@@ -281,6 +281,14 @@ DEPLOYMENTS = [
         "description": "매년 1월 한국농어촌공사 영암/율치 PV(odcloud 15005796) 전체 연도 멱등 수집 → generation 코어",
     },
     {
+        "flow": "prefect_flows.ewp_pv_flow.yearly_ewp_pv_flow",
+        "name": "yearly-ewp-pv-collection",
+        "cron": "0 5 8 2 *",  # 원천이 1월 하순에 갱신되므로 2월에 받는다
+        "label": "매년 2월 8일 05:00 (동서발전 지점별 PV → generation 코어)",
+        "tags": ["pv", "ewp", "yearly"],
+        "description": "매년 한국동서발전 지점별 태양광(data.go.kr 15099650) 전체 기간 멱등 수집 → generation 코어 + plants 좌표·용량 갱신",
+    },
+    {
         "flow": "prefect_flows.oil_flow.hourly_oil_flow",
         "name": "hourly-oil-price",
         "cron": "5 * * * *",  # 정각 직후 — 진행 중 캔들이 확정된 뒤 받는다
