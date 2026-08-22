@@ -41,6 +41,7 @@ WHERE table_schema='research' AND table_name='generation';
 | ----------------------- | -------------------- | --------- | ------------------------ | -------- |
 | `research.weather_asos` | ASOS 시간별 관측 95개 지점   | 4,743,936 | 2019-01-01 \~ 2026-08-11 | 매일 09:00 |
 | `research.forecast()`   | 기상청 동네예보 3종 (NAS 직독) | 적재 없음     | 2023-01 \~ 2025-06       | 정적       |
+| `research.aws_obs_daily` | AWS·ASOS **일자료** 107지점 | 377,822   | 2015-01-01 \~ 2026-06-15 | 없음 (정적) |
 
 ### 국제유가
 
@@ -57,6 +58,8 @@ WHERE table_schema='research' AND table_name='generation';
 | `research.demand_weather_1h`    | 전국 수요 × 기상 시간별  | 6,112,742 | 2019-01-01 \~ 2026-08-11 | 매시        |
 | `research.heat_demand`          | 지역난방 열수요 19개 지사 | 499,301   | 2021-01-01 \~ 2023-12-31 | 없음 (완결)   |
 | `research.heat_demand_location` | 열수요 지사 위치       | 19        | —                        | 없음        |
+| `research.jeju_demand_hourly`   | 제주 시간별 수요       | 48,119    | 2021-01-01 \~ 2026-06-30 | 분기        |
+| `research.jeju_generation_mix`  | 제주 연료원별 시간별 거래량 | 46,680    | 2024년 1년치              | 없음 (원천 폐기 예정) |
 
 ### 송배전망
 

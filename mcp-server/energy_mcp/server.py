@@ -341,6 +341,15 @@ def run_sql(query: str) -> dict[str, Any]:
         temperature, humidity, solar_radiation, has_solar_sensor).
       - `research.jeju_supply_demand` — 제주 계통 수급 5분(실시간, timestamp,
         supply_mw, demand_mw, renewable_total_mw, solar_mw, wind_mw).
+      - `research.jeju_demand_hourly` — 제주 시간별 수요(timestamp, demand_mw,
+        source). 분기 파일이 원천이라 최신 분기는 비어 있을 수 있다.
+      - `research.jeju_generation_mix` — 제주 연료원별 시간별 거래량(timestamp,
+        fuel_type, gen_mwh). **2024년 1년치가 전부다.** fuel_type 은
+        lng/oil/solar/wind/renewable_other/other 로 plants 의 코드와 다르다.
+      - `research.aws_obs_daily` — 방재기상(AWS)·종관기상(ASOS) **일자료**
+        (date, station_id, station_name, station_type, ta, wd, ws, rn_day,
+        rn_hr1, hm, pa, ps, imputed). 시간별이 아니다 — 시간별은
+        weather_asos 를 써라. imputed 가 비지 않은 행은 결측 보정값이다.
       - `research.demand_5min` — 전국 5분 전력수요. **컬럼 이름이 의미와
         어긋난다**: 공급능력은 `current_supply`, 최대예측수요는
         `supply_capacity` 다(이름이 서로 바뀐 것처럼 보이지만 그게 맞다).

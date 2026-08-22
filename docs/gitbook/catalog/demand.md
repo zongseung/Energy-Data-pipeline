@@ -67,6 +67,34 @@ GROUP BY g.timestamp ORDER BY g.timestamp;
 | `renewable_total_mw`  | 신재생 합계                     |
 | `solar_mw`, `wind_mw` | 태양광·풍력 발전량                 |
 
+### research.jeju\_demand\_hourly — 제주 시간별 수요
+
+| 항목    | 값                        |
+| ----- | ------------------------ |
+| 행수    | 48,119                   |
+| 기간    | 2021-01-01 \~ 2026-06-30 |
+| 갱신 주기 | 분기                       |
+| 단위    | MW                       |
+
+공공데이터포털의 분기 파일이 원천이라 **분기마다 끊겨서 들어옵니다.** 원천이 분기 종료 후 열흘쯤 뒤에 올라오므로 최신 분기가 비어 보이는 것은 정상입니다. 5분 단위가 필요하면 위의 `research.jeju_supply_demand`를 쓰세요 — 이쪽은 10분마다 갱신됩니다.
+
+`source` 컬럼이 출처를 표시합니다. `datagokr`은 분기 파일, `sukub`은 KPX 5분 수급을 시간평균한 백필값입니다.
+
+### research.jeju\_generation\_mix — 제주 연료원별 시간별 거래량
+
+| 항목 | 값                        |
+| -- | ------------------------ |
+| 행수 | 46,680                   |
+| 기간 | **2024년 1년치가 전부**        |
+| 갱신 | 없음                       |
+| 단위 | MWh                      |
+
+{% hint style="warning" %}
+원천(공공데이터포털)이 연 1회 갱신인데 2025년치가 아직 없고, **데이터셋 자체가 2026-08-19자로 다른 파일에 통합·폐기 예정**입니다. 최신 제주 발전 구성이 필요하면 `research.jeju_supply_demand`의 `solar_mw`·`wind_mw`를 쓰세요.
+{% endhint %}
+
+`fuel_type`은 `lng` · `oil` · `solar` · `wind` · `renewable_other` · `other` 6종입니다. **`research.plants`의 코드 체계(solar/wind/thermal/hydro/fuel_cell)와 달라서 그대로 조인하면 안 됩니다.**
+
 ### research.heat\_demand — 지역난방 열수요 (시간별)
 
 | 항목    | 값                                 |
