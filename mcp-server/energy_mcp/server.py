@@ -341,6 +341,13 @@ def run_sql(query: str) -> dict[str, Any]:
         temperature, humidity, solar_radiation, has_solar_sensor).
       - `research.jeju_supply_demand` — 제주 계통 수급 5분(실시간, timestamp,
         supply_mw, demand_mw, renewable_total_mw, solar_mw, wind_mw).
+      - `research.gen_mix_5min` — **전국 발전원별 5분 실시간**(timestamp,
+        solar_market, solar_ppa, solar_btm, wind, nuclear, gas, coal_total,
+        coal_domestic, oil, hydro, pumped, renewable_total, renewable_new,
+        renewable_renew, ess). 단위 MW. **태양광이 세 갈래다** — solar_market 만
+        계량값이고 solar_ppa·solar_btm 은 KPX 추정치다. "지금 태양광 얼마나
+        발전하나" 같은 실시간 질문은 이 뷰를 써라(generation 은 하루~수개월
+        지연된다). 2026-08-23 수집 시작이라 그 이전 구간은 없다.
       - `research.jeju_demand_hourly` — 제주 시간별 수요(timestamp, demand_mw,
         source). 분기 파일이 원천이라 최신 분기는 비어 있을 수 있다.
       - `research.jeju_generation_mix` — 제주 연료원별 시간별 거래량(timestamp,

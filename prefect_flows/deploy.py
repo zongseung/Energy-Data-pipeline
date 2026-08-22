@@ -281,6 +281,14 @@ DEPLOYMENTS = [
         "description": "매년 1월 한국농어촌공사 영암/율치 PV(odcloud 15005796) 전체 연도 멱등 수집 → generation 코어",
     },
     {
+        "flow": "prefect_flows.genmix_flow.realtime_gen_mix_flow",
+        "name": "realtime-gen-mix-collection",
+        "cron": "*/5 * * * *",
+        "label": "5분마다 (KPX 실시간 발전원별 발전량 → demand DB gen_mix_5min)",
+        "tags": ["genmix", "realtime", "solar"],
+        "description": "KPX 실시간 전력수급현황 페이지의 발전원별 5분 자료 수집. 태양광이 전력시장·PPA·BTM 으로 나뉜다. 당일치만 제공되므로 5분 주기 필수",
+    },
+    {
         "flow": "prefect_flows.ewp_pv_flow.yearly_ewp_pv_flow",
         "name": "yearly-ewp-pv-collection",
         "cron": "0 5 8 2 *",  # 원천이 1월 하순에 갱신되므로 2월에 받는다

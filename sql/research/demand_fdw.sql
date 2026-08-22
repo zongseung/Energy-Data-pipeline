@@ -24,13 +24,13 @@ CREATE USER MAPPING FOR PUBLIC SERVER demand_fdw
 
 IMPORT FOREIGN SCHEMA research
     LIMIT TO (demand_5min, jeju_supply_demand, heat_demand,
-              heat_demand_location, demand_weather_1h)
+              heat_demand_location, demand_weather_1h, gen_mix_5min)
     FROM SERVER demand_fdw INTO research;
 
 -- 뷰 재생성 스크립트(pv_research.sql)의 GRANT 는 뷰에만 걸리므로 여기서도 한 번.
 GRANT SELECT ON research.demand_5min, research.jeju_supply_demand,
                research.heat_demand, research.heat_demand_location,
-               research.demand_weather_1h TO research_ro;
+               research.demand_weather_1h, research.gen_mix_5min TO research_ro;
 
 
 -- =============================================================================
@@ -95,3 +95,15 @@ COMMENT ON COLUMN research.demand_weather_1h."timestamp" IS
     '구간시작 KST. demand_avg 는 demand_5min 의 5분 라벨 기준 [H, H+1) 평균이라 버킷 경계는 확정적이지만, 5분 라벨 자체의 의미가 미확정이라 최대 5분 오차가 남을 수 있다. 기상 컬럼은 ASOS 라벨 규약을 따른다.';
 COMMENT ON COLUMN research.demand_weather_1h.demand_avg IS
     '해당 1시간 구간 전국 수요(MW)의 5분값 평균.';
+
+
+COMMENT ON FOREIGN TABLE research.gen_mix_5min IS
+    'KPX 실시간 발전원별 발전량 5분(계통기준 전국, MW). demand_5min 이 수요·예비력만 담아 발전원 구분이 없던 자리를 채운다. **태양광이 세 갈래다** — solar_market(전력시장 계량), solar_ppa·solar_btm(KPX 추정치). 원천이 당일치만 제공해 5분마다 수집하므로 수집 시작(2026-08-23) 이전 구간은 없다.';
+COMMENT ON COLUMN research.gen_mix_5min."timestamp" IS 'KST naive. KPX 페이지의 5분 라벨 그대로다(demand_5min 과 동일 규약).';
+COMMENT ON COLUMN research.gen_mix_5min.solar_market IS '전력시장 참여 태양광(MW). 계량 기반이라 셋 중 가장 신뢰도가 높다.';
+COMMENT ON COLUMN research.gen_mix_5min.solar_ppa IS '기업PPA 태양광(MW). **KPX 추정치**다.';
+COMMENT ON COLUMN research.gen_mix_5min.solar_btm IS '자가소비(Behind-The-Meter) 태양광(MW). **KPX 추정치**다. 계통에 안 잡히는 자가발전을 추정한 값이라 태양광 전체 규모를 볼 때만 쓰고 정산·검증에는 쓰지 마라.';
+COMMENT ON COLUMN research.gen_mix_5min.coal_total IS '석탄 합계(MW) = 유연탄 + coal_domestic(국내탄).';
+COMMENT ON COLUMN research.gen_mix_5min.pumped IS '양수(MW). 양수 발전 출력이며 펌핑(충전)은 여기 안 잡힌다.';
+COMMENT ON COLUMN research.gen_mix_5min.ess IS 'ESS(MW). **충전 중이면 음수**다.';
+COMMENT ON COLUMN research.gen_mix_5min.renewable_total IS '신재생 합계(MW) = renewable_new(신에너지) + renewable_renew(재생에너지). 태양광·풍력이 여기 포함되므로 발전원 합계를 낼 때 이중 계산에 주의하라.';

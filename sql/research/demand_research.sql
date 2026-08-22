@@ -44,7 +44,8 @@ DROP VIEW IF EXISTS
     research.jeju_supply_demand,
     research.heat_demand,
     research.heat_demand_location,
-    research.demand_weather_1h
+    research.demand_weather_1h,
+    research.gen_mix_5min
 CASCADE;
 
 
@@ -148,6 +149,32 @@ COMMENT ON COLUMN research.demand_weather_1h."timestamp" IS
     '구간시작 KST. demand_avg 는 demand_5min 의 5분 라벨 기준 [H, H+1) 평균이다 — 버킷 경계는 확정적이지만 5분 라벨 자체의 의미가 미확정이라 최대 5분 오차가 남을 수 있다. 기상 컬럼은 ASOS 관측값을 같은 시각에 붙인 것이라 ASOS 라벨 규약을 따른다.';
 COMMENT ON COLUMN research.demand_weather_1h.demand_avg IS
     '해당 1시간 구간 전국 수요(MW)의 5분값 평균.';
+
+
+-- -----------------------------------------------------------------------------
+-- 발전원별 발전량 (5분, 계통기준 전국)
+--   demand_5min 이 수요·예비력만 담아 발전원 구분이 없던 자리를 채운다.
+--   태양광이 전력시장/PPA/BTM 세 갈래인 것이 이 자료의 핵심이다.
+-- -----------------------------------------------------------------------------
+CREATE VIEW research.gen_mix_5min AS
+SELECT
+    g.timestamp,
+    g.solar_market, g.solar_ppa, g.solar_btm,
+    g.wind, g.nuclear, g.gas,
+    g.coal_total, g.coal_domestic, g.oil,
+    g.hydro, g.pumped,
+    g.renewable_total, g.renewable_new, g.renewable_renew,
+    g.ess
+FROM gen_mix_5min g;
+
+COMMENT ON VIEW research.gen_mix_5min IS
+    'KPX 실시간 발전원별 발전량 5분(계통기준 전국, MW). 태양광이 solar_market(전력시장 계량)/solar_ppa/solar_btm(둘 다 KPX 추정치) 세 갈래다.';
+COMMENT ON COLUMN research.gen_mix_5min."timestamp" IS
+    'KPX 페이지의 5분 라벨 그대로(KST naive). demand_5min 과 같은 규약이다.';
+COMMENT ON COLUMN research.gen_mix_5min.solar_btm IS
+    '자가소비(Behind-The-Meter) 태양광 추정(MW). 계통에 안 잡히는 자가발전을 KPX 가 추정한 값이다.';
+COMMENT ON COLUMN research.gen_mix_5min.ess IS
+    'ESS(MW). 충전 중이면 음수다.';
 
 
 -- -----------------------------------------------------------------------------
