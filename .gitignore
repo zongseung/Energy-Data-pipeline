@@ -111,6 +111,7 @@ dist/
 # 'docs/*' 로 항목만 제외해야 git 이 docs/gitbook/ 안으로 들어갈 수 있다.
 docs/*
 !docs/gitbook/
+!docs/adr/          # 아키텍처 결정 기록 — 추적한다
 .claude/
 
 ############################
