@@ -1,0 +1,104 @@
+# 연구원별 원격 MCP — Tailscale 전용. 데모 스택(compose.yml)과 별개로 띄운다.
+#
+#   docker compose -f docker/llm-demo/compose.mcp-users.yml up -d --build
+#
+# 왜 사람마다 컨테이너 하나인가: energy-mcp 는 DSN 을 프로세스 환경변수로 읽는다
+# (server.py `_require_dsn`). 서버 하나 = DB role 하나다. 한 서버를 공유하면 감사
+# 로그(log_statement=all)가 전부 같은 role 로 뭉개져 이용조건 4항이 깨진다.
+#
+# DSN 은 같은 디렉토리의 `.env` 에 넣는다 (git 미추적). 8명치:
+#   MCP_DSN_U1=postgresql://<role>:<pw>@pv-db:5432/pv
+#   ... MCP_DSN_U8=...
+# 주의: 이 방식은 연구원 8명의 비밀번호가 이 서버에 평문으로 남는다. role 발급
+# 주체가 어차피 관리자라 새로 새는 정보는 없지만, 서버가 털리면 8개가 같이 털린다.
+#
+# 노출은 tailscale serve 로 한다 (외부망·공인IP 불필요, tailnet 안에서만 보인다):
+#   for p in 8441 8442 8443 8444 8445 8446 8447 8448; do
+#     tailscale serve --bg --https=$p http://127.0.0.1:$p
+#   done
+# 연구원에게 주는 주소: https://<머신>.<tailnet>.ts.net:844N/mcp
+# funnel 은 절대 쓰지 말 것 — 그건 공개 인터넷 노출이다.
+#
+# CSV 익스포트(ENERGY_MCP_EXPORT_*)는 일부러 안 켠다. 여러 명이 한 볼륨을 공유하면
+# 남의 추출물이 서로 보인다. 개인 MCP 는 기본 동작(10,000행, truncated:true)으로 두고,
+# 대량 추출은 psql 직접 접속이 정답이다.
+
+x-mcp-user: &mcp-user
+  build:
+    context: ../..
+    dockerfile: docker/llm-demo/mcp.Dockerfile
+  environment: &mcp-user-env
+    ENERGY_MCP_TRANSPORT: streamable-http
+    ENERGY_MCP_HOST: 0.0.0.0
+  networks: [pvnet]
+  restart: unless-stopped
+
+services:
+  mcp-u1:
+    <<: *mcp-user
+    container_name: energy-mcp-u1
+    ports: ["127.0.0.1:8441:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U1:?.env 에 MCP_DSN_U1 을 넣어라}
+
+  mcp-u2:
+    <<: *mcp-user
+    container_name: energy-mcp-u2
+    ports: ["127.0.0.1:8442:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U2:?.env 에 MCP_DSN_U2 를 넣어라}
+
+  mcp-u3:
+    <<: *mcp-user
+    container_name: energy-mcp-u3
+    ports: ["127.0.0.1:8443:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U3:?.env 에 MCP_DSN_U3 을 넣어라}
+
+  mcp-u4:
+    <<: *mcp-user
+    container_name: energy-mcp-u4
+    ports: ["127.0.0.1:8444:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U4:?.env 에 MCP_DSN_U4 를 넣어라}
+
+  mcp-u5:
+    <<: *mcp-user
+    container_name: energy-mcp-u5
+    ports: ["127.0.0.1:8445:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U5:?.env 에 MCP_DSN_U5 를 넣어라}
+
+  mcp-u6:
+    <<: *mcp-user
+    container_name: energy-mcp-u6
+    ports: ["127.0.0.1:8446:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U6:?.env 에 MCP_DSN_U6 을 넣어라}
+
+  mcp-u7:
+    <<: *mcp-user
+    container_name: energy-mcp-u7
+    ports: ["127.0.0.1:8447:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U7:?.env 에 MCP_DSN_U7 을 넣어라}
+
+  mcp-u8:
+    <<: *mcp-user
+    container_name: energy-mcp-u8
+    ports: ["127.0.0.1:8448:8000"]
+    environment:
+      <<: *mcp-user-env
+      ENERGY_MCP_DSN: ${MCP_DSN_U8:?.env 에 MCP_DSN_U8 을 넣어라}
+
+networks:
+  pvnet:
+    external: true
+    name: pv-pipeline-network
