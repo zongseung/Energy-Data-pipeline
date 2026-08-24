@@ -10,7 +10,7 @@ from __future__ import annotations
 KNOWN_VIEWS = (
     "research.plants, research.generation, research.smp_hourly, "
     "research.smp_realtime_jeju, research.smp_weighted_avg, research.weather_asos, "
-    "research.jeju_supply_demand, research.demand_5min, research.demand_weather_1h, "
+    "research.jeju_supply_demand, research.demand_5min, "
     "research.heat_demand, research.heat_demand_location"
 )
 
