@@ -78,6 +78,7 @@ CATALOG_PAGES = {
     "generation.md",
     "smp.md",
     "weather.md",
+    "forecast.md",
     "demand.md",
     "oil.md",
     "grid.md",
