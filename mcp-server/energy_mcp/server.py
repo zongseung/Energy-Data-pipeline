@@ -19,6 +19,7 @@ import contextlib
 import csv
 import datetime
 import os
+import time
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -40,6 +41,9 @@ DEFAULT_TIMEOUT_S = 60
 DEFAULT_ROW_LIMIT = 10_000
 EXPORT_ROW_LIMIT_ENV = "ENERGY_MCP_EXPORT_ROW_LIMIT"
 DEFAULT_EXPORT_ROW_LIMIT = 100_000  # CSV 파일 상한 — 초대량 추출은 DB 직접 접속이 정답
+# 모든 쿼리가 CSV 를 남기므로 정리하지 않으면 볼륨이 무한 증식한다.
+# 링크는 조회 직후에 쓰는 것이라 하루면 충분하다.
+EXPORT_TTL_HOURS = 24
 
 # 스키마 리소스에 항상 고정으로 박아 넣는 함정 요약. research 스키마의 COMMENT가
 # 바뀌거나 누락되더라도 이 6개는 반드시 LLM에게 전달돼야 한다.
@@ -174,6 +178,23 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def _purge_stale_exports(export_dir: str) -> None:
+    """수명이 지난 export-*.csv 를 지운다.
+
+    쓰기 직전에 한 번 훑는다 — 별도 프로세스나 크론 없이 정리가 끝난다.
+    """
+    cutoff = time.time() - EXPORT_TTL_HOURS * 3600
+    for name in os.listdir(export_dir):
+        if not (name.startswith("export-") and name.endswith(".csv")):
+            continue
+        path = os.path.join(export_dir, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass  # 동시 조회가 먼저 지웠거나 읽는 중이다 — 다음 번에 지워진다
+
+
 def _summarize(columns: list[str], raw_rows: list[tuple]) -> dict[str, Any]:
     """대량 결과의 미리보기 대체 — 컬럼별 최소/최대/중간값만 계산한다.
 
@@ -245,6 +266,7 @@ def _execute(query: str) -> dict[str, Any]:
 
         export_dir = os.environ.get(EXPORT_DIR_ENV)
         if export_dir and fetched:
+            _purge_stale_exports(export_dir)
             export_limit = _env_int(EXPORT_ROW_LIMIT_ENV, DEFAULT_EXPORT_ROW_LIMIT)
             remainder = (
                 cur.fetchmany(export_limit - len(fetched)) if truncated else []
@@ -315,6 +337,10 @@ def run_sql(query: str) -> dict[str, Any]:
     - 데이터 추출/다운로드/CSV 요청에는 컬럼을 고르지 말고 `SELECT *` 를 써라 —
       timestamp·plant_name 같은 식별 컬럼이 빠진 CSV 는 쓸모가 없다.
       **단 집계(GROUP BY) 쿼리에는 절대 `SELECT *` 를 쓰지 마라** (위 규칙 2).
+    - 결과에 `lat`·`lon` 이 있고 클라이언트가 HTML 을 그릴 수 있으면 표 대신
+      **인라인 SVG 지도**로 보여줘라. 폐쇄망이라 지도 타일·CDN 은 못 부른다 —
+      `<svg>` 안에 x=lon, y=-lat 로 그대로 찍고, 같은 좌표는 하나로 묶어
+      호기 수를 함께 적어라(부지 단위라 자주 겹친다).
     - 세션이 read-only로 고정돼 있어 INSERT/UPDATE/DELETE/DROP 등은 DB가
       거부한다.
     - 행 수는 기본 10,000행으로 제한된다. 응답의 `truncated`가 true면 결과가
@@ -323,9 +349,13 @@ def run_sql(query: str) -> dict[str, Any]:
       `data_quality IN ('정상','시간별무효','전면무효','미검증')`,
       `fuel_type IN ('solar','wind','hydro','thermal','fuel_cell')` (이건 영어).
     - 존재하는 뷰는 아래가 전부다. 다른 테이블 이름을 지어내지 마라:
-      - `research.plants` — 발전소 마스터(plant_id, plant_name, fuel_type,
-        capacity_mw, data_quality, is_aggregate). is_aggregate=true는 합계
-        계열이므로 합산에서 제외하라.
+      - `research.plants` — 발전소 마스터(plant_id, plant_name, unit_no,
+        operator, fuel_type, region, capacity_mw, lat, lon, data_quality,
+        is_aggregate). 위치는 `lat`·`lon` 에 있다 — 다만 본부·부지 단위로
+        붙어 있어 같은 부지의 여러 호기가 같은 점을 공유하고(96기 → 29개
+        지점), 풍력 6기는 좌표가 없다.
+        **`is_aggregate = false` 를 덧붙이지 마라.** 지금은 이중계상이 없고,
+        걸면 2019~2021년 영암 발전량이 통째로 사라진다(함정 4번).
       - `research.generation` — 시간별 발전량(timestamp, plant_id, plant_name,
         fuel_type, gen_kwh). plants와 plant_id로 조인돼 있다. **5개 연료가 모두
         섞여 있다 — 위 규칙 1 참조.** 시간별로 신뢰할 수 없는 구간은 이 뷰에서

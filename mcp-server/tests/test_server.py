@@ -237,3 +237,24 @@ def test_schema_markdown_includes_known_pitfalls_without_db():
     assert "영흥태양광" in md
     assert "is_aggregate" in md
     assert "구간시작" in md
+
+
+def test_수명_지난_익스포트만_지운다(tmp_path) -> None:
+    """모든 쿼리가 CSV 를 남기는데 정리 로직이 없어 볼륨이 무한 증식했다."""
+    import os
+    import time
+
+    old = tmp_path / "export-deadbeef.csv"
+    fresh = tmp_path / "export-cafe0000.csv"
+    keep = tmp_path / "README.txt"          # 익스포트가 아닌 파일은 건드리지 않는다
+    for f in (old, fresh, keep):
+        f.write_text("x")
+    stale = time.time() - (server.EXPORT_TTL_HOURS + 1) * 3600
+    os.utime(old, (stale, stale))
+    os.utime(keep, (stale, stale))
+
+    server._purge_stale_exports(str(tmp_path))
+
+    assert not old.exists()
+    assert fresh.exists()
+    assert keep.exists()
