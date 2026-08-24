@@ -45,8 +45,10 @@
 ## 저장소 감사 (별건, P1)
 
 - `.worktrees/gitbook-research-guide` 812MB — main 이 이미 앞서 있다(branch→main diff 가 -2299줄).
-- 코드가 읽지만 아무도 세팅하지 않는 환경변수 14개. `NAMDONG_*` 6개는 CLAUDE.md 에
-  "Key Environment Variables" 로 문서화까지 돼 있는데 실체가 없다.
+- 환경변수 14개가 "아무도 세팅하지 않는다"로 잡혔으나, 코드를 읽어 보니 대부분 기본값이
+  있는 선택적 손잡이였다(`NAMDONG_*` 는 빈 문자열이 "전체"를 뜻하고, `KOEN_SSL_NO_VERIFY`
+  는 명시적 탈출구다). 실제 군더더기는 `deploy.py` 가 이 값들을 다시 읽어 빈 문자열로
+  배포 env 에 싣는 10줄뿐이라, 배포 등록 경로를 건드릴 값어치가 없어 남긴다.
 - `scripts/verify_humanize.py` 124줄 — 미참조 1회성.
 
 자르지 않기로 한 것: `scripts/migrations/`(README 가 삭제 금지를 명시하고 라이브 트리거

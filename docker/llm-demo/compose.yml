@@ -34,8 +34,10 @@ services:
     environment:
       DB_HOST: pv-db
       DB_PORT: "5432"
-      DB_USER: pv
-      DB_PASSWORD: pv
+      # 슈퍼유저 pv 대신 research 스키마만 읽는 demo_ro 로 붙는다.
+      # PgBouncer 는 평문 목록에 있는 계정만 통과시키므로 여기와 DSN 이 같아야 한다.
+      DB_USER: demo_ro
+      DB_PASSWORD: ${DEMO_RO_PW:?docker/llm-demo/.env 에 DEMO_RO_PW 를 넣어라}
       DB_NAME: pv
       # energy-mcp 가 세션 설정(read-only, statement_timeout)을 쓰므로
       # transaction 풀링은 불가 — session 모드로 커넥션 재사용·캡핑만 얻는다.
@@ -54,7 +56,7 @@ services:
       dockerfile: docker/llm-demo/mcp.Dockerfile
     container_name: energy-mcp
     environment:
-      ENERGY_MCP_DSN: postgresql://pv:pv@pgbouncer:5432/pv
+      ENERGY_MCP_DSN: postgresql://demo_ro:${DEMO_RO_PW:?docker/llm-demo/.env 에 DEMO_RO_PW 를 넣어라}@pgbouncer:5432/pv
       ENERGY_MCP_TRANSPORT: streamable-http
       ENERGY_MCP_HOST: 0.0.0.0
       # 채팅 미리보기 행 수 — 컨텍스트 절약. 초과분은 CSV 다운로드로 제공된다.
@@ -95,7 +97,7 @@ services:
       ENDPOINTS: openAI,agents
       OPENAI_MODELS: gpt-4o-mini
       SEARCH: "false"             # Meilisearch 미기동 — 데모에 검색 불필요
-      ALLOW_REGISTRATION: "true"  # 시연 배포 후 false 로 잠글 것
+      ALLOW_REGISTRATION: "false" # 계정은 관리자가 직접 만든다. 여는 순간 사내망 아무나 들어온다
     volumes:
       - ./librechat.yaml:/app/librechat.yaml:ro
     networks:
