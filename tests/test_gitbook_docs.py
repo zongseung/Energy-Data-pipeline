@@ -165,6 +165,10 @@ def test_public_docs_contain_no_live_credentials() -> None:
         if host != "127.0.0.1"
     ]
     assert not literal_hosts, f"공개 문서에 실주소가 있다: {literal_hosts}"
+    # 메일 주소를 공개 문서에 두면 수집 봇의 표적이 된다. 제출·문의 창구는
+    # 구글 폼이나 '관리자에게 문의' 로만 적는다.
+    emails = re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", combined)
+    assert not emails, f"공개 문서에 메일 주소가 있다: {emails}"
 
 
 # GitBook 전용 블록은 여닫이가 안 맞으면 에러가 아니라 '{% endhint %}' 같은
