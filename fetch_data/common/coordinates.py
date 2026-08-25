@@ -61,3 +61,30 @@ def check_coordinates(rows: list[dict]) -> list[dict]:
             continue
         findings.extend(_finding(row, "duplicate") for row in group)
     return findings
+
+
+def admin_region(address: dict) -> tuple[str | None, str | None]:
+    """역지오코딩 주소에서 (시도, 시군구) 를 뽑는다.
+
+    Nominatim 은 지점마다 키가 다르다. 시도가 `province` 로 올 때도 `state` 로
+    올 때도 있고, 광역시·특별시는 둘 다 없이 `city` 가 시도 자리에 온다.
+
+    `city` 로 넘어갈 때는 이름이 실제로 시도인지 확인한다. 확인하지 않으면
+    전남 일대처럼 시도 키가 비어 있는 지점에서 '여수시'가 시도로 승격된다.
+    틀린 값을 넣느니 비워 두는 편이 낫다.
+    """
+    SIDO_SUFFIXES = ("특별시", "광역시", "특별자치시", "특별자치도", "도")
+
+    sido = address.get("province") or address.get("state")
+    if sido:
+        below = ("city", "county", "town")
+    else:
+        city = address.get("city")
+        sido = city if city and city.endswith(SIDO_SUFFIXES) else None
+        below = ("county", "borough", "city_district", "town")
+    if not sido:
+        return None, None
+    for key in below:
+        if address.get(key):
+            return sido, address[key]
+    return sido, None

@@ -91,3 +91,26 @@ def test_실제_발전소_좌표에_오류가_없다() -> None:
         pytest.skip("DB 접속 불가 — CI 에서는 건너뛴다")
     errors = [f for f in check_coordinates(rows) if f["severity"] == "error"]
     assert errors == []
+
+
+def test_역지오코딩_주소에서_시도_시군구를_뽑는다() -> None:
+    """Nominatim 은 지점마다 키가 다르다. 광역시는 province 가 없고 city 가 시도 자리에 온다."""
+    from fetch_data.common.coordinates import admin_region
+
+    assert admin_region({"province": "경상북도", "city": "구미시"}) == ("경상북도", "구미시")
+    assert admin_region({"city": "인천광역시", "county": "옹진군", "town": "영흥면"}) == ("인천광역시", "옹진군")
+    assert admin_region({"province": "제주특별자치도", "city": "제주시", "town": "한경면"}) == ("제주특별자치도", "제주시")
+    assert admin_region({"city": "부산광역시"}) == ("부산광역시", None)
+    assert admin_region({}) == (None, None)
+
+
+def test_시도가_아닌_시를_시도로_승격하지_않는다() -> None:
+    """전남 일대는 province 없이 state 로 온다. state 를 안 보면 '여수시'가 시도가 된다."""
+    from fetch_data.common.coordinates import admin_region
+
+    assert admin_region({"state": "전남광주통합특별시", "city": "여수시"}) == (
+        "전남광주통합특별시", "여수시")
+    assert admin_region({"state": "전남광주통합특별시", "county": "영암군", "town": "삼호읍"}) == (
+        "전남광주통합특별시", "영암군")
+    # 시도로 볼 수 없는 값만 있으면 승격하지 말고 비운다 — 틀린 값보다 빈 값이 낫다
+    assert admin_region({"city": "여수시"}) == (None, None)
