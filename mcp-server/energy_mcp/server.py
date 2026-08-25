@@ -350,8 +350,9 @@ def run_sql(query: str) -> dict[str, Any]:
       `fuel_type IN ('solar','wind','hydro','thermal','fuel_cell')` (이건 영어).
     - 존재하는 뷰는 아래가 전부다. 다른 테이블 이름을 지어내지 마라:
       - `research.plants` — 발전소 마스터(plant_id, plant_name, unit_no,
-        operator, fuel_type, region, capacity_mw, lat, lon, data_quality,
-        is_aggregate). 위치는 `lat`·`lon` 에 있다 — 다만 본부·부지 단위로
+        operator, fuel_type, region, capacity_mw, lat, lon, sido, sigungu,
+        data_quality, is_aggregate). **지역을 묻는 질문에는 `sido`·`sigungu` 를
+        써라** — `region` 은 육지/제주 2값뿐이라 지역이 아니다. 좌표는 `lat`·`lon` — 다만 본부·부지 단위로
         붙어 있어 같은 부지의 여러 호기가 같은 점을 공유하고(96기 → 29개
         지점), 풍력 6기는 좌표가 없다.
         **`is_aggregate = false` 를 덧붙이지 마라.** 지금은 이중계상이 없고,
