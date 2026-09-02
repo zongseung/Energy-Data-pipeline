@@ -1,16 +1,19 @@
-#!/usr/bin/env bash
+#!/bin/sh
 set -eu
+
+secret_dir=${LOAD_SECRETS_DIR:-/run/secrets}
 
 read_secret() {
     variable=$1
-    file=/run/secrets/$2
+    file=$secret_dir/$2
     [ -r "$file" ] || { echo "필수 secret 파일이 없습니다: $2" >&2; exit 1; }
-    value=$(sed -e 's/[[:space:]]*$//' "$file")
+    value=$(cat "$file")
     export "$variable=$value"
     unset value
 }
 
-profile=${1:?profile이 필요합니다}
+[ "$#" -ge 2 ] || { echo "사용법: load-secrets <profile> <명령...>" >&2; exit 1; }
+profile=$1
 shift
 
 case "$profile" in

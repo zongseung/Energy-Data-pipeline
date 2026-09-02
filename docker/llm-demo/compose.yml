@@ -80,16 +80,18 @@ services:
     image: mongo:7
     container_name: librechat-mongo
     # mongod --auth keeps every non-local connection behind Mongo authentication.
+    # 기존 mongo-data는 전체 스택보다 먼저 ./bootstrap-mongo.sh를 한 번 실행한다.
     command: ["mongod", "--auth", "--bind_ip_all"]
     volumes:
       - mongo-data:/data/db
       - ./init-mongo-users.js:/docker-entrypoint-initdb.d/init-mongo-users.js:ro
+      - ./mongo-healthcheck.js:/usr/local/share/mongo-healthcheck.js:ro
     secrets:
       - mongo_root_password
       - librechat_mongo_password
       - energy_mcp_mongo_password
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --username root --password \"$$(cat /run/secrets/mongo_root_password)\" --authenticationDatabase admin --eval 'quit(db.runCommand({ping:1}).ok ? 0 : 2)'"]
+      test: ["CMD", "mongosh", "--quiet", "--file", "/usr/local/share/mongo-healthcheck.js"]
       interval: 30s
       timeout: 10s
       retries: 5

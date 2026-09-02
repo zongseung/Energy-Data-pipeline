@@ -1,5 +1,5 @@
 const fs = require('fs');
-const secret = (name) => fs.readFileSync(`/run/secrets/${name}`, 'utf8').trim();
+const secret = (name) => fs.readFileSync(`/run/secrets/${name}`, 'utf8').replace(/\n+$/, '');
 
 const ensureUser = (database, user, password, roles) => {
   const target = db.getSiblingDB(database);
