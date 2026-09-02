@@ -10,6 +10,29 @@ from pymongo import ReturnDocument
 WORKFLOW_TTL = timedelta(minutes=30)
 
 
+def _reject_multi_statement(query: str) -> None:
+    """세미콜론으로 이어진 여러 문장을 거부한다."""
+    body = query.strip()
+    if not body:
+        raise ValueError("빈 쿼리입니다.")
+    if body.endswith(";"):
+        body = body[:-1]
+    if ";" in body:
+        raise ValueError(
+            "한 번에 하나의 SQL 문장만 실행할 수 있습니다. "
+            "세미콜론으로 여러 문장을 연결하지 마세요."
+        )
+
+
+def validate_planned_sql(query: str) -> str:
+    _reject_multi_statement(query)
+    query = query.strip().removesuffix(";").strip()
+    first = query.split(None, 1)[0].upper()
+    if first not in {"SELECT", "WITH"}:
+        raise ValueError("planner SQL은 SELECT 또는 WITH로 시작해야 합니다.")
+    return query
+
+
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -47,7 +70,7 @@ def save_decision(collection, workflow_id, decision, approval_base_url, now=None
                 "questions": decision.questions}
 
     token = secrets.token_urlsafe(32)
-    sql = decision.sql.strip()
+    sql = validate_planned_sql(decision.sql)
     changed = collection.update_one(
         {"_id": workflow_id, "status": "clarifying", "expires_at": {"$gt": now}},
         {"$set": {

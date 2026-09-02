@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from energy_mcp.workflow import (
     WORKFLOW_TTL,
     approve_workflow,
@@ -11,6 +13,7 @@ from energy_mcp.workflow import (
     issue_csrf,
     new_workflow,
     save_decision,
+    validate_planned_sql,
 )
 
 NOW = datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc)
@@ -152,3 +155,9 @@ def test_finish_treats_any_error_code_as_failure():
     finish_workflow(collection, "wf", None, "", NOW)
 
     assert collection.update_one.call_args.args[1]["$set"]["status"] == "failed"
+
+
+@pytest.mark.parametrize("query", ["UPDATE research.plants SET name = 'x'", "", "SELECT 1; SELECT 2"])
+def test_planned_sql_rejects_non_single_select_or_with(query):
+    with pytest.raises(ValueError):
+        validate_planned_sql(query)

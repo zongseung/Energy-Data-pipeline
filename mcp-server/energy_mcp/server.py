@@ -28,6 +28,7 @@ import psycopg2
 from mcp.server.fastmcp import FastMCP
 
 from energy_mcp.hints import hint_for
+from energy_mcp.workflow import _reject_multi_statement
 
 DSN_ENV = "ENERGY_MCP_DSN"
 TIMEOUT_ENV = "ENERGY_MCP_STATEMENT_TIMEOUT_S"
@@ -146,25 +147,6 @@ def _readonly_cursor(dsn: str, timeout_s: int):
 # ---------------------------------------------------------------------------
 # 쿼리 실행
 # ---------------------------------------------------------------------------
-
-
-def _reject_multi_statement(query: str) -> None:
-    """세미콜론으로 이어진 여러 문장을 거부한다.
-
-    read-only 세션은 데이터 변경만 막을 뿐 `SET statement_timeout = 0` 같은
-    세션 설정 변경은 막지 않는다. 한 호출에 문장 하나만 허용하면 우리가 앞서
-    설정한 statement_timeout을 뒤 문장이 덮어쓸 길이 없어진다.
-    """
-    body = query.strip()
-    if not body:
-        raise ValueError("빈 쿼리입니다.")
-    if body.endswith(";"):
-        body = body[:-1]
-    if ";" in body:
-        raise ValueError(
-            "한 번에 하나의 SQL 문장만 실행할 수 있습니다. "
-            "세미콜론으로 여러 문장을 연결하지 마세요."
-        )
 
 
 def _jsonable(value: Any) -> Any:
