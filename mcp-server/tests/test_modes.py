@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -6,6 +7,10 @@ import httpx
 import pytest
 
 from energy_mcp import server
+
+
+PAST = datetime(2000, 1, 1, tzinfo=timezone.utc)
+FUTURE = datetime(9999, 1, 1, tzinfo=timezone.utc)
 
 
 def tool_names(mcp):
@@ -24,6 +29,22 @@ def request(app, method, url):
             return await client.request(method, url)
 
     return asyncio.run(send())
+
+
+class ClaimCollection:
+    def __init__(self, doc):
+        self.doc = doc
+
+    def find_one_and_update(self, query, update, **kwargs):
+        for key, expected in query.items():
+            value = self.doc.get(key)
+            if isinstance(expected, dict):
+                if value is None or value <= expected["$gt"]:
+                    return None
+            elif value != expected:
+                return None
+        self.doc.update(update["$set"])
+        return dict(self.doc)
 
 
 def test_workflow_mode_cannot_bypass_approval_with_run_sql():
@@ -78,17 +99,20 @@ def test_plan_query_creates_and_saves_a_ready_workflow(monkeypatch):
     collection = MagicMock()
     decision = SimpleNamespace(status="ready", sql="SELECT 42")
     saved = {"status": "awaiting_confirmation", "workflow_id": "wf"}
+    started = datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc)
+    persisted = datetime(2026, 9, 2, 10, 1, tzinfo=timezone.utc)
+    clock = MagicMock(side_effect=[started, persisted])
+    monkeypatch.setattr(server, "utcnow", clock)
     monkeypatch.setattr(server, "workflow_collection", lambda: collection)
-    monkeypatch.setattr(
-        server,
-        "new_workflow",
-        lambda question, now: ({"_id": "wf", "question": question, "answers": {}}, "wf"),
+    new = MagicMock(
+        return_value=({"_id": "wf", "question": "상수 조회", "answers": {}}, "wf")
     )
+    monkeypatch.setattr(server, "new_workflow", new)
     planner = MagicMock(return_value=decision)
     monkeypatch.setattr(server, "plan_with_openai", planner)
     monkeypatch.setattr(server, "_fetch_schema_markdown", lambda: "schema")
-    validate = MagicMock(return_value="SELECT 42")
-    monkeypatch.setattr(server, "validate_planned_sql", validate)
+    validate = MagicMock(side_effect=AssertionError("plan_query duplicated SQL validation"))
+    monkeypatch.setattr(server, "validate_planned_sql", validate, raising=False)
     save = MagicMock(return_value=saved)
     monkeypatch.setattr(server, "save_decision", save)
     monkeypatch.setenv("ENERGY_MCP_APPROVAL_BASE_URL", "https://mcp/approval")
@@ -96,19 +120,27 @@ def test_plan_query_creates_and_saves_a_ready_workflow(monkeypatch):
     assert server.plan_query("상수 조회") == saved
 
     collection.insert_one.assert_called_once()
+    new.assert_called_once_with("상수 조회", started)
     planner.assert_called_once_with("상수 조회", {}, "schema")
-    validate.assert_called_once_with("SELECT 42")
-    assert decision.sql == "SELECT 42"
+    validate.assert_not_called()
     assert save.call_args.args[:4] == (
         collection,
         "wf",
         decision,
         "https://mcp/approval",
     )
+    assert save.call_args.args[4] == persisted
 
 
 def test_plan_query_merges_answers_into_live_clarifying_workflow(monkeypatch):
     collection = MagicMock()
+    collection.update_one.return_value.matched_count = 1
+    read_at = datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc)
+    updated_at = datetime(2026, 9, 2, 10, 1, tzinfo=timezone.utc)
+    persisted_at = datetime(2026, 9, 2, 10, 2, tzinfo=timezone.utc)
+    monkeypatch.setattr(server, "utcnow", MagicMock(
+        side_effect=[read_at, updated_at, persisted_at]
+    ))
     collection.find_one.return_value = {
         "_id": "wf",
         "question": "발전량",
@@ -119,7 +151,8 @@ def test_plan_query_merges_answers_into_live_clarifying_workflow(monkeypatch):
     planner = MagicMock(return_value=decision)
     monkeypatch.setattr(server, "plan_with_openai", planner)
     monkeypatch.setattr(server, "_fetch_schema_markdown", lambda: "schema")
-    monkeypatch.setattr(server, "save_decision", lambda *args: {"status": "needs_clarification"})
+    save = MagicMock(return_value={"status": "needs_clarification"})
+    monkeypatch.setattr(server, "save_decision", save)
     monkeypatch.setenv("ENERGY_MCP_APPROVAL_BASE_URL", "https://mcp/approval")
 
     result = server.plan_query("ignored", "wf", {"기간": "2025년"})
@@ -128,14 +161,46 @@ def test_plan_query_merges_answers_into_live_clarifying_workflow(monkeypatch):
     query = collection.find_one.call_args.args[0]
     assert query["_id"] == "wf"
     assert query["status"] == "clarifying"
-    assert "$gt" in query["expires_at"]
+    assert query["expires_at"] == {"$gt": read_at}
+    update_query = collection.update_one.call_args.args[0]
     collection.update_one.assert_called_once_with(
-        {"_id": "wf"},
+        update_query,
         {"$set": {"answers": {"대상": "태양광", "기간": "2025년"}}},
     )
+    assert update_query == {
+        "_id": "wf",
+        "status": "clarifying",
+        "expires_at": {"$gt": updated_at},
+    }
     planner.assert_called_once_with(
         "발전량", {"대상": "태양광", "기간": "2025년"}, "schema"
     )
+    assert save.call_args.args[4] == persisted_at
+
+
+def test_plan_query_stops_if_resumed_answers_lose_the_live_guard(monkeypatch):
+    collection = MagicMock()
+    collection.find_one.return_value = {
+        "_id": "wf",
+        "question": "발전량",
+        "answers": {"대상": "태양광"},
+    }
+    collection.update_one.return_value.matched_count = 0
+    monkeypatch.setattr(server, "workflow_collection", lambda: collection)
+    planner = MagicMock()
+    schema = MagicMock()
+    monkeypatch.setattr(server, "plan_with_openai", planner)
+    monkeypatch.setattr(server, "_fetch_schema_markdown", schema)
+
+    with pytest.raises(RuntimeError, match="만료됐거나 이미 다음 단계"):
+        server.plan_query("ignored", "wf", {"기간": "2025년"})
+
+    update_query = collection.update_one.call_args.args[0]
+    assert update_query["_id"] == "wf"
+    assert update_query["status"] == "clarifying"
+    assert "$gt" in update_query["expires_at"]
+    planner.assert_not_called()
+    schema.assert_not_called()
 
 
 def test_execute_query_runs_only_claimed_stored_sql(monkeypatch):
@@ -164,10 +229,19 @@ def test_execute_query_runs_only_claimed_stored_sql(monkeypatch):
     assert finish.call_args.args[:4] == (collection, "wf", execute.return_value, None)
 
 
-@pytest.mark.parametrize("state", ["awaiting_confirmation", "expired", "declined", "executing"])
-def test_execute_query_never_touches_postgres_without_a_claim(monkeypatch, state):
-    monkeypatch.setattr(server, "workflow_collection", lambda: MagicMock(name=state))
-    monkeypatch.setattr(server, "claim_workflow", lambda collection, workflow_id: None)
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"_id": "wf", "status": "awaiting_confirmation", "expires_at": FUTURE},
+        {"_id": "wf", "status": "confirmed", "expires_at": PAST},
+        {"_id": "wf", "status": "declined", "expires_at": FUTURE},
+        {"_id": "wf", "status": "executing", "expires_at": FUTURE},
+    ],
+    ids=["pre-approval", "expired", "declined", "already-claimed"],
+)
+def test_execute_query_never_touches_postgres_without_a_claim(monkeypatch, doc):
+    collection = ClaimCollection(doc)
+    monkeypatch.setattr(server, "workflow_collection", lambda: collection)
     execute = MagicMock()
     monkeypatch.setattr(server, "_execute", execute)
 
@@ -217,6 +291,7 @@ def test_workflow_health_fails_closed_without_leaking_details(monkeypatch, depen
     cursor = MagicMock()
     readonly = MagicMock()
     readonly.__enter__.return_value = cursor
+    monkeypatch.setenv(server.DSN_ENV, "postgresql://example.invalid/research")
     monkeypatch.setattr(server, "workflow_collection", lambda: collection)
     monkeypatch.setattr(server, "_readonly_cursor", lambda dsn, timeout: readonly)
     if dependency == "mongo":

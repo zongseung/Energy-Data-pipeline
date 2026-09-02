@@ -40,7 +40,6 @@ from energy_mcp.workflow import (
     new_workflow,
     save_decision,
     utcnow,
-    validate_planned_sql,
 )
 
 DSN_ENV = "ENERGY_MCP_DSN"
@@ -473,27 +472,29 @@ def plan_query(
         doc["answers"] = dict(answers or {})
         collection.insert_one(doc)
     else:
-        doc = collection.find_one({
+        live_query = {
             "_id": workflow_id,
             "status": "clarifying",
             "expires_at": {"$gt": now},
-        })
+        }
+        doc = collection.find_one(live_query)
         if doc is None:
             raise RuntimeError("구체화할 workflow가 없거나 만료됐습니다.")
         merged = {**doc.get("answers", {}), **(answers or {})}
-        collection.update_one({"_id": workflow_id}, {"$set": {"answers": merged}})
+        update_query = {**live_query, "expires_at": {"$gt": utcnow()}}
+        changed = collection.update_one(update_query, {"$set": {"answers": merged}})
+        if changed.matched_count != 1:
+            raise RuntimeError("workflow가 만료됐거나 이미 다음 단계로 진행됐습니다.")
         doc["answers"] = merged
     decision = plan_with_openai(
         doc["question"], doc.get("answers", {}), _fetch_schema_markdown()
     )
-    if decision.status == "ready":
-        decision.sql = validate_planned_sql(decision.sql)
     return save_decision(
         collection,
         workflow_id,
         decision,
         os.environ["ENERGY_MCP_APPROVAL_BASE_URL"],
-        now,
+        utcnow(),
     )
 
 
