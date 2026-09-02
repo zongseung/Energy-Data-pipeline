@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.28,<2",
+    "openai>=1.100,<3",
     "psycopg2-binary>=2.9",
+    "pymongo>=4.10,<5",
 ]
 
 [project.scripts]
