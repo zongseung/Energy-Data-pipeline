@@ -217,6 +217,19 @@ def test_connection_failure_does_not_leak_traceback_object(monkeypatch):
     assert "Traceback" not in message
 
 
+def test_main_runs_the_selected_mode(monkeypatch):
+    selected = MagicMock()
+    choose = MagicMock(return_value=selected)
+    monkeypatch.setattr(server, "server_for_mode", choose)
+    monkeypatch.setenv("ENERGY_MCP_MODE", "workflow")
+    monkeypatch.setenv("ENERGY_MCP_TRANSPORT", "stdio")
+
+    server.main()
+
+    choose.assert_called_once_with("workflow")
+    selected.run.assert_called_once_with(transport="stdio")
+
+
 # ---------------------------------------------------------------------------
 # 스키마 리소스 마크다운 렌더링 (DB 없이 — 행 튜플만 넣어본다)
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import csv
 import datetime
+import functools
 import os
 import time
 import uuid
@@ -26,9 +27,21 @@ from typing import Any
 
 import psycopg2
 from mcp.server.fastmcp import FastMCP
+from pymongo import MongoClient
+from starlette.responses import PlainTextResponse
 
+from energy_mcp.approval import register_approval_routes
 from energy_mcp.hints import hint_for
-from energy_mcp.workflow import _reject_multi_statement
+from energy_mcp.planner import plan_with_openai
+from energy_mcp.workflow import (
+    _reject_multi_statement,
+    claim_workflow,
+    finish_workflow,
+    new_workflow,
+    save_decision,
+    utcnow,
+    validate_planned_sql,
+)
 
 DSN_ENV = "ENERGY_MCP_DSN"
 TIMEOUT_ENV = "ENERGY_MCP_STATEMENT_TIMEOUT_S"
@@ -82,7 +95,40 @@ KNOWN_PITFALLS_MD = """\
 
 RESOURCE_URI = "energy://schema"
 
-mcp = FastMCP("energy-mcp")
+WORKFLOW_INSTRUCTIONS = """각 HTTP 요청은 무상태다. 모호한 질문은 plan_query가 반환한 질문으로 구체화한다.
+awaiting_confirmation이면 조건, SQL, 승인 링크를 보여주고 사용자가 승인했다고 말할 때까지 execute_query를 호출하지 않는다.
+실행 결과에는 확정 조건과 실제 SQL을 표시한다.
+legacy run_sql은 이 서버에 없다.
+"""
+
+legacy_mcp = FastMCP("energy-mcp-legacy")
+workflow_mcp = FastMCP(
+    "energy-mcp",
+    instructions=WORKFLOW_INSTRUCTIONS,
+    stateless_http=True,
+)
+mcp = legacy_mcp  # 기존 import 호환
+
+
+def server_for_mode(mode: str) -> FastMCP:
+    if mode == "legacy":
+        return legacy_mcp
+    if mode == "workflow":
+        return workflow_mcp
+    raise RuntimeError("ENERGY_MCP_MODE는 legacy 또는 workflow여야 합니다.")
+
+
+@functools.lru_cache(maxsize=1)
+def workflow_collection():
+    uri = os.environ.get("ENERGY_MCP_MONGO_URI")
+    if not uri:
+        raise RuntimeError("ENERGY_MCP_MONGO_URI가 설정되지 않았습니다.")
+    collection = MongoClient(uri).get_default_database()["query_workflows"]
+    collection.create_index("expires_at", expireAfterSeconds=0)
+    return collection
+
+
+register_approval_routes(workflow_mcp, workflow_collection)
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +333,7 @@ def _execute(query: str) -> dict[str, Any]:
         return result
 
 
-@mcp.tool()
+@legacy_mcp.tool()
 def run_sql(query: str) -> dict[str, Any]:
     """읽기전용 SQL을 `research` 스키마에 대해 실행한다.
 
@@ -414,6 +460,63 @@ def run_sql(query: str) -> dict[str, Any]:
     return _execute(query)
 
 
+@workflow_mcp.tool()
+def plan_query(
+    question: str,
+    workflow_id: str | None = None,
+    answers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    collection = workflow_collection()
+    now = utcnow()
+    if workflow_id is None:
+        doc, workflow_id = new_workflow(question, now)
+        doc["answers"] = dict(answers or {})
+        collection.insert_one(doc)
+    else:
+        doc = collection.find_one({
+            "_id": workflow_id,
+            "status": "clarifying",
+            "expires_at": {"$gt": now},
+        })
+        if doc is None:
+            raise RuntimeError("구체화할 workflow가 없거나 만료됐습니다.")
+        merged = {**doc.get("answers", {}), **(answers or {})}
+        collection.update_one({"_id": workflow_id}, {"$set": {"answers": merged}})
+        doc["answers"] = merged
+    decision = plan_with_openai(
+        doc["question"], doc.get("answers", {}), _fetch_schema_markdown()
+    )
+    if decision.status == "ready":
+        decision.sql = validate_planned_sql(decision.sql)
+    return save_decision(
+        collection,
+        workflow_id,
+        decision,
+        os.environ["ENERGY_MCP_APPROVAL_BASE_URL"],
+        now,
+    )
+
+
+@workflow_mcp.tool()
+def execute_query(workflow_id: str) -> dict[str, Any]:
+    collection = workflow_collection()
+    stored = claim_workflow(collection, workflow_id)
+    if stored is None:
+        raise RuntimeError("승인됐고 실행 가능한 workflow가 아닙니다.")
+    try:
+        result = _execute(stored["sql"])
+    except Exception as exc:
+        finish_workflow(collection, workflow_id, None, type(exc).__name__, utcnow())
+        raise
+    finish_workflow(collection, workflow_id, result, None, utcnow())
+    return {
+        **result,
+        "request_summary": stored["summary"],
+        "executed_sql": stored["sql"],
+        "workflow_id": workflow_id,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 스키마 리소스
 # ---------------------------------------------------------------------------
@@ -476,7 +579,7 @@ def _render_schema_markdown(table_rows: list[tuple]) -> str:
     return "\n".join(lines)
 
 
-@mcp.resource(RESOURCE_URI)
+@legacy_mcp.resource(RESOURCE_URI)
 def schema_dictionary() -> str:
     """`research` 스키마의 뷰·컬럼·COMMENT를 DB에서 직접 읽어 마크다운으로 낸다.
 
@@ -486,22 +589,35 @@ def schema_dictionary() -> str:
     return _fetch_schema_markdown()
 
 
+@workflow_mcp.custom_route("/health", methods=["GET"])
+async def workflow_health(request):
+    try:
+        collection = workflow_collection()
+        collection.database.client.admin.command("ping")
+        with _readonly_cursor(_require_dsn(), _env_int(TIMEOUT_ENV, DEFAULT_TIMEOUT_S)) as cur:
+            cur.execute("SELECT 1")
+    except Exception:
+        return PlainTextResponse("unavailable", status_code=503)
+    return PlainTextResponse("ok", status_code=200)
+
+
 def main() -> None:
     # stdio(기본) 외에 streamable-http 를 지원한다 — LibreChat 처럼 별도
     # 컨테이너에서 접속하는 클라이언트용. (mcp SDK 1.29 는 FASTMCP_* 환경변수를
     # 읽지 않아 settings 에 직접 넣는다. 기본 바인드는 127.0.0.1:8000)
     transport = os.environ.get("ENERGY_MCP_TRANSPORT", "stdio")
+    selected_mcp = server_for_mode(os.environ.get("ENERGY_MCP_MODE", "legacy"))
     if transport != "stdio":
         from mcp.server.transport_security import TransportSecuritySettings
 
-        mcp.settings.host = os.environ.get("ENERGY_MCP_HOST", "127.0.0.1")
-        mcp.settings.port = int(os.environ.get("ENERGY_MCP_PORT", "8000"))
+        selected_mcp.settings.host = os.environ.get("ENERGY_MCP_HOST", "127.0.0.1")
+        selected_mcp.settings.port = int(os.environ.get("ENERGY_MCP_PORT", "8000"))
         # 기본 DNS rebinding 보호는 Host 가 localhost 가 아니면 421 을 준다.
         # 이 포트는 도커 내부망 전용(호스트 미공개)이라 보호가 불필요하다.
-        mcp.settings.transport_security = TransportSecuritySettings(
+        selected_mcp.settings.transport_security = TransportSecuritySettings(
             enable_dns_rebinding_protection=False
         )
-    mcp.run(transport=transport)
+    selected_mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
