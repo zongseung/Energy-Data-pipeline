@@ -77,8 +77,9 @@ v0.8.7에는 없다. v0.8.8-rc1 또는 미출시 코드를 정식 서비스의 �
 - `workflow_id: str`
 
 호출자가 SQL이나 승인 값을 전달할 수 없다. 서버는 MongoDB에 저장된 workflow가
-같은 주체의 `confirmed` 상태이고 만료되지 않았을 때만 저장된 SQL을 한 번 점유해
-기존 `_execute()`로 실행한다.
+`confirmed` 상태이고 만료되지 않았을 때만 저장된 SQL을 한 번 점유해 기존
+`_execute()`로 실행한다. IP 신원 결합 전에는 256-bit 임의 workflow ID가 bearer
+식별자다. 후속 IP 설계가 적용되면 같은 주체인지도 함께 검증한다.
 
 기존 `run_sql(query)`는 로컬 stdio·관리자 호환을 위해 코드에 남기되 정식 HTTP
 endpoint에서는 광고하지 않는다. 정식 endpoint에 같이 노출하면 승인 절차를 우회할
@@ -117,7 +118,8 @@ FastMCP 인스턴스 중 하나만 실행한다. `workflow` 모드는 `plan_quer
 - `sql`, `sql_sha256`: 실행 예정 SQL과 무결성 해시
 - `status`: `clarifying`, `awaiting_confirmation`, `confirmed`, `executing`,
   `done`, `declined`, `failed`, `expired`
-- `conversation_id`, `principal_id`: 가능한 클라이언트에서 전달한 소유 정보
+- `conversation_id`, `principal_id`: 이번 범위에서는 `null`; 후속 IP 설계에서
+  신뢰된 프록시가 채운다.
 - `created_at`, `expires_at`, `confirmed_at`, `executed_at`
 - `approval_token_hash`, `approval_csrf_hash`: 원문 토큰은 저장하지 않는다.
 - `error_code`, `row_count`, `duration_ms`: 결과 데이터가 아닌 실행 감사 정보
