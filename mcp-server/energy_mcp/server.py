@@ -96,6 +96,23 @@ KNOWN_PITFALLS_MD = """\
    한해 보정을 적용하지 않았다 — 실제 값과 ±1시간 어긋날 수 있다.
 """
 
+FORECAST_FUNCTIONS_MD = """\
+## NAS 기상예보 함수
+
+- `research.forecast(text, text, text, text, text)` — 예보종, **읍면동**, 요소,
+  시작 YYYYMM, 종료 YYYYMM 순서로 NAS CSV를 읽는다.
+- `research.forecast_regions(text, text, text)` — 예보종, 시도, 시군구 순서로
+  실제 읍면동 목록을 확인한다.
+- `research.forecast_elements(text)` — 예보종의 요소 목록을 확인한다.
+
+사용자가 `종로구` 같은 시군구로 자연스럽게 질문하는 것은 정상이다.
+시군구를 `dong` 인자로 넣지 마라. **데이터 존재 여부**만 물으면
+`research.forecast_regions('단기예보', '서울특별시', '종로구')`로 확인하고,
+읍면동이 반환되면 데이터가 있다고 답한다. 실제 값을 요청했는데 시군구만 주어졌으면
+전체 읍면동인지 특정 읍면동인지 질문한다. 잘못된 `forecast()` 호출이 실패했다는
+이유만으로 데이터가 없다고 결론 내리지 마라.
+"""
+
 RESOURCE_URI = "energy://schema"
 
 WORKFLOW_INSTRUCTIONS = """각 HTTP 요청은 무상태다. 모호한 질문은 plan_query가 반환한 질문으로 구체화한다.
@@ -462,6 +479,12 @@ def run_sql(query: str) -> dict[str, Any]:
       - 요소 이름을 모르면 `SELECT * FROM research.forecast_elements('단기예보')`,
         지역 이름을 모르면 `SELECT * FROM research.forecast_regions('단기예보','서울특별시')`
         를 먼저 불러라. 요소·읍면동 이름을 지어내면 에러가 난다.
+      - 사용자가 `종로구` 같은 시군구로 묻는 것은 정상이다.
+        시군구를 `dong` 인자로 넣지 마라. **데이터 존재 여부**만 물으면
+        `research.forecast_regions('단기예보','서울특별시','종로구')`로 확인하고,
+        읍면동이 반환되면 데이터가 있다고 답하라. 실제 값을 요청했는데 시군구만
+        주어졌으면 전체 읍면동인지 특정 읍면동인지 질문하라. 잘못된 `forecast()`
+        호출이 실패했다는 이유만으로 데이터가 없다고 결론 내리지 마라.
     - 상세 컬럼·함정은 `energy://schema` 리소스에 있다(읽을 수 있는 클라이언트만).
     - 조회 결과는 **마크다운 표**로 정리해 보여줘라.
     - 응답에 `download_url`이 있으면 반드시 마크다운 링크로 안내하라 —
@@ -623,7 +646,10 @@ def _render_schema_markdown(table_rows: list[tuple]) -> str:
         )
         section["columns"].append((column_name, data_type, column_comment))
 
-    lines = ["# research 스키마 사전", "", KNOWN_PITFALLS_MD, "## 뷰 목록", ""]
+    lines = [
+        "# research 스키마 사전", "", KNOWN_PITFALLS_MD,
+        FORECAST_FUNCTIONS_MD, "## 뷰 목록", "",
+    ]
     for table_name in sorted(sections):
         section = sections[table_name]
         lines.append(f"### research.{table_name}")

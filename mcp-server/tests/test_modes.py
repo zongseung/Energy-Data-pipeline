@@ -94,6 +94,15 @@ def test_legacy_mode_keeps_run_sql_and_schema_resource_only():
     assert resource_uris(legacy) == {server.RESOURCE_URI}
 
 
+def test_legacy_tool_explains_forecast_sigungu_discovery():
+    description = tools_by_name(server.legacy_mcp)["run_sql"].description
+
+    assert "forecast_regions" in description
+    assert "시군구를 `dong` 인자로 넣지 마라" in description
+    assert "데이터 존재 여부" in description
+    assert "전체 읍면동인지 특정 읍면동인지" in description
+
+
 def test_workflow_mode_is_stateless_and_explains_the_confirmation_gate():
     workflow = server.server_for_mode("workflow")
 

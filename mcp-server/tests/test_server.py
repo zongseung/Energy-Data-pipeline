@@ -252,6 +252,17 @@ def test_schema_markdown_includes_known_pitfalls_without_db():
     assert "구간시작" in md
 
 
+def test_schema_markdown_explains_forecast_sigungu_discovery():
+    """함수 계약이 빠지면 planner가 종로구를 dong으로 넣고 데이터 없음으로 오판한다."""
+    md = server._render_schema_markdown([])
+
+    assert "research.forecast(text, text, text, text, text)" in md
+    assert "research.forecast_regions(text, text, text)" in md
+    assert "시군구를 `dong` 인자로 넣지 마라" in md
+    assert "존재 여부" in md
+    assert "전체 읍면동인지 특정 읍면동인지" in md
+
+
 def test_수명_지난_익스포트만_지운다(tmp_path) -> None:
     """모든 쿼리가 CSV 를 남기는데 정리 로직이 없어 볼륨이 무한 증식했다."""
     import os
