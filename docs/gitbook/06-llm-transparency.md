@@ -104,12 +104,12 @@ MongoDB TTL 인덱스가 걸려 있지만 TTL 삭제는 백그라운드에서 �
 
 OpenAI는 API 입력과 출력을 기본적으로 모델 학습에 사용하지 않는다고 안내합니다.
 다만 기본 abuse-monitoring 로그에는 프롬프트와 응답 일부가 포함될 수 있고 최대
-30일 보존될 수 있습니다. 정식 SQL 계획기가 사용하는 Responses API도 이 코드에서
-`store=false`를 명시하지 않으므로 제공자의 기본 application-state 보존 정책을
-확인해야 합니다. 이 저장소 설정만으로는 **Zero Data Retention** 적용 여부를 증명할
-수 없으므로 기본 정책을 전제로 사용해야 합니다.
+30일 보존될 수 있습니다. 정식 SQL 계획기의 Responses API 호출에는 `store=false`를
+명시해 별도 application state 저장을 비활성화합니다. 이 저장소 설정만으로는
+**Zero Data Retention** 적용 여부를 증명할 수 없으므로 abuse-monitoring에는 기본
+정책을 전제로 사용해야 합니다.
 
-- [OpenAI API 데이터 제어](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint)
+- [OpenAI API 데이터 제어](https://developers.openai.com/api/docs/guides/your-data)
 - [OpenAI 비즈니스 데이터 보호](https://openai.com/business-data/)
 - [LibreChat의 MongoDB 사용 설명](https://www.librechat.ai/docs/user_guides/mongodb)
 - [LibreChat의 선택형 장기 기억 설명](https://www.librechat.ai/docs/features/memory)
@@ -129,7 +129,7 @@ LibreChat JWT 및 암호화키를 Docker secret 파일로 주입합니다. 이 �
 | 정식 MCP workflow | 실행 가능 시간 30분. 이후 사용 불가, 물리 삭제는 MongoDB TTL의 비동기 처리 |
 | CSV 내보내기 | 24시간 경과 파일을 다음 내보내기 시 정리 |
 | PostgreSQL 감사 로그 | 별도 만료·로테이션 정책 없음 |
-| OpenAI API | 기본 abuse-monitoring 로그 및 Responses API application state 최대 30일. 별도 데이터 제어 적용 여부는 저장소만으로 확인 불가 |
+| OpenAI API | 기본 abuse-monitoring 로그 최대 30일. SQL 계획기 Responses API는 `store=false`; 별도 데이터 제어 적용 여부는 저장소만으로 확인 불가 |
 
 민감정보나 외부 제공이 금지된 분석은 자연어 서비스에 입력하지 말고 직접 SQL 경로를
 사용하세요. 채팅 답변을 논문·보고서에 사용하기 전에는 표시된 실제 SQL과 원본
