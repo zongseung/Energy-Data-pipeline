@@ -9,6 +9,7 @@
 
 * [직접 SQL로 조회](02-direct-sql.md)
 * [LLM·MCP로 조회](03-llm-mcp.md)
+* [LLM·MCP 데이터 처리와 투명성](06-llm-transparency.md)
 
 ## 데이터 이해
 
