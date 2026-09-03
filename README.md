@@ -1,7 +1,12 @@
 # Energy-Data-pipeline
 
-대한민국 발전·전력 데이터를 수집·전처리·적재하는 ETL 파이프라인입니다. 조회는 직접 SQL 과 LLM 데모(LibreChat+MCP)로 제공합니다.
+대한민국 발전·전력 데이터를 수집·전처리·적재하는 ETL 파이프라인입니다. 조회는 직접 SQL과 LibreChat+MCP 자연어 서비스로 제공합니다.
 Prefect 2로 오케스트레이션하고 PostgreSQL에 저장합니다.
+
+정식 LLM·MCP 승인 서비스는 공용 읽기전용 role `demo_ro`로 사용자가 확인한 SQL만
+한 번 실행하도록 구현돼 있습니다. 다만 현재 호스팅 서비스는 아직 레거시 `run_sql`
+모드이므로 SQL이 승인 화면 없이 즉시 실행됩니다. 실제 운영 모드는 GitBook의
+`LLM·MCP 데이터 처리와 투명성` 페이지에서 확인합니다.
 
 **수집 도메인**
 - **태양광(PV)** — 남부발전(API), 남동발전(koenergy.kr 스크래핑)

@@ -1,17 +1,6 @@
 # LLM 데모 스택 — LibreChat + OpenAI gpt-4o-mini + energy-mcp.
-# (로컬 Qwen 스택은 2026-08-21 제거 — GPU/CUDA 복구 시 git 역사에서 복원)
-#
-#   docker compose -f docker/llm-demo/compose.yml up -d --build
-#   브라우저: http://<서버IP>:8099  (첫 접속 시 계정 등록 후 로그인)
-#
 # 외부 입구는 nginx 하나다: 8099(UI) / 8098(CSV). 내부 서비스는 포트 미공개.
-# DB 접속은 PgBouncer(session 풀링)를 거친다 — 동시 접속자가 늘어도 pv-db
-# 커넥션은 DEFAULT_POOL_SIZE 로 캡핑된다.
-#
-# OPENAI_API_KEY 는 같은 디렉토리의 librechat.env 에 넣는다(git 미추적).
-# user_provided 로 두면 각 사용자가 UI 설정에서 자기 키를 입력해야 한다.
-#
-# 주의: 질문·DB 조회 결과가 OpenAI 로 전송된다 — 폐쇄망 전제가 깨지는 지점.
+# 질문·DB 조회 결과가 OpenAI 로 전송된다 — 폐쇄망 전제가 깨지는 지점.
 services:
   nginx:
     image: nginx:alpine
@@ -19,11 +8,13 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
-      - "8099:8099"  # 채팅 UI
-      - "8098:8098"  # CSV 다운로드
+      - "8099:8099"
+      - "8098:8098"
     depends_on:
-      - librechat
-      - energy-mcp
+      librechat:
+        condition: service_healthy
+      energy-mcp:
+        condition: service_healthy
     networks:
       - pvnet
     restart: unless-stopped
@@ -31,19 +22,21 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer
     container_name: llm-demo-pgbouncer
+    entrypoint: ["/usr/local/bin/load-secrets", "pgbouncer", "/entrypoint.sh"]
+    command: ["/usr/bin/pgbouncer", "/etc/pgbouncer/pgbouncer.ini"]
     environment:
       DB_HOST: pv-db
       DB_PORT: "5432"
-      DB_USER: pv
-      DB_PASSWORD: pv
+      DB_USER: demo_ro
       DB_NAME: pv
-      # energy-mcp 가 세션 설정(read-only, statement_timeout)을 쓰므로
-      # transaction 풀링은 불가 — session 모드로 커넥션 재사용·캡핑만 얻는다.
       POOL_MODE: session
       DEFAULT_POOL_SIZE: "20"
       MAX_CLIENT_CONN: "200"
-      # 내부 도커망 전용이라 평문 인증 (pv-db 의 scram 과의 불일치 회피)
       AUTH_TYPE: plain
+    volumes:
+      - ./load-secrets.sh:/usr/local/bin/load-secrets:ro
+    secrets:
+      - postgres_readonly_password
     networks:
       - pvnet
     restart: unless-stopped
@@ -53,22 +46,34 @@ services:
       context: ../..
       dockerfile: docker/llm-demo/mcp.Dockerfile
     container_name: energy-mcp
+    entrypoint: ["/usr/local/bin/load-secrets", "energy-mcp"]
+    command: ["sh", "-c", "mkdir -p /exports && python /serve_exports.py & exec energy-mcp"]
     environment:
-      ENERGY_MCP_DSN: postgresql://pv:pv@pgbouncer:5432/pv
+      ENERGY_MCP_MODE: workflow
       ENERGY_MCP_TRANSPORT: streamable-http
       ENERGY_MCP_HOST: 0.0.0.0
-      # 채팅 미리보기 행 수 — 컨텍스트 절약. 초과분은 CSV 다운로드로 제공된다.
+      ENERGY_MCP_APPROVAL_BASE_URL: ${LLM_APPROVAL_PUBLIC_ORIGIN:?LLM_APPROVAL_PUBLIC_ORIGIN을 설정하세요}/approval
+      ENERGY_MCP_PLANNER_MODEL: gpt-4o-mini
       ENERGY_MCP_ROW_LIMIT: "10"
       ENERGY_MCP_EXPORT_DIR: /exports
-      # 2026년 전체 태양광이 ~20만 행이라 기본 상한(10만)으로는 잘린다
       ENERGY_MCP_EXPORT_ROW_LIMIT: "300000"
-      # 다운로드 링크는 접속하는 PC 기준 주소여야 한다. 기본값은 LAN IP,
-      # Tailscale 로 보는 사람에게는 DEMO_HOST=100.127.20.105 로 띄울 것.
-      ENERGY_MCP_EXPORT_URL: http://${DEMO_HOST:-192.9.65.58}:8098
+      ENERGY_MCP_EXPORT_URL: ${LLM_EXPORT_PUBLIC_ORIGIN:?LLM_EXPORT_PUBLIC_ORIGIN을 설정하세요}
     volumes:
       - exports:/exports
+    secrets:
+      - openai_api_key
+      - energy_mcp_dsn
+      - energy_mcp_mongo_password
     depends_on:
-      - pgbouncer
+      mongodb:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - pvnet
     restart: unless-stopped
@@ -76,8 +81,22 @@ services:
   mongodb:
     image: mongo:7
     container_name: librechat-mongo
+    # mongod --auth keeps every non-local connection behind Mongo authentication.
+    # 기존 mongo-data는 전체 스택보다 먼저 ./bootstrap-mongo.sh를 한 번 실행한다.
+    command: ["mongod", "--auth", "--bind_ip_all"]
     volumes:
       - mongo-data:/data/db
+      - ./init-mongo-users.js:/docker-entrypoint-initdb.d/init-mongo-users.js:ro
+      - ./mongo-healthcheck.js:/usr/local/share/mongo-healthcheck.js:ro
+    secrets:
+      - mongo_root_password
+      - librechat_mongo_password
+      - energy_mcp_mongo_password
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--file", "/usr/local/share/mongo-healthcheck.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - pvnet
     restart: unless-stopped
@@ -85,19 +104,34 @@ services:
   librechat:
     image: ghcr.io/danny-avila/librechat:v0.8.7
     container_name: librechat
-    depends_on:
-      - mongodb
-      - energy-mcp
-    env_file: librechat.env
+    entrypoint: ["/usr/local/bin/load-secrets", "librechat"]
+    command: ["npm", "run", "backend"]
     environment:
       HOST: 0.0.0.0
-      MONGO_URI: mongodb://mongodb:27017/LibreChat
       ENDPOINTS: openAI,agents
       OPENAI_MODELS: gpt-4o-mini
-      SEARCH: "false"             # Meilisearch 미기동 — 데모에 검색 불필요
-      ALLOW_REGISTRATION: "true"  # 시연 배포 후 false 로 잠글 것
+      SEARCH: "false"
+      ALLOW_REGISTRATION: "false"
     volumes:
+      - ./load-secrets.sh:/usr/local/bin/load-secrets:ro
       - ./librechat.yaml:/app/librechat.yaml:ro
+    secrets:
+      - openai_api_key
+      - jwt_secret
+      - jwt_refresh_secret
+      - creds_key
+      - creds_iv
+      - librechat_mongo_password
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      energy-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
     networks:
       - pvnet
     restart: unless-stopped
@@ -110,3 +144,25 @@ networks:
   pvnet:
     external: true
     name: pv-pipeline-network
+
+secrets:
+  openai_api_key:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/openai_api_key"
+  jwt_secret:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/jwt_secret"
+  jwt_refresh_secret:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/jwt_refresh_secret"
+  creds_key:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/creds_key"
+  creds_iv:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/creds_iv"
+  postgres_readonly_password:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/postgres_readonly_password"
+  energy_mcp_dsn:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/energy_mcp_dsn"
+  mongo_root_password:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/mongo_root_password"
+  librechat_mongo_password:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/librechat_mongo_password"
+  energy_mcp_mongo_password:
+    file: "${LLM_SECRET_DIR:?LLM_SECRET_DIR를 설정하세요}/energy_mcp_mongo_password"

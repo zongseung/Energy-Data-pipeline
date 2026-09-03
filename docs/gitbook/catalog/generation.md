@@ -2,6 +2,27 @@
 
 발전소 마스터(`research.plants`)와 시간별 발전량(`research.generation`). 이 프로젝트에서 함정이 가장 많은 두 뷰입니다 — 단위·시간 규약·품질 등급을 모르고 쓰면 답이 조용히 틀립니다.
 
+## 세 겹으로 쌓입니다
+
+```mermaid
+flowchart TB
+    G["generation<br/>수집 원본 · 시간 미보정"]
+    V["v_generation_hourly<br/>KST 구간시작으로 보정"]
+    P["research.plants<br/>발전소 96기 · 품질 등급 · 좌표"]
+    R["research.generation<br/>연구원이 조회하는 뷰"]
+
+    G -->|시간 보정은 여기 한 곳뿐| V
+    V --> R
+    P -->|plant_id 조인 + 품질 필터| R
+```
+
+연구원이 보는 `research.generation`은 두 겹을 이미 거친 결과입니다.
+
+1. **시간 보정** — 원본은 수집처 표기 그대로 들어옵니다. 이를 KST 구간시작으로 옮기는 곳은 `v_generation_hourly` 한 곳뿐입니다. 조회 결과의 시각을 다시 옮기지 마세요.
+2. **품질 필터** — `research.plants`를 조인하면서 `전면무효` 2기와 `시간별무효` 10기의 `hourly_valid_from` 이전 구간을 이미 제외합니다. 그래서 `data_quality`로 한 번 더 거르면 멀쩡한 데이터가 사라집니다.
+
+발전소 **개수**를 세는 질문은 `research.plants`(96기 전부), **발전량**은 `research.generation`(걸러진 것)을 봐야 하는 이유가 여기 있습니다.
+
 ***
 
 ### research.plants — 발전소 마스터 + 데이터 품질 등급
@@ -25,6 +46,8 @@
 | `region`                              | `mainland`/`jeju`                                 | 위 표 참고                                                                |
 | `capacity_mw`                         | 정격용량(MW)                                          | 아래 "capacity\_mw 보유율" 참고. 공시값·추정값이 섞여 있어 정밀도 보장 안 함                   |
 | `lat`, `lon`                          | 위도·경도                                             | 아래 "좌표" 항목 참고                                                         |
+| `sido`, `sigungu`                     | 시도·시군구                                            | 좌표를 역지오코딩한 값(89기). 좌표가 부지 단위라 같은 부지 호기는 같은 값입니다. 2026-07 행정구역 개편 반영 |
+| `address`                             | 지번·도로명 주소                                         | **43기만 있습니다.** 발전사 공개 소재지에서 온 값이라 개편 전 명칭일 수 있습니다 — 시도는 `sido`가 최신입니다 |
 | `is_aggregate`                        | 합계 계열 여부                                          | 아래 "함정 — is\_aggregate" 참고                                            |
 | `data_quality`                        | `정상`/`시간별무효`/`전면무효`/`미검증`                         | 아래 "함정 — data\_quality" 참고                                            |
 | `hourly_valid_from`                   | 시간별 값을 신뢰할 수 있는 시작일 (NULL이면 근거 없음)                | 아래 "함정 — hourly\_valid\_from" 참고                                      |

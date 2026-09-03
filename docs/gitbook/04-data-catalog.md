@@ -12,7 +12,7 @@ WHERE table_schema='research' AND table_name='generation';
 ```
 {% endhint %}
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>발전소와 발전량</strong></td><td>발전소 96기와 시간별 발전량. 함정이 가장 많습니다</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation</a></td></tr><tr><td><strong>SMP 가격</strong></td><td>하루전시장·제주 실시간·가중평균</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp</a></td></tr><tr><td><strong>기상 관측과 예보</strong></td><td>ASOS 실측 95개 지점과 동네예보 3종</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather</a></td></tr><tr><td><strong>전력수요와 수급</strong></td><td>전국·제주 계통과 지역난방 열수요</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand</a></td></tr><tr><td><strong>국제유가</strong></td><td>브렌트·WTI 시간별 OHLCV</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil</a></td></tr><tr><td><strong>송배전망</strong></td><td>변전소·송전선로 좌표와 한전 접속 여유용량</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>발전소와 발전량</strong></td><td>발전소 96기와 시간별 발전량. 함정이 가장 많습니다</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation</a></td></tr><tr><td><strong>SMP 가격</strong></td><td>하루전시장·제주 실시간·가중평균</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp</a></td></tr><tr><td><strong>기상 관측</strong></td><td>ASOS 실측 95개 지점과 AWS 일자료 (KST)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather</a></td></tr><tr><td><strong>기상 예보</strong></td><td>기상청 동네예보 3종, NAS 직독 (UTC)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/forecast">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/forecast</a></td></tr><tr><td><strong>전력수요와 수급</strong></td><td>전국·제주 계통과 지역난방 열수요</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand</a></td></tr><tr><td><strong>국제유가</strong></td><td>브렌트·WTI 시간별 OHLCV</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil</a></td></tr><tr><td><strong>송배전망</strong></td><td>변전소·송전선로 좌표와 한전 접속 여유용량</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid</a></td></tr></tbody></table>
 
 ***
 
@@ -35,13 +35,20 @@ WHERE table_schema='research' AND table_name='generation';
 | `research.smp_realtime_jeju` | 제주 실시간시장 15분 SMP | 78,912  | 2024-03-01 \~ 2026-05-31 | **원천 공표 중단** |
 | `research.smp_weighted_avg`  | 가중평균 SMP (일/월/연) | 16,137  | —                        | 매일           |
 
-### 기상 관측과 예보
+### 기상 관측
 
 | 뷰·함수                    | 내용                   | 행수        | 기간                       | 갱신       |
 | ----------------------- | -------------------- | --------- | ------------------------ | -------- |
 | `research.weather_asos` | ASOS 시간별 관측 95개 지점   | 4,743,936 | 2019-01-01 \~ 2026-08-11 | 매일 09:00 |
-| `research.forecast()`   | 기상청 동네예보 3종 (NAS 직독) | 적재 없음     | 2023-01 \~ 2025-06       | 정적       |
 | `research.aws_obs_daily` | AWS·ASOS **일자료** 107지점 | 377,822   | 2015-01-01 \~ 2026-06-15 | 없음 (정적) |
+
+### 기상 예보
+
+| 이름 | 내용 | 행수 | 기간 | 갱신 |
+| --- | --- | --- | --- | --- |
+| `research.forecast()`   | 기상청 동네예보 3종 (NAS 직독) | 적재 없음     | 2023-01 \~ 2025-06       | 정적       |
+
+> **시각이 UTC입니다.** 위 관측(KST)과 기준이 다릅니다.
 
 ### 국제유가
 
@@ -55,7 +62,6 @@ WHERE table_schema='research' AND table_name='generation';
 | ------------------------------- | --------------- | --------- | ------------------------ | --------- |
 | `research.demand_5min`          | 전국 계통 수급 5분     | 1,324,181 | 2014-01-01 \~ 2026-08-13 | **10분마다** |
 | `research.jeju_supply_demand`   | 제주 계통 수급 5분     | 589,060   | 2021-01-01 \~ 2026-08-13 | **10분마다** |
-| `research.demand_weather_1h`    | 전국 수요 × 기상 시간별  | 6,112,742 | 2019-01-01 \~ 2026-08-11 | 매시        |
 | `research.heat_demand`          | 지역난방 열수요 19개 지사 | 499,301   | 2021-01-01 \~ 2023-12-31 | 없음 (완결)   |
 | `research.heat_demand_location` | 열수요 지사 위치       | 19        | —                        | 없음        |
 | `research.jeju_demand_hourly`   | 제주 시간별 수요       | 48,119    | 2021-01-01 \~ 2026-06-30 | 분기        |

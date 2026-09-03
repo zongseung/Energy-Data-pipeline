@@ -12,5 +12,26 @@ mcpServers:
   energy-db:
     type: streamable-http
     url: http://energy-mcp:8000/mcp
+    serverInstructions: true
     # 대량 CSV export 쿼리가 수십 초 걸릴 수 있다
     timeout: 120000
+
+# 연구원이 시간 규약·데이터 목록을 모르고 질문하면 엉뚱한 답을 받게 되므로,
+# 첫 로그인 때 이용 안내서(GitBook)를 모달로 먼저 띄운다.
+# customWelcome 은 한 줄만 쓴다 — 개행이 무시되고 길면 잘린다.
+interface:
+  customWelcome: "에너지 연구 데이터에 물어보세요 — 이용 안내서: https://eax-1.gitbook.io/energy-research-data/"
+  termsOfService:
+    externalUrl: https://eax-1.gitbook.io/energy-research-data/
+    openNewTab: true
+    modalAcceptance: true
+    modalTitle: 먼저 이용 안내서를 읽어주세요
+    modalContent: |
+      질문 전에 **데이터 이용 안내서**를 훑어보면 훨씬 정확한 답을 받을 수 있습니다.
+
+      - 어떤 데이터가 있는지 — 태양광·풍력·SMP·전력수요·기상·유가
+      - **시간 규약** — 모든 시각은 KST 구간시작 (09:00 값 = 09~10시 구간)
+      - **발전소 품질 등급** — 정상 / 시간별무효 / 전면무효 / 미검증
+      - 발전소 개수는 `plants`, 발전량은 `generation` 을 봐야 합니다
+
+      안내서: https://eax-1.gitbook.io/energy-research-data/

@@ -24,13 +24,13 @@ CREATE USER MAPPING FOR PUBLIC SERVER demand_fdw
 
 IMPORT FOREIGN SCHEMA research
     LIMIT TO (demand_5min, jeju_supply_demand, heat_demand,
-              heat_demand_location, demand_weather_1h, gen_mix_5min)
+              heat_demand_location, gen_mix_5min)
     FROM SERVER demand_fdw INTO research;
 
 -- 뷰 재생성 스크립트(pv_research.sql)의 GRANT 는 뷰에만 걸리므로 여기서도 한 번.
 GRANT SELECT ON research.demand_5min, research.jeju_supply_demand,
                research.heat_demand, research.heat_demand_location,
-               research.demand_weather_1h, research.gen_mix_5min TO research_ro;
+               research.gen_mix_5min TO research_ro;
 
 
 -- =============================================================================
@@ -88,14 +88,6 @@ COMMENT ON COLUMN research.heat_demand.heat_demand IS
 
 COMMENT ON FOREIGN TABLE research.heat_demand_location IS
     '열수요 지사 위치 19곳. name 이 research.heat_demand.branch 와 대응한다.';
-
-COMMENT ON FOREIGN TABLE research.demand_weather_1h IS
-    'demand_5min 시간평균 × ASOS 관측을 시각으로 조인한 파생 테이블. **지점 수(95~96개)만큼 같은 수요값이 반복되므로 수요만 필요하면 research.demand_5min 을 써라** — 안 그러면 전국 수요를 96배로 합산하게 된다. station_name = ''UNKNOWN'' 행은 제외할 것.';
-COMMENT ON COLUMN research.demand_weather_1h."timestamp" IS
-    '구간시작 KST. demand_avg 는 demand_5min 의 5분 라벨 기준 [H, H+1) 평균이라 버킷 경계는 확정적이지만, 5분 라벨 자체의 의미가 미확정이라 최대 5분 오차가 남을 수 있다. 기상 컬럼은 ASOS 라벨 규약을 따른다.';
-COMMENT ON COLUMN research.demand_weather_1h.demand_avg IS
-    '해당 1시간 구간 전국 수요(MW)의 5분값 평균.';
-
 
 COMMENT ON FOREIGN TABLE research.gen_mix_5min IS
     'KPX 실시간 발전원별 발전량 5분(계통기준 전국, MW). demand_5min 이 수요·예비력만 담아 발전원 구분이 없던 자리를 채운다. **태양광이 세 갈래다** — solar_market(전력시장 계량), solar_ppa·solar_btm(KPX 추정치). 원천이 당일치만 제공해 5분마다 수집하므로 수집 시작(2026-08-23) 이전 구간은 없다.';

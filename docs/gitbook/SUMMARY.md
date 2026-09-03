@@ -9,13 +9,15 @@
 
 * [직접 SQL로 조회](02-direct-sql.md)
 * [LLM·MCP로 조회](03-llm-mcp.md)
+* [LLM·MCP 데이터 처리와 투명성](06-llm-transparency.md)
 
 ## 데이터 이해
 
 * [데이터 카탈로그 · 스키마 사전](04-data-catalog.md)
   * [발전소와 발전량](catalog/generation.md)
   * [SMP 가격](catalog/smp.md)
-  * [기상 관측과 예보](catalog/weather.md)
+  * [기상 관측](catalog/weather.md)
+  * [기상 예보](catalog/forecast.md)
   * [전력수요와 수급](catalog/demand.md)
   * [국제유가](catalog/oil.md)
   * [송배전망](catalog/grid.md)

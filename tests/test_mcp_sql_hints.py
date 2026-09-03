@@ -38,5 +38,16 @@ def test_division_by_zero():
     assert "NULLIF" in hints.hint_for("division by zero")
 
 
+def test_forecast_sigungu_error_suggests_region_discovery():
+    hint = hints.hint_for(
+        "SQL 오류: 종로구 / 1시간기온 를 찾지 못했다. "
+        "읍면동과 요소 이름이 정확한지 확인하라."
+    )
+
+    assert "forecast_regions" in hint
+    assert "시군구" in hint
+    assert "dong 인자" in hint
+
+
 def test_unknown_error_returns_none():
     assert hints.hint_for("deadlock detected") is None
