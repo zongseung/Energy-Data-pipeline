@@ -46,16 +46,18 @@ services:
       context: ../..
       dockerfile: docker/llm-demo/mcp.Dockerfile
     container_name: energy-mcp
+    entrypoint: ["/usr/local/bin/load-secrets", "energy-mcp"]
+    command: ["sh", "-c", "mkdir -p /exports && python /serve_exports.py & exec energy-mcp"]
     environment:
       ENERGY_MCP_MODE: workflow
       ENERGY_MCP_TRANSPORT: streamable-http
       ENERGY_MCP_HOST: 0.0.0.0
-      ENERGY_MCP_APPROVAL_BASE_URL: ${LLM_PUBLIC_BASE_URL:?LLM_PUBLIC_BASE_URL을 설정하세요}/approval
+      ENERGY_MCP_APPROVAL_BASE_URL: ${LLM_APPROVAL_PUBLIC_ORIGIN:?LLM_APPROVAL_PUBLIC_ORIGIN을 설정하세요}/approval
       ENERGY_MCP_PLANNER_MODEL: gpt-4o-mini
       ENERGY_MCP_ROW_LIMIT: "10"
       ENERGY_MCP_EXPORT_DIR: /exports
       ENERGY_MCP_EXPORT_ROW_LIMIT: "300000"
-      ENERGY_MCP_EXPORT_URL: ${LLM_PUBLIC_BASE_URL:?LLM_PUBLIC_BASE_URL을 설정하세요}:8098
+      ENERGY_MCP_EXPORT_URL: ${LLM_EXPORT_PUBLIC_ORIGIN:?LLM_EXPORT_PUBLIC_ORIGIN을 설정하세요}
     volumes:
       - exports:/exports
     secrets:

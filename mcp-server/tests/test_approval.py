@@ -55,6 +55,13 @@ class Collection:
 
     def _matches(self, query):
         for key, expected in query.items():
+            if key == "$expr":
+                left, right = expected["$eq"]
+                if self.doc.get(left.removeprefix("$")) != self.doc.get(
+                    right.removeprefix("$")
+                ):
+                    return False
+                continue
             value = self.doc.get(key)
             if isinstance(expected, dict):
                 if not all(value > limit for op, limit in expected.items() if op == "$gt"):
@@ -95,6 +102,7 @@ def test_get_escapes_values_and_replaces_csrf_nonce():
         "status": "awaiting_confirmation",
         "summary": "<script>alert(1)</script>",
         "sql": "SELECT '<tag>'",
+        "sql_sha256": _hash("SELECT '<tag>'"),
         "expires_at": NOW + timedelta(minutes=10),
         "approval_token_hash": _hash("secret"),
     }
@@ -109,7 +117,28 @@ def test_get_escapes_values_and_replaces_csrf_nonce():
     query, update = collection.update_one.call_args.args
     assert query["status"] == "awaiting_confirmation"
     assert update["$set"]["approval_csrf_hash"]
-    assert (NOW + timedelta(minutes=10)).isoformat() in response.text
+    assert update["$set"]["approval_sql_sha256"] == _hash("SELECT '<tag>'")
+    assert "2026-09-02 10:10:00 UTC" in response.text
+    assert_security_headers(response)
+
+
+def test_get_hides_sql_when_stored_hash_does_not_match():
+    collection = MagicMock()
+    collection.find_one.return_value = {
+        "_id": "wf",
+        "status": "awaiting_confirmation",
+        "summary": "summary",
+        "sql": "SELECT changed",
+        "sql_sha256": _hash("SELECT approved"),
+        "expires_at": NOW + timedelta(minutes=10),
+        "approval_token_hash": _hash("secret"),
+    }
+
+    response = request(app_for(collection), "GET", "/approval/wf?token=secret")
+
+    assert response.status_code == 409
+    assert "SELECT" not in response.text
+    collection.update_one.assert_not_called()
     assert_security_headers(response)
 
 
@@ -126,8 +155,10 @@ def test_post_confirm_uses_atomic_workflow_transition():
     assert query["status"] == "awaiting_confirmation"
     assert query["approval_token_hash"] == _hash("secret")
     assert query["approval_csrf_hash"] == _hash("nonce")
+    assert query["$expr"] == {"$eq": ["$sql_sha256", "$approval_sql_sha256"]}
     assert update["$set"]["status"] == "confirmed"
     assert update["$unset"] == {"approval_csrf_hash": ""}
+    assert "채팅으로 돌아가 승인했다고 알려주세요" in response.text
     assert_security_headers(response)
 
 
@@ -149,6 +180,7 @@ def test_get_refreshes_csrf_and_rejects_the_replaced_nonce():
         "status": "awaiting_confirmation",
         "summary": "summary",
         "sql": "SELECT 1",
+        "sql_sha256": _hash("SELECT 1"),
         "expires_at": NOW + timedelta(minutes=10),
         "approval_token_hash": _hash("secret"),
     })
@@ -173,6 +205,30 @@ def test_get_refreshes_csrf_and_rejects_the_replaced_nonce():
     assert collection.transitions == 1
     assert_security_headers(reused)
     assert_security_headers(confirmed)
+
+
+def test_confirm_fails_if_sql_hash_changed_after_csrf_was_issued():
+    collection = Collection({
+        "_id": "wf",
+        "status": "awaiting_confirmation",
+        "summary": "summary",
+        "sql": "SELECT 1",
+        "sql_sha256": _hash("SELECT 1"),
+        "expires_at": NOW + timedelta(minutes=10),
+        "approval_token_hash": _hash("secret"),
+    })
+    app = app_for(collection)
+    page = request(app, "GET", "/approval/wf?token=secret")
+    csrf = csrf_from(page)
+    collection.doc["sql"] = "SELECT 2"
+    collection.doc["sql_sha256"] = _hash("SELECT 2")
+
+    response = request(app, "POST", "/approval/wf", data={
+        "action": "confirm", "token": "secret", "csrf": csrf,
+    })
+
+    assert response.status_code == 409
+    assert collection.doc["status"] == "awaiting_confirmation"
 
 
 def test_post_declines_once_then_conflicts():
@@ -232,6 +288,7 @@ def test_expired_get_request_hides_sql_and_keeps_security_headers():
         "status": "awaiting_confirmation",
         "summary": "summary",
         "sql": "SELECT secret FROM research.data",
+        "sql_sha256": _hash("SELECT secret FROM research.data"),
         "expires_at": NOW - timedelta(seconds=1),
         "approval_token_hash": _hash("secret"),
     })

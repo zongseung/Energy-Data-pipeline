@@ -1,4 +1,6 @@
 from collections.abc import Callable
+from datetime import timezone
+from hmac import compare_digest
 from html import escape
 from re import search
 from urllib.parse import parse_qsl
@@ -68,14 +70,22 @@ async def approval_get(request: Request, collection, now=utcnow):
     })
     if doc is None:
         return _text("승인 요청이 없거나 만료됐습니다.", 404)
+    sql = doc.get("sql")
+    sql_sha256 = doc.get("sql_sha256")
+    if not isinstance(sql, str) or not isinstance(sql_sha256, str) or not compare_digest(
+        _hash(sql), sql_sha256
+    ):
+        return _text("승인 SQL이 변경됐습니다. 새 workflow를 만드세요.", 409)
     try:
-        csrf = issue_csrf(collection, workflow_id, current)
+        csrf = issue_csrf(collection, workflow_id, sql, sql_sha256, current)
     except RuntimeError:
         return _text("승인 요청이 없거나 만료됐습니다.", 404)
     body = APPROVAL_HTML.format(
         summary=escape(doc["summary"]),
-        sql=escape(doc["sql"]),
-        expires_at=escape(doc["expires_at"].isoformat()),
+        sql=escape(sql),
+        expires_at=escape(
+            doc["expires_at"].astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        ),
         form_action=escape(request.url.path, quote=True),
         token=escape(token, quote=True),
         csrf=escape(csrf, quote=True),
@@ -99,7 +109,9 @@ async def approval_post(request: Request, collection, now=utcnow):
     transition = approve_workflow if action == "confirm" else decline_workflow
     if not transition(collection, request.path_params["workflow_id"], token, csrf, now()):
         return _text("승인 요청이 없거나 이미 처리됐습니다.", 409)
-    return _text("조회 조건을 처리했습니다. 채팅으로 돌아가세요.", 200)
+    if action == "confirm":
+        return _text("승인했습니다. 채팅으로 돌아가 승인했다고 알려주세요.", 200)
+    return _text("거절했습니다. 채팅으로 돌아가 거절했다고 알려주세요.", 200)
 
 
 def register_approval_routes(mcp: FastMCP, collection_factory: Callable) -> None:

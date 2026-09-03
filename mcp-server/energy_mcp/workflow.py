@@ -49,6 +49,7 @@ def new_workflow(question: str, now: datetime | None = None) -> tuple[dict, str]
         "question": question.strip(),
         "answers": {},
         "conditions": {},
+        "revision": 0,
         "status": "clarifying",
         "conversation_id": None,
         "principal_id": None,
@@ -57,25 +58,36 @@ def new_workflow(question: str, now: datetime | None = None) -> tuple[dict, str]
     }, workflow_id)
 
 
-def save_decision(collection, workflow_id, decision, approval_base_url, now=None):
+def save_decision(
+    collection, workflow_id, revision, decision, approval_base_url, now=None
+):
     now = now or utcnow()
+    conditions = decision.condition_mapping()
+    live = {
+        "_id": workflow_id,
+        "status": "clarifying",
+        "revision": revision,
+        "expires_at": {"$gt": now},
+    }
     if decision.status == "needs_clarification":
         changed = collection.update_one(
-            {"_id": workflow_id, "status": "clarifying", "expires_at": {"$gt": now}},
-            {"$set": {"questions": decision.questions, "conditions": decision.conditions}},
+            live,
+            {"$set": {"questions": decision.questions, "conditions": conditions}},
         )
         if changed.matched_count != 1:
-            raise RuntimeError("workflow가 만료됐거나 이미 다음 단계로 진행됐습니다.")
+            raise RuntimeError(
+                "workflow가 만료됐거나 다른 구체화 요청이 먼저 반영됐습니다."
+            )
         return {"status": "needs_clarification", "workflow_id": workflow_id,
-                "questions": decision.questions}
+                "questions": decision.questions, "conditions": conditions}
 
     token = secrets.token_urlsafe(32)
     sql = validate_planned_sql(decision.sql)
     changed = collection.update_one(
-        {"_id": workflow_id, "status": "clarifying", "expires_at": {"$gt": now}},
+        live,
         {"$set": {
             "status": "awaiting_confirmation",
-            "conditions": decision.conditions,
+            "conditions": conditions,
             "summary": decision.summary,
             "sql": sql,
             "sql_sha256": _hash(sql),
@@ -84,19 +96,57 @@ def save_decision(collection, workflow_id, decision, approval_base_url, now=None
         }},
     )
     if changed.matched_count != 1:
-        raise RuntimeError("workflow가 만료됐거나 이미 다음 단계로 진행됐습니다.")
+        raise RuntimeError(
+            "workflow가 만료됐거나 다른 구체화 요청이 먼저 반영됐습니다."
+        )
     url = f"{approval_base_url.rstrip('/')}/{quote(workflow_id)}?token={quote(token)}"
     return {"status": "awaiting_confirmation", "workflow_id": workflow_id,
-            "summary": decision.summary, "sql": sql, "approval_url": url,
+            "conditions": conditions, "summary": decision.summary, "sql": sql,
+            "approval_url": url,
             "expires_at": (now + WORKFLOW_TTL).isoformat()}
 
 
-def issue_csrf(collection, workflow_id: str, now: datetime | None = None) -> str:
+def fail_planning(
+    collection,
+    workflow_id: str,
+    revision: int,
+    error_code: str,
+    now: datetime | None = None,
+) -> bool:
+    now = now or utcnow()
+    changed = collection.update_one(
+        {
+            "_id": workflow_id,
+            "status": "clarifying",
+            "revision": revision,
+            "expires_at": {"$gt": now},
+        },
+        {"$set": {"status": "failed", "error_code": error_code}},
+    )
+    return changed.matched_count == 1
+
+
+def issue_csrf(
+    collection,
+    workflow_id: str,
+    sql: str,
+    sql_sha256: str,
+    now: datetime | None = None,
+) -> str:
     now = now or utcnow()
     token = secrets.token_urlsafe(32)
     changed = collection.update_one(
-        {"_id": workflow_id, "status": "awaiting_confirmation", "expires_at": {"$gt": now}},
-        {"$set": {"approval_csrf_hash": _hash(token)}},
+        {
+            "_id": workflow_id,
+            "status": "awaiting_confirmation",
+            "expires_at": {"$gt": now},
+            "sql": sql,
+            "sql_sha256": sql_sha256,
+        },
+        {"$set": {
+            "approval_csrf_hash": _hash(token),
+            "approval_sql_sha256": sql_sha256,
+        }},
     )
     if changed.matched_count != 1:
         raise RuntimeError("workflow가 만료됐거나 이미 처리됐습니다.")
@@ -111,6 +161,7 @@ def _decide_workflow(collection, workflow_id, approval_token, csrf_token, status
             "expires_at": {"$gt": now},
             "approval_token_hash": _hash(approval_token),
             "approval_csrf_hash": _hash(csrf_token),
+            "$expr": {"$eq": ["$sql_sha256", "$approval_sql_sha256"]},
         },
         {"$set": {"status": status, f"{status}_at": now},
          "$unset": {"approval_csrf_hash": ""}},
@@ -141,14 +192,21 @@ def claim_workflow(collection, workflow_id: str, now: datetime | None = None):
     )
 
 
-def finish_workflow(collection, workflow_id: str, result: dict | None,
-                    error_code: str | None, now: datetime | None = None) -> None:
+def finish_workflow(
+    collection,
+    workflow_id: str,
+    result: dict | None,
+    error_code: str | None,
+    duration_ms: int,
+    now: datetime | None = None,
+) -> None:
     now = now or utcnow()
     collection.update_one(
         {"_id": workflow_id, "status": "executing"},
         {"$set": {
             "status": "failed" if error_code is not None else "done",
-            "finished_at": now,
+            "executed_at": now,
+            "duration_ms": duration_ms,
             "row_count": result.get("row_count") if result else None,
             "error_code": error_code,
         }},

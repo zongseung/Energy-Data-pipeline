@@ -14,4 +14,4 @@ COPY docker/llm-demo/load-secrets.sh /usr/local/bin/load-secrets
 RUN chmod 0555 /usr/local/bin/load-secrets
 
 EXPOSE 8000 8098
-CMD ["/usr/local/bin/load-secrets", "energy-mcp", "sh", "-c", "mkdir -p /exports && python /serve_exports.py & exec energy-mcp"]
+CMD ["sh", "-c", "mkdir -p /exports && python /serve_exports.py & exec energy-mcp"]

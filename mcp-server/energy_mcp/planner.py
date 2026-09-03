@@ -5,7 +5,7 @@ import os
 from typing import Literal
 
 from openai import OpenAI
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 PLANNER_MODEL_ENV = "ENERGY_MCP_PLANNER_MODEL"
 DEFAULT_PLANNER_MODEL = "gpt-4o-mini"
@@ -19,20 +19,35 @@ WITH...SELECT를 반환한다. 제공된 스키마 밖 이름을 만들지 마�
 """
 
 
+class Condition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    value: str
+
+
 class PlannerDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: Literal["needs_clarification", "ready"]
     questions: list[str] = Field(default_factory=list)
-    conditions: dict[str, str] = Field(default_factory=dict)
+    conditions: list[Condition] = Field(default_factory=list)
     summary: str | None = None
     sql: str | None = None
 
     @model_validator(mode="after")
     def validate_state(self):
+        names = [condition.name for condition in self.conditions]
+        if len(names) != len(set(names)):
+            raise ValueError("조건 이름은 중복될 수 없습니다.")
         if self.status == "ready" and (not self.summary or not self.sql):
             raise ValueError("ready 응답에는 summary와 sql이 필요합니다.")
         if self.status == "needs_clarification" and not self.questions:
             raise ValueError("needs_clarification 응답에는 질문이 필요합니다.")
         return self
+
+    def condition_mapping(self) -> dict[str, str]:
+        return {condition.name: condition.value for condition in self.conditions}
 
 
 def plan_with_openai(

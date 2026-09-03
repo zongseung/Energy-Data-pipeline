@@ -1,73 +1,70 @@
 # 데이터 제공 구조
 
-직접 SQL과 LLM·MCP가 어디에서 갈라지고 어디에서 다시 같은 보안 경계를 사용하는지 설명합니다.
+직접 SQL, 정식 호스팅 LLM·MCP, 레거시 로컬 stdio는 같은 `research` 스키마를
+읽지만 접속·신원·승인 경계가 다릅니다.
 
 ## 한눈에 보는 전체 흐름
 
 ```mermaid
 flowchart TB
-    U[연구원] --> G[공개 GitBook 안내서]
-    U --> C{조회 방법 선택}
+    U[연구원] --> C{조회 방법 선택}
 
     C -->|직접 SQL| D[psql · pandas · R · DBeaver]
-    C -->|자연어 질문| L[LLM 클라이언트]
-    L -->|로컬 stdio| M["energy-mcp<br/>run_sql"]
+    C -->|정식 자연어 질문| L[정식 호스팅 LibreChat]
+    C -->|레거시 자연어 질문| X[로컬 LLM 클라이언트]
 
     D --> T[Tailscale 폐쇄망]
+    X --> M["energy-mcp<br/>stdio run_sql"]
     M --> T
-    T --> A["개인별 읽기전용<br/>PostgreSQL role"]
-    A --> V[research 스키마 뷰]
+    T --> P["개인별 읽기전용<br/>PostgreSQL role"]
 
+    L --> W["energy-mcp workflow<br/>구체화 · 승인 · 1회 실행"]
+    W --> G[공용 demo_ro]
+
+    P --> V[research 스키마 뷰]
+    G --> V
     V --> R[조회 결과]
     R --> D
     R --> M
-    M --> L
+    R --> W
 ```
 
-* 네트워크: Tailscale 밖에서는 PostgreSQL에 연결할 수 없습니다.
-* 권한: 운영 테이블은 숨기고 `research` 스키마 뷰만 `SELECT`를 허용합니다.
-* 식별: 연구원마다 서로 다른 PostgreSQL role(DB 계정)을 사용합니다.
-* 감사: 누가 어떤 SQL을 실행했는지 DB 로그에 남습니다.
+## 경로별 경계
 
-## 최초 1회 준비
+| 경로 | 네트워크·로그인 | PostgreSQL 신원 | 실행 통제 |
+| --- | --- | --- | --- |
+| 직접 SQL | Tailscale 폐쇄망 | 개인별 읽기전용 role | 연구원이 SQL을 직접 실행 |
+| 정식 호스팅 LibreChat | LibreChat 계정 로그인 | 공용 읽기전용 `demo_ro` | 서버가 저장한 조건·SQL을 웹에서 승인한 뒤 1회 실행 |
+| 레거시 로컬 stdio | Tailscale 폐쇄망 | 개인별 읽기전용 role | `run_sql`이 즉시 실행하므로 고급·비권장 |
 
-1. 이용조건을 읽고 서약합니다.
-2. 관리자의 초대로 Tailscale에 가입하고 로그인합니다.
-3. 개인별 읽기전용 DB 계정(role·비밀번호)을 별도 채널로 받습니다.
+모든 DB 연결은 읽기전용 세션이고 운영 테이블 대신 `research` 스키마만 조회합니다.
+쿼리에는 60초 `statement_timeout`이 적용됩니다. 다만 정식 호스팅 경로의 DB
+감사 로그에는 개인이 아니라 공용 `demo_ro`가 남으므로 개인별 role 경로와 같다고
+간주하면 안 됩니다.
 
-이후에는 선택한 조회 방법의 가이드만 따라 하면 됩니다.
+## 정식 승인 workflow
 
-## 방법 1: 직접 SQL
+정식 호스팅 경로는 질문과 답변, 정규화된 조건, SQL 및 SHA-256을 MongoDB에
+30분 동안 보존합니다. 승인 페이지는 SQL을 실행하지 않으며, 일회용 CSRF와
+승인 당시 SQL hash가 일치해야 `confirmed`가 됩니다. `execute_query`는 승인된
+저장 SQL을 한 번만 점유하고 실행합니다. 결과 행과 CSV는 MongoDB에 저장하지
+않습니다.
 
-psql·pandas·R·DBeaver 같은 익숙한 도구로 PostgreSQL에 곧바로 연결합니다. 쿼리를 연구원이 직접 작성하므로 재현 가능한 분석에 적합합니다.
+현재 workflow의 `conversation_id`와 `principal_id`는 비어 있습니다. Tailscale
+IP 허용 목록과 IP→`principal` 매핑은 이번 정식 서비스 범위에서 제외된 후속
+경계입니다. 그 전까지 LibreChat 로그인은 유지되지만, 승인 링크를 가진 사람과
+채팅 사용자가 같은 주체인지 서버가 결합해 증명하지는 않습니다. 승인 URL을
+전달하거나 공유하지 마세요.
 
-1. Tailscale에 연결된 상태에서 개인 계정으로 DB에 접속
-2. `research` 스키마의 뷰를 SQL로 조회
-3. 결과를 분석 환경(pandas·R 등)에서 바로 사용
+## 준비 사항
 
-→ 직접 SQL로 조회
-
-## 방법 2: LLM·MCP
-
-`energy-mcp`(연구원 PC에서 돌아가는 로컬 MCP 서버)를 LLM 클라이언트에 등록하면 자연어로 질문할 수 있습니다. LLM이 SQL을 생성하고 `energy-mcp`가 같은 개인 계정으로 실행합니다.
-
-1. Tailscale에 연결된 상태에서 로컬 `energy-mcp` 실행
-2. LLM 클라이언트가 stdio(표준 입출력)로 `energy-mcp`에 SQL 실행을 요청
-3. 실행된 SQL과 결과를 연구원이 직접 검증
-
-→ LLM·MCP로 조회
-
-## 두 방법이 함께 쓰는 보호 장치
-
-| 보호 장치         | 내용                                           |
-| ------------- | -------------------------------------------- |
-| Tailscale 폐쇄망 | 폐쇄망 밖에서는 DB에 아예 연결할 수 없음                     |
-| 개인별 읽기전용 role | `research` 스키마 `SELECT` 권한만 부여, 운영 테이블 접근 불가 |
-| 쿼리 시간 제한      | `statement_timeout` 60초 — 오래 걸리는 쿼리는 자동 종료   |
-| 감사 로그         | 모든 쿼리가 role별로 DB 로그에 기록                      |
-
-LLM·MCP 방식이라고 해서 별도의 공개 서버를 거치지 않습니다. `energy-mcp`는 연구원 PC 안에서만 돕니다. DB 연결 경로는 직접 SQL과 완전히 같습니다.
+- 정식 호스팅 LLM·MCP: 이용조건 서약 후 관리자에게 LibreChat 주소와 계정을
+  받습니다. 개인 DB 비밀번호를 LibreChat에 입력하지 않습니다.
+- 직접 SQL·레거시 로컬 stdio: Tailscale에 가입하고 개인별 읽기전용 DB 계정을
+  별도 채널로 받습니다.
 
 ## GitBook에 공개하지 않는 정보
 
-실제 DB 호스트 주소, 비밀번호, Tailscale 초대 링크, 개인별 완성 DSN(접속 문자열)은 이 공개 문서에 싣지 않습니다. 관리자가 별도 채널로 전달합니다. 문서의 `<발급받은_ID>` 같은 플레이스홀더를 실제 값으로 바꿔 쓰되 그 값을 문서·저장소·채팅에 남기지 마세요.
+실제 DB 호스트 주소, 비밀번호, Tailscale 초대 링크, 개인별 완성 DSN은 공개
+문서에 싣지 않습니다. 문서의 플레이스홀더를 실제 값으로 바꾸더라도 그 값을
+문서·저장소·채팅에 남기지 마세요.

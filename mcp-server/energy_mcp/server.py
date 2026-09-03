@@ -36,8 +36,10 @@ from energy_mcp.approval import register_approval_routes
 from energy_mcp.hints import hint_for
 from energy_mcp.planner import plan_with_openai
 from energy_mcp.workflow import (
+    _hash,
     _reject_multi_statement,
     claim_workflow,
+    fail_planning,
     finish_workflow,
     new_workflow,
     save_decision,
@@ -124,8 +126,17 @@ def workflow_collection():
     uri = os.environ.get("ENERGY_MCP_MONGO_URI")
     if not uri:
         raise RuntimeError("ENERGY_MCP_MONGO_URI가 설정되지 않았습니다.")
-    collection = MongoClient(uri).get_default_database()["query_workflows"]
+    collection = MongoClient(uri, tz_aware=True).get_default_database()["query_workflows"]
     collection.create_index("expires_at", expireAfterSeconds=0)
+    collection.update_many(
+        {"status": "executing"},
+        {"$set": {
+            "status": "failed",
+            "error_code": "execution_interrupted_uncertain",
+            "executed_at": utcnow(),
+            "duration_ms": None,
+        }},
+    )
     return collection
 
 
@@ -467,12 +478,19 @@ def plan_query(
     workflow_id: str | None = None,
     answers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    """질문을 구체화하고 승인할 조건과 SQL을 계획한다.
+
+    needs_clarification이면 질문을 그대로 전달한다. awaiting_confirmation이면
+    조건, SQL, 승인 URL을 보여주고 브라우저 처리 뒤 채팅으로 돌아와 승인 여부를
+    알려 달라고 안내한다. 이 도구는 SQL을 실행하지 않는다.
+    """
     collection = workflow_collection()
     now = utcnow()
     if workflow_id is None:
         doc, workflow_id = new_workflow(question, now)
         doc["answers"] = dict(answers or {})
         collection.insert_one(doc)
+        revision = doc["revision"]
     else:
         live_query = {
             "_id": workflow_id,
@@ -482,40 +500,86 @@ def plan_query(
         doc = collection.find_one(live_query)
         if doc is None:
             raise RuntimeError("구체화할 workflow가 없거나 만료됐습니다.")
+        revision = doc["revision"]
         merged = {**doc.get("answers", {}), **(answers or {})}
-        update_query = {**live_query, "expires_at": {"$gt": utcnow()}}
-        changed = collection.update_one(update_query, {"$set": {"answers": merged}})
+        update_query = {
+            **live_query,
+            "revision": revision,
+            "expires_at": {"$gt": utcnow()},
+        }
+        changed = collection.update_one(
+            update_query,
+            {"$set": {"answers": merged}, "$inc": {"revision": 1}},
+        )
         if changed.matched_count != 1:
             raise RuntimeError("workflow가 만료됐거나 이미 다음 단계로 진행됐습니다.")
         doc["answers"] = merged
-    decision = plan_with_openai(
-        doc["question"], doc.get("answers", {}), _fetch_schema_markdown()
-    )
-    return save_decision(
-        collection,
-        workflow_id,
-        decision,
-        os.environ["ENERGY_MCP_APPROVAL_BASE_URL"],
-        utcnow(),
-    )
+        revision += 1
+    try:
+        decision = plan_with_openai(
+            doc["question"], doc.get("answers", {}), _fetch_schema_markdown()
+        )
+    except Exception as exc:
+        fail_planning(collection, workflow_id, revision, type(exc).__name__, utcnow())
+        raise
+    try:
+        return save_decision(
+            collection,
+            workflow_id,
+            revision,
+            decision,
+            os.environ["ENERGY_MCP_APPROVAL_BASE_URL"],
+            utcnow(),
+        )
+    except ValueError as exc:
+        fail_planning(collection, workflow_id, revision, type(exc).__name__, utcnow())
+        raise
 
 
 @workflow_mcp.tool()
 def execute_query(workflow_id: str) -> dict[str, Any]:
+    """사용자가 승인했다고 채팅에 알린 뒤 저장 SQL을 정확히 한 번 실행한다.
+
+    호출자가 SQL을 전달할 수 없으며 승인 전, 만료, 거절, 재실행은 거부한다.
+    """
     collection = workflow_collection()
     stored = claim_workflow(collection, workflow_id)
     if stored is None:
         raise RuntimeError("승인됐고 실행 가능한 workflow가 아닙니다.")
+    started_ns = time.monotonic_ns()
+    sql = stored.get("sql")
+    sql_sha256 = stored.get("sql_sha256")
+    approval_sql_sha256 = stored.get("approval_sql_sha256")
+    if (
+        not isinstance(sql, str)
+        or not isinstance(sql_sha256, str)
+        or sql_sha256 != approval_sql_sha256
+        or _hash(sql) != sql_sha256
+    ):
+        duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
+        finish_workflow(
+            collection,
+            workflow_id,
+            None,
+            "sql_integrity_error",
+            duration_ms,
+            utcnow(),
+        )
+        raise RuntimeError("승인된 SQL이 변경됐습니다. 새 workflow를 만드세요.")
     try:
-        result = _execute(stored["sql"])
+        result = _execute(sql)
     except Exception as exc:
-        finish_workflow(collection, workflow_id, None, type(exc).__name__, utcnow())
+        duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
+        finish_workflow(
+            collection, workflow_id, None, type(exc).__name__, duration_ms, utcnow()
+        )
         raise
-    finish_workflow(collection, workflow_id, result, None, utcnow())
+    duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
+    finish_workflow(collection, workflow_id, result, None, duration_ms, utcnow())
     return {
         **result,
         "request_summary": stored["summary"],
-        "executed_sql": stored["sql"],
+        "executed_sql": sql,
         "workflow_id": workflow_id,
     }
 

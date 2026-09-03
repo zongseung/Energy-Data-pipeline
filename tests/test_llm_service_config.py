@@ -11,6 +11,8 @@ import yaml
 COMPOSE_PATH = Path("docker/llm-demo/compose.yml")
 COMPOSE = COMPOSE_PATH.read_text()
 CONFIG = yaml.safe_load(COMPOSE)
+LEGACY_COMPOSE_PATH = Path("docker/llm-demo/compose.mcp-users.yml")
+LEGACY_CONFIG = yaml.safe_load(LEGACY_COMPOSE_PATH.read_text())
 LOADER = Path("docker/llm-demo/load-secrets.sh")
 PROVISIONER = Path("docker/llm-demo/provision-secrets.sh")
 MONGO_INIT = Path("docker/llm-demo/init-mongo-users.js")
@@ -24,6 +26,7 @@ const secrets = {
   mongo_root_password: 'file-root-password',
   librechat_mongo_password: 'file-librechat-password',
   energy_mcp_mongo_password: 'file-energy-password',
+  ...JSON.parse(process.env.MONGO_TEST_SECRETS || '{}'),
 };
 fs.readFileSync = (path, encoding) => {
   if (String(path).startsWith('/run/secrets/')) return secrets[String(path).split('/').pop()];
@@ -96,15 +99,27 @@ def _run_loader(secret_dir: Path, profile: str, check: str, values: dict[str, st
     )
 
 
-def _run_mongo_init(users):
+def _run_mongo_init(users, secrets=None):
     env = os.environ | {
         "MONGO_INIT_PATH": str(MONGO_INIT.resolve()),
         "MONGO_TEST_USERS": json.dumps(users),
+        "MONGO_TEST_SECRETS": json.dumps(secrets or {}),
     }
     result = subprocess.run(
         ["node", "-e", MONGO_HARNESS], capture_output=True, text=True, env=env
     )
     return result, json.loads(result.stdout)
+
+
+def _render_compose(path: Path, env: dict[str, str]):
+    result = subprocess.run(
+        ["docker", "compose", "--env-file", "/dev/null", "-f", path, "config"],
+        capture_output=True,
+        text=True,
+        env=os.environ | env,
+    )
+    assert result.returncode == 0, result.stderr
+    return yaml.safe_load(result.stdout)
 
 
 def test_sensitive_values_are_not_compose_environment_or_env_file():
@@ -147,9 +162,36 @@ def test_loader_profiles_execute_commands_and_preserve_trailing_spaces(tmp_path)
         assert result.stderr == ""
 
 
+def test_loader_rejects_empty_or_newline_only_secrets_before_exec(tmp_path):
+    cases = (
+        ("librechat", "jwt_secret", b""),
+        ("energy-mcp", "energy_mcp_dsn", b"\n\n"),
+        ("pgbouncer", "postgres_readonly_password", b"\n"),
+    )
+    for profile, empty_name, content in cases:
+        case_dir = tmp_path / profile
+        values = _write_loader_secrets(case_dir)
+        (case_dir / empty_name).write_bytes(content)
+        marker = tmp_path / f"{profile}.ran"
+
+        result = _run_loader(
+            case_dir,
+            profile,
+            f'touch "$WANT_MARKER"',
+            values | {"marker": str(marker)},
+        )
+
+        assert result.returncode != 0
+        assert not marker.exists()
+        assert empty_name in result.stderr
+        assert all(value not in result.stdout + result.stderr for value in values.values())
+
+
 def test_loader_is_posix_and_rejects_missing_command_without_reading_secrets(tmp_path):
     assert LOADER.read_text().startswith("#!/bin/sh\n")
-    assert stat.S_IMODE(LOADER.stat().st_mode) == 0o555
+    mode = stat.S_IMODE(LOADER.stat().st_mode)
+    assert mode & stat.S_IXUSR
+    assert not mode & stat.S_IWOTH
     env = os.environ | {"LOAD_SECRETS_DIR": str(tmp_path / "missing")}
     result = subprocess.run(
         [LOADER, "librechat"], capture_output=True, text=True, env=env
@@ -170,7 +212,9 @@ def test_loader_never_traces_or_prints_submitted_values(tmp_path):
 
 
 def test_provisioner_refuses_existing_or_incomplete_destinations(tmp_path):
-    assert stat.S_IMODE(PROVISIONER.stat().st_mode) == 0o555
+    mode = stat.S_IMODE(PROVISIONER.stat().st_mode)
+    assert mode & stat.S_IXUSR
+    assert not mode & stat.S_IWOTH
     assert subprocess.run(
         [PROVISIONER, "relative"], capture_output=True, text=True
     ).returncode != 0
@@ -315,6 +359,18 @@ def test_mongo_init_wrong_existing_root_password_fails_closed_without_values():
     assert "file-root-password" not in result.stdout + result.stderr
 
 
+def test_mongo_init_rejects_empty_secrets_before_any_database_mutation():
+    result, payload = _run_mongo_init(
+        {"admin": {}, "LibreChat": {}, "energy_mcp": {}},
+        {"energy_mcp_mongo_password": "\n\n"},
+    )
+
+    assert result.returncode != 0
+    assert payload["ok"] is False
+    assert payload["events"] == []
+    assert payload["error"] == "필수 secret 파일이 비어 있습니다: energy_mcp_mongo_password"
+
+
 def test_mongo_healthcheck_reads_secret_from_file_not_process_argv():
     mongodb = CONFIG["services"]["mongodb"]
     assert mongodb["command"] == ["mongod", "--auth", "--bind_ip_all"]
@@ -336,7 +392,9 @@ def test_mongo_healthcheck_reads_secret_from_file_not_process_argv():
 
 def test_existing_volume_bootstrap_starts_only_mongo_then_initializes_and_verifies(tmp_path):
     assert MONGO_BOOTSTRAP.exists()
-    assert stat.S_IMODE(MONGO_BOOTSTRAP.stat().st_mode) == 0o555
+    mode = stat.S_IMODE(MONGO_BOOTSTRAP.stat().st_mode)
+    assert mode & stat.S_IXUSR
+    assert not mode & stat.S_IWOTH
     compose = f"compose --env-file /dev/null -f {COMPOSE_PATH.resolve()}"
     for scenario, readiness in (
         (
@@ -380,7 +438,8 @@ esac
             "FAKE_MONGO_MARKER": str(marker),
             "FAKE_MONGO_SCENARIO": scenario,
             "LLM_SECRET_DIR": str(case_dir / "secrets"),
-            "LLM_PUBLIC_BASE_URL": "http://example.invalid",
+            "LLM_APPROVAL_PUBLIC_ORIGIN": "http://example.invalid:8099",
+            "LLM_EXPORT_PUBLIC_ORIGIN": "http://example.invalid:8098",
         }
         result = subprocess.run(
             [MONGO_BOOTSTRAP], capture_output=True, text=True, env=env
@@ -415,6 +474,15 @@ def test_services_own_exact_secrets_and_health_dependencies():
         "librechat"
     ]["volumes"]
     assert services["energy-mcp"]["environment"]["ENERGY_MCP_MODE"] == "workflow"
+    assert services["energy-mcp"]["entrypoint"] == [
+        "/usr/local/bin/load-secrets",
+        "energy-mcp",
+    ]
+    assert services["energy-mcp"]["command"] == [
+        "sh",
+        "-c",
+        "mkdir -p /exports && python /serve_exports.py & exec energy-mcp",
+    ]
     assert services["pgbouncer"]["secrets"] == ["postgres_readonly_password"]
     assert services["energy-mcp"]["secrets"] == [
         "openai_api_key",
@@ -473,6 +541,56 @@ def test_mcp_image_installs_the_tracked_lockfile_and_loader():
     assert "uv sync --frozen --no-dev" in dockerfile
     assert "COPY mcp-server /opt/mcp-server" in dockerfile
     assert "COPY docker/llm-demo/load-secrets.sh" in dockerfile
+    assert "RUN chmod 0555 /usr/local/bin/load-secrets" in dockerfile
+    assert (
+        'CMD ["sh", "-c", "mkdir -p /exports && python /serve_exports.py & exec energy-mcp"]'
+        in dockerfile
+    )
+    assert 'CMD ["/usr/local/bin/load-secrets"' not in dockerfile
+
+
+def test_formal_and_legacy_compose_paths_keep_distinct_startup_contracts():
+    formal = CONFIG["services"]["energy-mcp"]
+    legacy_services = LEGACY_CONFIG["services"]
+
+    assert formal["entrypoint"][:2] == ["/usr/local/bin/load-secrets", "energy-mcp"]
+    assert formal["environment"]["ENERGY_MCP_MODE"] == "workflow"
+    for service in legacy_services.values():
+        assert "entrypoint" not in service
+        assert "command" not in service
+        assert "ENERGY_MCP_MODE" not in service["environment"]
+        assert "ENERGY_MCP_DSN" in service["environment"]
+
+
+def test_both_compose_files_render_without_dotenv_and_use_exact_public_origins(tmp_path):
+    secret_dir = tmp_path / "secrets"
+    secret_dir.mkdir()
+    for name in CONFIG["secrets"]:
+        (secret_dir / name).write_text("dummy")
+    approval_origin = "https://llm.example.invalid:8099"
+    export_origin = "https://llm.example.invalid:8098"
+    formal = _render_compose(
+        COMPOSE_PATH,
+        {
+            "LLM_SECRET_DIR": str(secret_dir),
+            "LLM_APPROVAL_PUBLIC_ORIGIN": approval_origin,
+            "LLM_EXPORT_PUBLIC_ORIGIN": export_origin,
+        },
+    )
+    legacy = _render_compose(
+        LEGACY_COMPOSE_PATH,
+        {
+            f"MCP_DSN_U{number}": (
+                f"postgresql://researcher{number}:dummy@db.example.invalid/pv"
+            )
+            for number in range(1, 9)
+        },
+    )
+
+    environment = formal["services"]["energy-mcp"]["environment"]
+    assert environment["ENERGY_MCP_APPROVAL_BASE_URL"] == f"{approval_origin}/approval"
+    assert environment["ENERGY_MCP_EXPORT_URL"] == export_origin
+    assert len(legacy["services"]) == 8
 
 
 def _nginx_location_directives(nginx: str, path: str) -> list[tuple[str, str]]:

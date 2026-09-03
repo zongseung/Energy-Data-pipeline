@@ -10,16 +10,21 @@ def read(name: str) -> str:
     return (DOCS / name).read_text(encoding="utf-8")
 
 
-def test_landing_explains_the_two_access_methods() -> None:
+def test_landing_distinguishes_formal_and_personal_access_boundaries() -> None:
     text = read("README.md")
     assert "직접 SQL" in text
     assert "LLM·MCP" in text
     assert "Tailscale" in text
-    assert "개인별" in text
+    assert "정식 호스팅" in text
+    assert "공용 읽기전용 role `demo_ro`" in text
+    assert "로컬 stdio" in text
+    assert "개인별 읽기전용 role" in text
+    assert "IP 허용 목록" in text
+    assert "principal" in text
     assert "공개" in text
 
 
-def test_architecture_shows_the_shared_security_boundary() -> None:
+def test_architecture_shows_distinct_formal_and_legacy_boundaries() -> None:
     text = read("01-architecture.md")
     assert "```mermaid" in text
     assert "flowchart TB" in text
@@ -27,6 +32,10 @@ def test_architecture_shows_the_shared_security_boundary() -> None:
     assert "energy-mcp" in text
     assert "Tailscale 폐쇄망" in text
     assert "개인별 읽기전용" in text
+    assert "정식 호스팅 LibreChat" in text
+    assert "공용 demo_ro" in text
+    assert "IP 허용 목록" in text
+    assert "principal" in text
     assert "research 스키마" in text
 
 
@@ -44,13 +53,14 @@ def test_direct_sql_guide_is_complete() -> None:
         assert required in text
 
 
-def test_mcp_guide_uses_the_same_personal_database_role() -> None:
+def test_mcp_guide_documents_formal_approval_and_legacy_limits() -> None:
     text = read("03-llm-mcp.md")
     steps = (
         "질문이 모호하면",
         "조건 요약",
         "30분 동안 유효한 승인 URL",
         "URL에서 **승인** 또는 거절",
+        "채팅으로 돌아와 `승인했어`",
         "승인된 경우에만 `execute_query`가 실행됩니다",
         "SQL이 한 글자라도 바뀌면",
         "최종 답변에는 조건 요약과 **실제 실행 SQL**",
@@ -62,7 +72,15 @@ def test_mcp_guide_uses_the_same_personal_database_role() -> None:
     )
     for required in (
         "OpenAI 서버",
-        "읽기전용 role",
+        "공용 읽기전용 role `demo_ro`",
+        "IP 허용 목록",
+        "principal",
+        "미리보기는 최대 **10행**",
+        "최대 **10,000행**",
+        "LLM_APPROVAL_PUBLIC_ORIGIN",
+        "LLM_EXPORT_PUBLIC_ORIGIN",
+        "8099",
+        "8098",
         "KST 구간시작",
         "solar_radiation",
         "구간시작/구간종료",
@@ -74,6 +92,14 @@ def test_mcp_guide_uses_the_same_personal_database_role() -> None:
         "Tailscale",
     ):
         assert required in text
+
+
+def test_root_readme_calls_the_hosted_workflow_production_not_demo() -> None:
+    text = Path("README.md").read_text(encoding="utf-8")
+
+    assert "정식 LLM·MCP 승인 서비스" in text
+    assert "공용 읽기전용 role `demo_ro`" in text
+    assert "IP·principal 결합은 후속 범위" in text
 
 
 FINAL_PAGES = {
