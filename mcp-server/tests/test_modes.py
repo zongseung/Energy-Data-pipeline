@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -69,6 +69,28 @@ def test_workflow_mode_is_stateless_and_explains_the_confirmation_gate():
     assert "awaiting_confirmation" in workflow.instructions
     assert "승인했다고 말할 때까지 execute_query를 호출하지 않는다" in workflow.instructions
     assert "legacy run_sql은 이 서버에 없다" in workflow.instructions
+
+
+def test_workflow_streamable_http_disables_uvicorn_access_logging(monkeypatch):
+    app = object()
+    config = MagicMock(return_value="config")
+    uvicorn_server = MagicMock()
+    uvicorn_server.return_value.serve = AsyncMock()
+    monkeypatch.setattr(server.workflow_mcp, "streamable_http_app", MagicMock(return_value=app))
+    monkeypatch.setattr(server.uvicorn, "Config", config)
+    monkeypatch.setattr(server.uvicorn, "Server", uvicorn_server)
+
+    asyncio.run(server._run_workflow_streamable_http())
+
+    config.assert_called_once_with(
+        app,
+        host=server.workflow_mcp.settings.host,
+        port=server.workflow_mcp.settings.port,
+        log_level=server.workflow_mcp.settings.log_level.lower(),
+        access_log=False,
+    )
+    uvicorn_server.assert_called_once_with("config")
+    uvicorn_server.return_value.serve.assert_awaited_once_with()
 
 
 def test_unknown_mode_fails_closed():

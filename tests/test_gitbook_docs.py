@@ -46,20 +46,32 @@ def test_direct_sql_guide_is_complete() -> None:
 
 def test_mcp_guide_uses_the_same_personal_database_role() -> None:
     text = read("03-llm-mcp.md")
+    steps = (
+        "질문이 모호하면",
+        "조건 요약",
+        "30분 동안 유효한 승인 URL",
+        "URL에서 **승인** 또는 거절",
+        "승인된 경우에만 `execute_query`가 실행됩니다",
+        "SQL이 한 글자라도 바뀌면",
+        "최종 답변에는 조건 요약과 **실제 실행 SQL**",
+    )
+
+    assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
+    assert text.index("## 설치 없이 쓰기 — 정식 LibreChat 서비스") < text.index(
+        "## 고급 경로 — 로컬 stdio `run_sql`"
+    )
     for required in (
-        "로컬",
-        "stdio",
-        "energy-mcp",
+        "OpenAI 서버",
+        "읽기전용 role",
+        "KST 구간시작",
+        "solar_radiation",
+        "구간시작/구간종료",
+        "±1시간",
+        "data_quality = '정상'",
+        "truncated: true",
+        "직접 SQL",
         "ENERGY_MCP_DSN",
         "Tailscale",
-        "개인",
-        "run_sql",
-        "실행 SQL",
-        "직접 SQL로 전환",
-        "구체화",
-        "조건 요약",
-        "승인",
-        "실제 실행 SQL",
     ):
         assert required in text
 

@@ -476,13 +476,28 @@ def test_mcp_image_installs_the_tracked_lockfile_and_loader():
 
 
 def test_librechat_uses_server_instructions_and_approval_proxy():
-    librechat = Path("docker/llm-demo/librechat.yaml").read_text()
     nginx = Path("docker/llm-demo/nginx.conf").read_text()
-    approval = re.search(r"location /approval/ \{(?P<body>.*?)\n        \}", nginx, re.S)
+    servers = yaml.safe_load(Path("docker/llm-demo/librechat.yaml").read_text())["mcpServers"]
+    locations = {
+        match["path"]: match["body"]
+        for match in re.finditer(
+            r"^        location (?P<path>\S+) \{(?P<body>.*?)^        \}",
+            nginx,
+            re.M | re.S,
+        )
+    }
+    directives = {
+        line.split(maxsplit=1)[0]: line.split(maxsplit=1)[1].rstrip(";")
+        for raw_line in locations["/approval/"].splitlines()
+        if (line := raw_line.split("#", 1)[0].strip())
+    }
 
-    assert "serverInstructions: true" in librechat
-    assert approval is not None
-    assert approval.start() < nginx.index("location / {")
-    assert "proxy_pass http://energy-mcp:8000" in approval["body"]
-    assert "access_log off" in approval["body"]
-    assert "X-Forwarded-For" not in approval["body"]
+    assert {
+        name: config.get("serverInstructions")
+        for name, config in servers.items()
+        if "serverInstructions" in config
+    } == {"energy-db": True}
+    assert list(locations).index("/approval/") < list(locations).index("/")
+    assert directives["proxy_pass"] == "http://energy-mcp:8000"
+    assert directives["access_log"] == "off"
+    assert not any("X-Forwarded-For" in directive for directive in directives.values())

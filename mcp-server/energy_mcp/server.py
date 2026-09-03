@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import csv
 import datetime
@@ -26,6 +27,7 @@ from decimal import Decimal
 from typing import Any
 
 import psycopg2
+import uvicorn
 from mcp.server.fastmcp import FastMCP
 from pymongo import MongoClient
 from starlette.responses import PlainTextResponse
@@ -602,6 +604,18 @@ async def workflow_health(request):
     return PlainTextResponse("ok", status_code=200)
 
 
+async def _run_workflow_streamable_http() -> None:
+    """Run the formal HTTP service without logging bearer-token URLs."""
+    config = uvicorn.Config(
+        workflow_mcp.streamable_http_app(),
+        host=workflow_mcp.settings.host,
+        port=workflow_mcp.settings.port,
+        log_level=workflow_mcp.settings.log_level.lower(),
+        access_log=False,
+    )
+    await uvicorn.Server(config).serve()
+
+
 def main() -> None:
     # stdio(기본) 외에 streamable-http 를 지원한다 — LibreChat 처럼 별도
     # 컨테이너에서 접속하는 클라이언트용. (mcp SDK 1.29 는 FASTMCP_* 환경변수를
@@ -618,6 +632,9 @@ def main() -> None:
         selected_mcp.settings.transport_security = TransportSecuritySettings(
             enable_dns_rebinding_protection=False
         )
+    if transport == "streamable-http" and selected_mcp is workflow_mcp:
+        asyncio.run(_run_workflow_streamable_http())
+        return
     selected_mcp.run(transport=transport)
 
 
