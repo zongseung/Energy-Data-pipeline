@@ -475,29 +475,49 @@ def test_mcp_image_installs_the_tracked_lockfile_and_loader():
     assert "COPY docker/llm-demo/load-secrets.sh" in dockerfile
 
 
+def _nginx_location_directives(nginx: str, path: str) -> list[tuple[str, str]]:
+    location = re.search(
+        rf"^\s*location {re.escape(path)} \{{(?P<body>.*?)^\s*\}}",
+        nginx,
+        re.M | re.S,
+    )
+    assert location is not None
+    return [
+        tuple(line.rstrip(";").split(maxsplit=1))
+        for raw_line in location["body"].splitlines()
+        if (line := raw_line.split("#", 1)[0].strip())
+    ]
+
+
+def test_approval_proxy_parser_keeps_duplicate_header_directives():
+    directives = _nginx_location_directives(
+        """
+        location /approval/ {
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header Host $host;
+        }
+        """,
+        "/approval/",
+    )
+
+    assert ("proxy_set_header", "X-Forwarded-For $proxy_add_x_forwarded_for") in directives
+    assert ("proxy_set_header", "Host $host") in directives
+
+
 def test_librechat_uses_server_instructions_and_approval_proxy():
     nginx = Path("docker/llm-demo/nginx.conf").read_text()
     servers = yaml.safe_load(Path("docker/llm-demo/librechat.yaml").read_text())["mcpServers"]
-    locations = {
-        match["path"]: match["body"]
-        for match in re.finditer(
-            r"^        location (?P<path>\S+) \{(?P<body>.*?)^        \}",
-            nginx,
-            re.M | re.S,
-        )
-    }
-    directives = {
-        line.split(maxsplit=1)[0]: line.split(maxsplit=1)[1].rstrip(";")
-        for raw_line in locations["/approval/"].splitlines()
-        if (line := raw_line.split("#", 1)[0].strip())
-    }
+    directives = _nginx_location_directives(nginx, "/approval/")
 
     assert {
         name: config.get("serverInstructions")
         for name, config in servers.items()
         if "serverInstructions" in config
     } == {"energy-db": True}
-    assert list(locations).index("/approval/") < list(locations).index("/")
-    assert directives["proxy_pass"] == "http://energy-mcp:8000"
-    assert directives["access_log"] == "off"
-    assert not any("X-Forwarded-For" in directive for directive in directives.values())
+    assert nginx.index("location /approval/") < nginx.index("location / {")
+    assert ("proxy_pass", "http://energy-mcp:8000") in directives
+    assert ("access_log", "off") in directives
+    assert not any(
+        name == "proxy_set_header" and value.startswith("X-Forwarded-For")
+        for name, value in directives
+    )
