@@ -56,6 +56,10 @@ def test_mcp_guide_uses_the_same_personal_database_role() -> None:
         "run_sql",
         "실행 SQL",
         "직접 SQL로 전환",
+        "구체화",
+        "조건 요약",
+        "승인",
+        "실제 실행 SQL",
     ):
         assert required in text
 

@@ -473,3 +473,16 @@ def test_mcp_image_installs_the_tracked_lockfile_and_loader():
     assert "uv sync --frozen --no-dev" in dockerfile
     assert "COPY mcp-server /opt/mcp-server" in dockerfile
     assert "COPY docker/llm-demo/load-secrets.sh" in dockerfile
+
+
+def test_librechat_uses_server_instructions_and_approval_proxy():
+    librechat = Path("docker/llm-demo/librechat.yaml").read_text()
+    nginx = Path("docker/llm-demo/nginx.conf").read_text()
+    approval = re.search(r"location /approval/ \{(?P<body>.*?)\n        \}", nginx, re.S)
+
+    assert "serverInstructions: true" in librechat
+    assert approval is not None
+    assert approval.start() < nginx.index("location / {")
+    assert "proxy_pass http://energy-mcp:8000" in approval["body"]
+    assert "access_log off" in approval["body"]
+    assert "X-Forwarded-For" not in approval["body"]

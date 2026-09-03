@@ -12,6 +12,7 @@ mcpServers:
   energy-db:
     type: streamable-http
     url: http://energy-mcp:8000/mcp
+    serverInstructions: true
     # 대량 CSV export 쿼리가 수십 초 걸릴 수 있다
     timeout: 120000
 
