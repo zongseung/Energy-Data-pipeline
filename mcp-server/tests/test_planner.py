@@ -111,8 +111,9 @@ def test_real_sdk_serializes_strict_planner_schema_and_exact_request():
     )
 
     assert result.condition_mapping() == {"대상": "태양광"}
-    assert set(captured) == {"input", "model", "text"}
+    assert set(captured) == {"input", "model", "store", "text"}
     assert captured["model"] == "gpt-4o-mini"
+    assert captured["store"] is False
     assert captured["input"] == [
         {"role": "system", "content": PLANNER_PROMPT},
         {

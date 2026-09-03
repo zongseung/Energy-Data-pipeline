@@ -64,6 +64,7 @@ def plan_with_openai(
     )
     response = client.responses.parse(
         model=model or os.environ.get(PLANNER_MODEL_ENV, DEFAULT_PLANNER_MODEL),
+        store=False,
         input=[
             {"role": "system", "content": PLANNER_PROMPT},
             {"role": "user", "content": payload},

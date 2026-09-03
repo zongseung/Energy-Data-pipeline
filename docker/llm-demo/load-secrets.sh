@@ -2,6 +2,7 @@
 set -eu
 
 secret_dir=${LOAD_SECRETS_DIR:-/run/secrets}
+cr=$(printf '\r')
 
 read_secret() {
     secret_name=$1
@@ -12,6 +13,9 @@ read_secret() {
         echo "필수 secret 파일이 비어 있습니다: $secret_name" >&2
         exit 1
     }
+    case "$secret_value" in
+        *"$cr"*) echo "필수 secret 파일에 CR 문자가 있습니다: $secret_name" >&2; exit 1 ;;
+    esac
 }
 
 [ "$#" -ge 2 ] || { echo "사용법: load-secrets <profile> <명령...>" >&2; exit 1; }
@@ -51,5 +55,5 @@ case "$profile" in
     *) echo "알 수 없는 secret profile: $profile" >&2; exit 1 ;;
 esac
 
-unset secret_value secret_name file
+unset secret_value secret_name file cr
 exec "$@"
