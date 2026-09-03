@@ -8,18 +8,26 @@
 관리자가 별도 채널로 전달합니다.
 {% endhint %}
 
+{% hint style="warning" %}
+**현재 서비스의 `energy-db`는 레거시 `run_sql` 모드입니다.** 자연어 질문은 할 수
+있지만 SQL이 별도 승인 화면 없이 즉시 실행됩니다. 정식 호스팅 승인 workflow는
+도구 목록에 `plan_query`와 `execute_query`가 표시되고 승인 링크가 제시되는 시점부터
+적용됩니다.
+{% endhint %}
+
 ## 어떤 방법을 사용할까요?
 
 | 경로 | 추천 대상 | 접속·DB 경계 | 실행 전 승인 |
 | --- | --- | --- | --- |
 | 직접 SQL | 재현 가능한 분석·통계·그래프 | Tailscale 폐쇄망 + 개인별 읽기전용 role | 연구원이 SQL을 직접 실행 |
-| 정식 호스팅 LLM·MCP | 설치 없는 자연어 탐색 | LibreChat 로그인 + 공용 읽기전용 role `demo_ro` | 조건과 SQL을 웹에서 1회 승인 |
+| 현재 호스팅 LLM·MCP | 설치 없는 자연어 탐색 | LibreChat 로그인 + 공용 읽기전용 role `demo_ro` | 없음 — 레거시 `run_sql` 즉시 실행 |
+| 정식 호스팅 LLM·MCP | 전환 후 기본 경로 | LibreChat 로그인 + 공용 읽기전용 role `demo_ro` | 조건과 SQL을 웹에서 1회 승인 |
 | 레거시 로컬 stdio `run_sql` | 고급 사용자·호환 목적 | Tailscale 폐쇄망 + 개인별 읽기전용 role | 별도 승인 workflow 없음 |
 
 정식 호스팅 경로와 직접 SQL·로컬 stdio 경로는 같은 신원·감사 경계를 쓰지
-않습니다. 호스팅 서비스의 DB 감사 로그에는 공용 `demo_ro`가 기록됩니다. 현재는
-LibreChat 계정 로그인과 30분짜리 승인 링크가 경계이며, Tailscale IP 허용 목록과
-IP→`principal` 매핑은 후속 설계로 미뤄져 있습니다.
+않습니다. 호스팅 서비스의 DB 감사 로그에는 공용 `demo_ro`가 기록됩니다. 질문,
+대화 기록, 조회 workflow가 어디로 전송되고 저장되는지는
+[LLM·MCP 데이터 처리와 투명성](06-llm-transparency.md)에서 확인하세요.
 
 ## 처음 한 번만 준비하세요
 
@@ -33,5 +41,6 @@ IP→`principal` 매핑은 후속 설계로 미뤄져 있습니다.
 * 데이터 제공 구조 — 세 경로의 서로 다른 접속·승인·감사 경계
 * 직접 SQL로 조회 — Tailscale 연결부터 첫 쿼리까지
 * LLM·MCP로 조회 — 정식 승인 workflow와 레거시 로컬 stdio
+* LLM·MCP 데이터 처리와 투명성 — OpenAI 전송 범위, MongoDB 역할, 보존·삭제
 * 데이터 카탈로그 · 스키마 사전 — 뷰별 기간·단위·품질·시간 규약
 * 이용조건 · 보안 서약 — 허용·금지 행위, 감사 로그, 계정 회수

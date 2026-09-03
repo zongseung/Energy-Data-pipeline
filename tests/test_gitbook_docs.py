@@ -19,8 +19,9 @@ def test_landing_distinguishes_formal_and_personal_access_boundaries() -> None:
     assert "공용 읽기전용 role `demo_ro`" in text
     assert "로컬 stdio" in text
     assert "개인별 읽기전용 role" in text
-    assert "IP 허용 목록" in text
-    assert "principal" in text
+    assert "현재 서비스" in text
+    assert "`run_sql`" in text
+    assert "데이터 처리와 투명성" in text
     assert "공개" in text
 
 
@@ -34,8 +35,9 @@ def test_architecture_shows_distinct_formal_and_legacy_boundaries() -> None:
     assert "개인별 읽기전용" in text
     assert "정식 호스팅 LibreChat" in text
     assert "공용 demo_ro" in text
-    assert "IP 허용 목록" in text
-    assert "principal" in text
+    assert "현재 호스팅" in text
+    assert "승인 workflow" in text
+    assert "MongoDB" in text
     assert "research 스키마" in text
 
 
@@ -73,14 +75,13 @@ def test_mcp_guide_documents_formal_approval_and_legacy_limits() -> None:
     for required in (
         "OpenAI 서버",
         "공용 읽기전용 role `demo_ro`",
-        "IP 허용 목록",
-        "principal",
+        "일상적인 문장",
+        "단기예보 데이터 중 종로구",
+        "대화 기록",
+        "현재 서비스",
+        "`run_sql`",
         "미리보기는 최대 **10행**",
         "최대 **10,000행**",
-        "LLM_APPROVAL_PUBLIC_ORIGIN",
-        "LLM_EXPORT_PUBLIC_ORIGIN",
-        "8099",
-        "8098",
         "KST 구간시작",
         "solar_radiation",
         "구간시작/구간종료",
@@ -99,7 +100,8 @@ def test_root_readme_calls_the_hosted_workflow_production_not_demo() -> None:
 
     assert "정식 LLM·MCP 승인 서비스" in text
     assert "공용 읽기전용 role `demo_ro`" in text
-    assert "IP·principal 결합은 후속 범위" in text
+    assert "현재 호스팅 서비스" in text
+    assert "레거시 `run_sql`" in text
 
 
 FINAL_PAGES = {
@@ -109,9 +111,41 @@ FINAL_PAGES = {
     "03-llm-mcp.md",
     "04-data-catalog.md",
     "05-terms.md",
+    "06-llm-transparency.md",
     "appendix-local-llm.md",
     "SUMMARY.md",
 }
+
+
+def test_llm_transparency_page_documents_real_storage_and_retention() -> None:
+    text = read("06-llm-transparency.md")
+    for required in (
+        "LibreChat",
+        "`energy_mcp.query_workflows`",
+        "대화 간 장기 기억",
+        "질문 원문",
+        "조회 결과 행",
+        "30분",
+        "비동기",
+        "24시간",
+        "OpenAI",
+        "학습에 사용하지",
+        "Zero Data Retention",
+        "API 키",
+        "JWT",
+    ):
+        assert required in text
+
+    llm_pages = "\n".join(
+        read(name)
+        for name in ("README.md", "01-architecture.md", "03-llm-mcp.md", "06-llm-transparency.md")
+    )
+    for excluded in (
+        "IP 허용 목록",
+        "LLM_APPROVAL_PUBLIC_ORIGIN",
+        "LLM_EXPORT_PUBLIC_ORIGIN",
+    ):
+        assert excluded not in llm_pages
 
 
 # 카탈로그는 뷰가 11개라 한 페이지에 다 넣으면 좌측 목차 항목이 하나뿐이라

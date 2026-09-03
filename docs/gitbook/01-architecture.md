@@ -1,7 +1,7 @@
 # 데이터 제공 구조
 
-직접 SQL, 정식 호스팅 LLM·MCP, 레거시 로컬 stdio는 같은 `research` 스키마를
-읽지만 접속·신원·승인 경계가 다릅니다.
+직접 SQL, 현재 호스팅 LLM·MCP, 정식 승인 workflow, 로컬 stdio는 같은
+`research` 스키마를 읽지만 접속·신원·승인 경계가 다릅니다.
 
 ## 한눈에 보는 전체 흐름
 
@@ -10,7 +10,8 @@ flowchart TB
     U[연구원] --> C{조회 방법 선택}
 
     C -->|직접 SQL| D[psql · pandas · R · DBeaver]
-    C -->|정식 자연어 질문| L[정식 호스팅 LibreChat]
+    C -->|현재 자연어 질문| L[호스팅 LibreChat]
+    C -->|정식 전환 후| F[정식 호스팅 LibreChat]
     C -->|레거시 자연어 질문| X[로컬 LLM 클라이언트]
 
     D --> T[Tailscale 폐쇄망]
@@ -18,7 +19,10 @@ flowchart TB
     M --> T
     T --> P["개인별 읽기전용<br/>PostgreSQL role"]
 
-    L --> W["energy-mcp workflow<br/>구체화 · 승인 · 1회 실행"]
+    L --> H["energy-mcp legacy<br/>run_sql 즉시 실행"]
+    F --> W["energy-mcp 승인 workflow<br/>구체화 · 승인 · 1회 실행"]
+    W --> Q["MongoDB<br/>질문 · 조건 · SQL · 상태"]
+    H --> G[공용 demo_ro]
     W --> G[공용 demo_ro]
 
     P --> V[research 스키마 뷰]
@@ -34,6 +38,7 @@ flowchart TB
 | 경로 | 네트워크·로그인 | PostgreSQL 신원 | 실행 통제 |
 | --- | --- | --- | --- |
 | 직접 SQL | Tailscale 폐쇄망 | 개인별 읽기전용 role | 연구원이 SQL을 직접 실행 |
+| 현재 호스팅 LibreChat | LibreChat 계정 로그인 | 공용 읽기전용 `demo_ro` | 레거시 `run_sql`이 즉시 실행 |
 | 정식 호스팅 LibreChat | LibreChat 계정 로그인 | 공용 읽기전용 `demo_ro` | 서버가 저장한 조건·SQL을 웹에서 승인한 뒤 1회 실행 |
 | 레거시 로컬 stdio | Tailscale 폐쇄망 | 개인별 읽기전용 role | `run_sql`이 즉시 실행하므로 고급·비권장 |
 
@@ -42,19 +47,21 @@ flowchart TB
 감사 로그에는 개인이 아니라 공용 `demo_ro`가 남으므로 개인별 role 경로와 같다고
 간주하면 안 됩니다.
 
-## 정식 승인 workflow
+## 현재 호스팅과 정식 승인 workflow
+
+현재 호스팅 서비스에서 보이는 MCP 도구가 `run_sql`이면 질문에서 만든 SQL이 바로
+실행됩니다. `plan_query`와 `execute_query`가 보이고 조건·SQL·승인 링크가 먼저
+제시될 때만 아래의 정식 승인 절차가 적용됩니다.
 
 정식 호스팅 경로는 질문과 답변, 정규화된 조건, SQL 및 SHA-256을 MongoDB에
-30분 동안 보존합니다. 승인 페이지는 SQL을 실행하지 않으며, 일회용 CSRF와
+실행 가능한 상태로 30분 동안 보존합니다. 승인 페이지는 SQL을 실행하지 않으며, 일회용 CSRF와
 승인 당시 SQL hash가 일치해야 `confirmed`가 됩니다. `execute_query`는 승인된
 저장 SQL을 한 번만 점유하고 실행합니다. 결과 행과 CSV는 MongoDB에 저장하지
 않습니다.
 
-현재 workflow의 `conversation_id`와 `principal_id`는 비어 있습니다. Tailscale
-IP 허용 목록과 IP→`principal` 매핑은 이번 정식 서비스 범위에서 제외된 후속
-경계입니다. 그 전까지 LibreChat 로그인은 유지되지만, 승인 링크를 가진 사람과
-채팅 사용자가 같은 주체인지 서버가 결합해 증명하지는 않습니다. 승인 URL을
-전달하거나 공유하지 마세요.
+LibreChat의 대화 저장소와 승인 workflow 저장소는 같은 MongoDB 서버를 사용해도
+DB와 계정이 분리됩니다. 저장 항목·보존·외부 전송 범위는
+[LLM·MCP 데이터 처리와 투명성](06-llm-transparency.md)에 정리했습니다.
 
 ## 준비 사항
 
