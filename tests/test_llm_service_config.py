@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import stat
@@ -15,6 +16,54 @@ PROVISIONER = Path("docker/llm-demo/provision-secrets.sh")
 MONGO_INIT = Path("docker/llm-demo/init-mongo-users.js")
 MONGO_HEALTH = Path("docker/llm-demo/mongo-healthcheck.js")
 MONGO_BOOTSTRAP = Path("docker/llm-demo/bootstrap-mongo.sh")
+
+MONGO_HARNESS = r"""
+const fs = require('fs');
+const realRead = fs.readFileSync;
+const secrets = {
+  mongo_root_password: 'file-root-password',
+  librechat_mongo_password: 'file-librechat-password',
+  energy_mcp_mongo_password: 'file-energy-password',
+};
+fs.readFileSync = (path, encoding) => {
+  if (String(path).startsWith('/run/secrets/')) return secrets[String(path).split('/').pop()];
+  return realRead(path, encoding);
+};
+
+const users = JSON.parse(process.env.MONGO_TEST_USERS);
+const events = [];
+let authenticated = false;
+const target = (database) => ({
+  auth(user, password) {
+    events.push({ op: 'auth', database, user });
+    if (database === 'admin' && users.admin?.root === password) {
+      authenticated = true;
+      return true;
+    }
+    return false;
+  },
+  getUser(user) {
+    events.push({ op: 'getUser', database, user });
+    if (users.admin?.root && !authenticated) throw new Error('unauthorized');
+    return users[database]?.[user] ? { user } : null;
+  },
+  createUser({ user, pwd, roles }) {
+    events.push({ op: 'createUser', database, user, roles });
+    if (users.admin?.root && !authenticated) throw new Error('unauthorized');
+    users[database] ??= {};
+    users[database][user] = pwd;
+  },
+});
+global.db = { getSiblingDB: target };
+
+try {
+  require(process.env.MONGO_INIT_PATH);
+  process.stdout.write(JSON.stringify({ ok: true, events }));
+} catch (error) {
+  process.stdout.write(JSON.stringify({ ok: false, events, error: error.message }));
+  process.exitCode = 3;
+}
+"""
 
 
 def _write_loader_secrets(secret_dir: Path) -> dict[str, str]:
@@ -45,6 +94,17 @@ def _run_loader(secret_dir: Path, profile: str, check: str, values: dict[str, st
         text=True,
         env=env,
     )
+
+
+def _run_mongo_init(users):
+    env = os.environ | {
+        "MONGO_INIT_PATH": str(MONGO_INIT.resolve()),
+        "MONGO_TEST_USERS": json.dumps(users),
+    }
+    result = subprocess.run(
+        ["node", "-e", MONGO_HARNESS], capture_output=True, text=True, env=env
+    )
+    return result, json.loads(result.stdout)
 
 
 def test_sensitive_values_are_not_compose_environment_or_env_file():
@@ -195,15 +255,64 @@ def test_provisioner_atomically_creates_owner_only_complete_set(tmp_path):
     assert not list(tmp_path.glob(".complete.tmp.*"))
 
 
-def test_mongo_bootstrap_is_idempotent_and_scopes_application_roles():
-    text = MONGO_INIT.read_text()
-    assert text.count("getUser(") == 2
-    assert "admin.auth('root', rootPassword)" in text
-    assert "ensureUser('LibreChat', 'librechat_app'" in text
-    assert "ensureUser('energy_mcp', 'energy_mcp_app'" in text
-    assert ".trim()" not in text
-    assert "console.log" not in text
-    assert "print(" not in text
+def test_mongo_init_fresh_state_creates_root_then_scoped_app_users():
+    result, payload = _run_mongo_init({"admin": {}, "LibreChat": {}, "energy_mcp": {}})
+    assert result.returncode == 0
+    assert payload["ok"] is True
+    assert [(event["op"], event["database"], event["user"]) for event in payload["events"]] == [
+        ("auth", "admin", "root"),
+        ("getUser", "admin", "root"),
+        ("createUser", "admin", "root"),
+        ("auth", "admin", "root"),
+        ("getUser", "LibreChat", "librechat_app"),
+        ("createUser", "LibreChat", "librechat_app"),
+        ("getUser", "energy_mcp", "energy_mcp_app"),
+        ("createUser", "energy_mcp", "energy_mcp_app"),
+    ]
+    created = [event for event in payload["events"] if event["op"] == "createUser"]
+    assert created[1]["roles"] == [{"role": "readWrite", "db": "LibreChat"}]
+    assert created[2]["roles"] == [{"role": "readWrite", "db": "energy_mcp"}]
+
+
+def test_mongo_init_root_only_state_authenticates_then_creates_app_users():
+    result, payload = _run_mongo_init(
+        {"admin": {"root": "file-root-password"}, "LibreChat": {}, "energy_mcp": {}}
+    )
+    assert result.returncode == 0
+    assert payload["events"][0] == {"op": "auth", "database": "admin", "user": "root"}
+    assert not any(
+        event["op"] == "getUser" and event["database"] == "admin"
+        for event in payload["events"]
+    )
+    assert [
+        (event["database"], event["user"])
+        for event in payload["events"]
+        if event["op"] == "createUser"
+    ] == [("LibreChat", "librechat_app"), ("energy_mcp", "energy_mcp_app")]
+
+
+def test_mongo_init_completed_state_is_safe_to_rerun():
+    result, payload = _run_mongo_init(
+        {
+            "admin": {"root": "file-root-password"},
+            "LibreChat": {"librechat_app": "file-librechat-password"},
+            "energy_mcp": {"energy_mcp_app": "file-energy-password"},
+        }
+    )
+    assert result.returncode == 0
+    assert payload["events"][0] == {"op": "auth", "database": "admin", "user": "root"}
+    assert not any(event["op"] == "createUser" for event in payload["events"])
+
+
+def test_mongo_init_wrong_existing_root_password_fails_closed_without_values():
+    result, payload = _run_mongo_init(
+        {"admin": {"root": "different-password"}, "LibreChat": {}, "energy_mcp": {}}
+    )
+    assert result.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"] == "Mongo root 인증 실패"
+    assert not any(event["op"] == "createUser" for event in payload["events"])
+    assert "file-root-password" not in result.stdout + result.stderr
 
 
 def test_mongo_healthcheck_reads_secret_from_file_not_process_argv():
@@ -228,29 +337,64 @@ def test_mongo_healthcheck_reads_secret_from_file_not_process_argv():
 def test_existing_volume_bootstrap_starts_only_mongo_then_initializes_and_verifies(tmp_path):
     assert MONGO_BOOTSTRAP.exists()
     assert stat.S_IMODE(MONGO_BOOTSTRAP.stat().st_mode) == 0o555
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    log = tmp_path / "docker.log"
-    fake_docker = fake_bin / "docker"
-    fake_docker.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_DOCKER_LOG"\n')
-    fake_docker.chmod(0o755)
-    env = os.environ | {
-        "PATH": f"{fake_bin}:{os.environ['PATH']}",
-        "FAKE_DOCKER_LOG": str(log),
-        "LLM_SECRET_DIR": str(tmp_path / "secrets"),
-        "LLM_PUBLIC_BASE_URL": "http://example.invalid",
-    }
-    result = subprocess.run([MONGO_BOOTSTRAP], capture_output=True, text=True, env=env)
-    assert result.returncode == 0
-    assert result.stdout == ""
-    assert result.stderr == ""
     compose = f"compose --env-file /dev/null -f {COMPOSE_PATH.resolve()}"
-    assert log.read_text().splitlines() == [
-        f"{compose} up -d --no-deps mongodb",
-        f"{compose} exec -T mongodb mongosh --quiet --eval quit(db.runCommand({{ping:1}}).ok ? 0 : 2)",
-        f"{compose} exec -T mongodb mongosh --quiet --file /docker-entrypoint-initdb.d/init-mongo-users.js",
-        f"{compose} exec -T mongodb mongosh --quiet --file /usr/local/share/mongo-healthcheck.js",
-    ]
+    for scenario, readiness in (
+        (
+            "fresh",
+            [
+                f"{compose} exec -T mongodb mongosh --quiet --file /usr/local/share/mongo-healthcheck.js",
+                f"{compose} exec -T mongodb mongosh --quiet --eval quit(db.runCommand({{ping:1}}).ok ? 0 : 2)",
+            ],
+        ),
+        (
+            "rooted",
+            [f"{compose} exec -T mongodb mongosh --quiet --file /usr/local/share/mongo-healthcheck.js"],
+        ),
+    ):
+        case_dir = tmp_path / scenario
+        fake_bin = case_dir / "bin"
+        fake_bin.mkdir(parents=True)
+        log = case_dir / "docker.log"
+        marker = case_dir / "initialized"
+        fake_docker = fake_bin / "docker"
+        fake_docker.write_text(
+            """#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$*" in
+  *init-mongo-users.js*) : > "$FAKE_MONGO_MARKER" ;;
+  *mongo-healthcheck.js*)
+    [ "$FAKE_MONGO_SCENARIO" = rooted ] || [ -e "$FAKE_MONGO_MARKER" ] || exit 1
+    ;;
+  *'--eval quit(db.runCommand({ping:1}).ok ? 0 : 2)'*)
+    [ "$FAKE_MONGO_SCENARIO" = fresh ] || exit 1
+    ;;
+esac
+"""
+        )
+        fake_docker.chmod(0o755)
+        (fake_bin / "sleep").write_text("#!/bin/sh\nexit 0\n")
+        (fake_bin / "sleep").chmod(0o755)
+        env = os.environ | {
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            "FAKE_DOCKER_LOG": str(log),
+            "FAKE_MONGO_MARKER": str(marker),
+            "FAKE_MONGO_SCENARIO": scenario,
+            "LLM_SECRET_DIR": str(case_dir / "secrets"),
+            "LLM_PUBLIC_BASE_URL": "http://example.invalid",
+        }
+        result = subprocess.run(
+            [MONGO_BOOTSTRAP], capture_output=True, text=True, env=env
+        )
+        assert result.returncode == 0
+        assert result.stdout == ""
+        assert result.stderr == ""
+        assert log.read_text().splitlines() == [
+            f"{compose} up -d --no-deps mongodb",
+            *readiness,
+            f"{compose} exec -T mongodb mongosh --quiet --file /docker-entrypoint-initdb.d/init-mongo-users.js",
+            f"{compose} exec -T mongodb mongosh --quiet --file /usr/local/share/mongo-healthcheck.js",
+        ]
+        assert "--password" not in log.read_text()
 
 
 def test_services_own_exact_secrets_and_health_dependencies():

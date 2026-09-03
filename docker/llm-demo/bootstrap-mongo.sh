@@ -13,6 +13,8 @@ compose_file=$script_dir/compose.yml
 docker compose --env-file /dev/null -f "$compose_file" up -d --no-deps mongodb
 attempt=0
 until docker compose --env-file /dev/null -f "$compose_file" exec -T mongodb \
+  mongosh --quiet --file /usr/local/share/mongo-healthcheck.js >/dev/null 2>&1 || \
+  docker compose --env-file /dev/null -f "$compose_file" exec -T mongodb \
   mongosh --quiet --eval 'quit(db.runCommand({ping:1}).ok ? 0 : 2)' >/dev/null 2>&1
 do
   attempt=$((attempt + 1))
