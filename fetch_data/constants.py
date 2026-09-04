@@ -27,6 +27,7 @@ class NamdongGenAPI:
 
     # 발전원 key -> (한글명, 페이지 경로, menuCd)
     GEN_TYPES = {
+        "wind": {"label": "풍력", "page": "nfdt23", "menu_cd": "FN0912020218"},
         "ocean_hydro": {"label": "해양소수력", "page": "nfdt24", "menu_cd": "FN0912020219"},
         "fuel_cell": {"label": "연료전지", "page": "nfdt25", "menu_cd": "FN0912020220"},
         "thermal": {"label": "화력", "page": "nfdt26", "menu_cd": "FN0912020221"},

@@ -46,6 +46,7 @@ SOURCE = "api"
 
 # 카테고리 -> generation.fuel_type
 FUEL_MAP: Dict[str, str] = {
+    "wind": "wind",
     "ocean_hydro": "hydro",
     "fuel_cell": "fuel_cell",
     "thermal": "thermal",

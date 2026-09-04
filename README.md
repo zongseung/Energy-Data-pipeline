@@ -49,7 +49,7 @@ Energy-Data-pipeline/
 ├── prefect_flows/                      # Prefect flow 래퍼 (수집기엔 @flow 없음)
 │   ├── deploy.py                       # 모든 deployment/스케줄 등록
 │   ├── prefect_pipeline.py             # 기상
-│   ├── nambu_pv_flow.py · namdong_pv_flow.py · namdong_wind_flow.py
+│   ├── nambu_pv_flow.py · namdong_pv_flow.py
 │   ├── smp_flow.py · gen_flow.py · jeju_flow.py
 │   └── notify_tasks.py · merge_to_all.py
 │
@@ -111,7 +111,6 @@ make db        # psql 접속
 | `daily-weather-collection` | 매일 09:00 | prefect_pipeline |
 | `daily-nambu-pv-collection` | 매일 09:30 | nambu_pv_flow |
 | `monthly-namdong-pv-collection` | 매월 10일 10:00 | namdong_pv_flow |
-| `monthly-namdong-wind-collection` | 매월 10일 11:00 | namdong_wind_flow |
 | `monthly-koen-gen-collection` | 매월 10일 | gen_flow |
 | `daily-smp-collection` | 매일 09:00 (전날 데이터) | smp_flow |
 | `monthly-smp-aggregate` | 매월 2일 07:00 | smp_flow |

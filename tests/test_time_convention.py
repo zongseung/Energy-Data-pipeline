@@ -15,8 +15,7 @@
       fetch_data/pv/nambu_collect.py::collect_and_save     (위와 동일 로직의 인라인 복제본)
       fetch_data/pv/ekr_collect.py::_to_long
   · 라벨 N -> N시      (구간종료 그대로, 1시간 늦음 -> 뷰에서 -1h 필요)
-      fetch_data/gen/transform_gen.py::transform_wide_to_long
-      fetch_data/wind/namdong_collect.py::transform_wide_to_long
+      fetch_data/gen/transform_gen.py::transform_wide_to_long  (남동 풍력 포함 KOEN 비태양광 전체)
 
 **남부 경로는 공용 함수가 없다.** `nambu_collect.py:125-126` 과 `nambu_backfill.py:134-135` 는
 같은 계산의 독립된 인라인 복제본이고, `nambu_collect` 는 `parse_hour_column` 만 import 한다.
@@ -42,7 +41,6 @@ from fetch_data.common.utils import parse_hour_column  # noqa: E402
 from fetch_data.gen import transform_gen  # noqa: E402
 from fetch_data.pv import ekr_collect, nambu_backfill  # noqa: E402
 from fetch_data.pv.namdong_transform import extract_hour  # noqa: E402
-from fetch_data.wind import namdong_collect as wind_namdong  # noqa: E402
 
 DAY = "2026-06-15"
 NEXT_DAY = "2026-06-16"
@@ -160,25 +158,6 @@ def test_gen_transform_은_구간종료_라벨을_그대로_보존():
     assert ts[22.0] == pd.Timestamp(f"{DAY} 12:00")   # 실제 구간은 11~12시
     assert ts[33.0] == pd.Timestamp(f"{NEXT_DAY} 00:00")  # 24시 -> 익일 00시
     assert out["plant_name"].unique().tolist() == ["영흥_1"]
-
-
-def test_wind_namdong_은_구간종료_라벨을_그대로_보존():
-    """남동 풍력 API: qhorGen01 -> 당일 01시, qhorGen24 -> 익일 00시 (미보정)."""
-    wide = pd.DataFrame([{
-        "dgenYmd": DAY,
-        "ipptNam": "영흥풍력",
-        "hogi": "1",
-        "qhorGen01": 11,
-        "qhorGen12": 22,
-        "qhorGen24": 33,
-    }])
-    out = wind_namdong.transform_wide_to_long(wide)
-    ts = dict(zip(out["generation"], out["timestamp"]))
-
-    assert ts[11.0] == pd.Timestamp(f"{DAY} 01:00")
-    assert ts[22.0] == pd.Timestamp(f"{DAY} 12:00")
-    assert ts[33.0] == pd.Timestamp(f"{NEXT_DAY} 00:00")
-    assert out["plant_name"].unique().tolist() == ["영흥풍력 1"]
 
 
 # =========================================================

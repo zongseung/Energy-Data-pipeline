@@ -171,21 +171,12 @@ DEPLOYMENTS = [
         "description": "매일 오전 9시 30분에 남부발전 PV 데이터를 수집/백필",
     },
     {
-        "flow": "prefect_flows.namdong_wind_flow.monthly_namdong_wind_flow",
-        "name": "monthly-namdong-wind-collection",
-        "cron": "0 11 10 * *",
-        "label": "매월 10일 11:00 (남동발전 풍력)",
-        "tags": ["wind", "namdong", "monthly"],
-        "description": "매월 10일 오전 11시에 전월 남동발전 풍력 데이터를 수집",
-        "parameters": {"target_start": None, "target_end": None},
-    },
-    {
         "flow": "prefect_flows.gen_flow.monthly_gen_flow",
         "name": "monthly-koen-gen-collection",
         "cron": "0 10 10 * *",
-        "label": "매월 10일 10:00 (KOEN 비태양광: 화력/연료전지/소수력)",
+        "label": "매월 10일 10:00 (KOEN 비태양광: 풍력/화력/연료전지/소수력)",
         "tags": ["gen", "koen", "namdong", "monthly"],
-        "description": "매월 10일 10:00에 전월 KOEN 비태양광(화력/연료전지/해양소수력)을 "
+        "description": "매월 10일 10:00에 전월 KOEN 비태양광(풍력/화력/연료전지/해양소수력)을 "
                        "수집·변환해 generation 코어에 적재",
         "parameters": {"gen_keys": None, "mode": "latest"},
     },

@@ -1,7 +1,7 @@
 """
 남동발전(KOEN) 비태양광 발전원 데이터 수집 모듈.
 
-태양광(fetch_data/pv)·풍력(fetch_data/wind)과 동일한 koenergy.kr 소스에서
+태양광(fetch_data/pv)과 동일한 koenergy.kr 소스에서 (풍력도 2026-09 부터 여기)
 해양소수력 / 연료전지 / 화력 의 시간대별 발전실적을 수집한다.
 
 Submodules:
