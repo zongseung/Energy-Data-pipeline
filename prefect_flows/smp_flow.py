@@ -18,7 +18,11 @@ from fetch_data.smp.smp_aggregate import run_aggregate
 from fetch_data.smp.smp_collect import run_smp_collection
 from fetch_data.smp.smp_realtime import run_realtime_collection
 from fetch_data.smp.legacy_sync import run_legacy_sync
-from prefect_flows.notify_tasks import notify_slack_failure, notify_slack_success
+from prefect_flows.notify_tasks import (
+    assert_rows_loaded,
+    notify_slack_failure,
+    notify_slack_success,
+)
 
 
 # ========================================
@@ -34,6 +38,7 @@ def run_smp_collection_task() -> int:
 def daily_smp_collection_flow() -> int:
     try:
         inserted = run_smp_collection_task()
+        assert_rows_loaded("SMP Hourly", inserted)
         notify_slack_success.submit("SMP Hourly", f"- 시간별 적재 행수: {inserted}")
         return inserted
     except Exception as e:
@@ -54,6 +59,7 @@ def run_smp_aggregate_task() -> int:
 def monthly_smp_aggregate_flow() -> int:
     try:
         inserted = run_smp_aggregate_task()
+        assert_rows_loaded("SMP Aggregate", inserted)
         notify_slack_success.submit("SMP Aggregate", f"- 월/연 가중평균 적재 행수: {inserted}")
         return inserted
     except Exception as e:

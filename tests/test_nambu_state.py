@@ -42,3 +42,27 @@ def test_collectors_write_using_discovered_plant_name():
 
     assert 'core_df["plant_name"] = target["plant_name"]' in daily
     assert 'core_df["plant_name"] = t["plant_name"]' in backfill
+
+
+# =========================================================
+# 최근 결손일 되메우기 (earliest_start)
+# =========================================================
+def test_결손일이_없으면_시작일을_그대로_둔다():
+    from datetime import datetime as _dt
+    from fetch_data.pv.nambu_state import earliest_start
+    start = _dt(2026, 9, 1)
+    assert earliest_start(start, []) == start
+
+
+def test_최근_결손일이_있으면_그_날부터_다시_받는다():
+    """하루치 API 실패가 영구 구멍이 되던 회귀. 가장 이른 결손일로 당겨야 한다."""
+    from datetime import date as _d, datetime as _dt
+    from fetch_data.pv.nambu_state import earliest_start
+    gaps = [_d(2026, 8, 30), _d(2026, 8, 22)]  # 정렬돼 있지 않아도 가장 이른 날
+    assert earliest_start(_dt(2026, 9, 1), gaps) == _dt(2026, 8, 22)
+
+
+def test_결손일이_시작일보다_뒤면_시작일이_이긴다():
+    from datetime import date as _d, datetime as _dt
+    from fetch_data.pv.nambu_state import earliest_start
+    assert earliest_start(_dt(2026, 8, 1), [_d(2026, 8, 20)]) == _dt(2026, 8, 1)

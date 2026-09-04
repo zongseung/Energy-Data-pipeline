@@ -9,7 +9,11 @@ from __future__ import annotations
 from prefect import flow, task, get_run_logger
 
 from fetch_data.pv.ekr_collect import run as ekr_run
-from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
+from prefect_flows.notify_tasks import (
+    assert_rows_loaded,
+    notify_slack_failure,
+    notify_slack_success,
+)
 
 
 @task(name="EKR 영암/율치 PV 수집", retries=2, retry_delay_seconds=300)
@@ -23,6 +27,7 @@ def collect_ekr_pv() -> int:
 def yearly_ekr_pv_flow() -> int:
     try:
         n = collect_ekr_pv()
+        assert_rows_loaded("EKR PV", n)
         notify_slack_success.submit("EKR PV", f"- generation {n}행 적재")
         return n
     except Exception as e:

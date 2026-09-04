@@ -9,19 +9,25 @@ from __future__ import annotations
 from prefect import flow, task
 
 from fetch_data.pv.nambu_collect import solar_automation_flow
-from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
+from prefect_flows.notify_tasks import (
+    assert_rows_loaded,
+    notify_slack_failure,
+    notify_slack_success,
+)
 
 
 @task(name="남부발전 PV 수집 실행", retries=2, retry_delay_seconds=300)
-def run_nambu_collection() -> None:
-    solar_automation_flow()
+def run_nambu_collection() -> int:
+    return solar_automation_flow()
 
 
 @flow(name="Daily Nambu PV Collection Flow", log_prints=True)
-def daily_nambu_collection_flow() -> None:
+def daily_nambu_collection_flow() -> int:
     try:
-        run_nambu_collection()
-        notify_slack_success.submit("Nambu PV", "- 수집/백필 실행 완료")
+        rows = run_nambu_collection()
+        assert_rows_loaded("Nambu PV", rows)
+        notify_slack_success.submit("Nambu PV", f"- 수집/백필 적재 행수: {rows}")
+        return rows
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
         notify_slack_failure.submit("Nambu PV", error_msg)

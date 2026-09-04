@@ -9,7 +9,11 @@ from __future__ import annotations
 from prefect import flow, task, get_run_logger
 
 from fetch_data.pv.ewp_collect import run as ewp_run
-from prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
+from prefect_flows.notify_tasks import (
+    assert_rows_loaded,
+    notify_slack_failure,
+    notify_slack_success,
+)
 
 
 @task(name="EWP 지점별 PV 수집", retries=2, retry_delay_seconds=300)
@@ -23,6 +27,7 @@ def collect_ewp_pv() -> int:
 def yearly_ewp_pv_flow() -> int:
     try:
         n = collect_ewp_pv()
+        assert_rows_loaded("EWP PV", n)
         notify_slack_success.submit("EWP PV", f"- generation {n}행 적재")
         return n
     except Exception as e:

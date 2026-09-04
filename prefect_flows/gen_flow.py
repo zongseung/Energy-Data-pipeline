@@ -16,7 +16,11 @@ from prefect import flow, task
 
 from fetch_data.gen.load_gen import load_all
 from fetch_data.gen.pipeline import run_pipeline
-from prefect_flows.notify_tasks import notify_slack_failure, notify_slack_success
+from prefect_flows.notify_tasks import (
+    assert_rows_loaded,
+    notify_slack_failure,
+    notify_slack_success,
+)
 
 
 @task(name="비태양광 수집·변환", retries=2, retry_delay_seconds=300)
@@ -38,6 +42,7 @@ def monthly_gen_flow(
     try:
         collect_transform(gen_keys, mode)
         inserted = load_generation(gen_keys)
+        assert_rows_loaded("KOEN Gen", inserted)
         notify_slack_success.submit(
             "KOEN Gen", f"- 카테고리: {gen_keys or '전체'}\n- generation 적재(처리) 행수: {inserted}"
         )

@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import json
+import os
 import pandas as pd
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -16,6 +17,8 @@ from fetch_data.common.generation_core import upsert_generation
 from fetch_data.pv.nambu_state import (
     collection_start,
     count_hours_for_day,
+    earliest_start,
+    find_incomplete_days,
     get_nambu_targets,
 )
 
@@ -34,6 +37,9 @@ if _PLANT_JSON.exists():
             GENCD_TO_NAME.setdefault(_p["plant_code"], _p["plant_name"])
 
 ENDPOINT = NamebuAPI.ENDPOINT
+
+# 최근 N일은 매번 결손(24시간 미만) 여부를 확인해 되메운다.
+HEAL_DAYS = int(os.getenv("NAMBU_HEAL_DAYS", "14"))
 
 # lazy 초기화: import 시점이 아닌 실행 시점에 검증
 _engine = None
@@ -68,6 +74,12 @@ def get_active_targets(engine_):
                 f"{last_dt.year}년 이후 기록 없음. 수집 제외."
             )
             continue
+
+        # 최근 HEAL_DAYS 안에 24시간이 안 찬 날이 있으면 그 날부터 다시 받는다.
+        gaps = find_incomplete_days(
+            engine_, target["plant_id"], today - timedelta(days=HEAL_DAYS), yesterday
+        )
+        start_dt = earliest_start(start_dt, gaps)
 
         if start_dt.date() <= yesterday:
             active_targets.append({**target, "start_dt": start_dt})
@@ -160,16 +172,16 @@ async def collect_and_save(engine_, targets):
 
     return total_rows
 
-def solar_automation_flow():
+def solar_automation_flow() -> int:
     engine = _get_engine()
     # 1. 수집 대상 분석
     targets = get_active_targets(engine)
 
     # 2. 데이터 수집 및 저장
-    if targets:
-        asyncio.run(collect_and_save(engine, targets))
-    else:
+    if not targets:
         logger.info("모든 발전소가 최신 상태입니다.")
+        return 0
+    return asyncio.run(collect_and_save(engine, targets))
 
 if __name__ == "__main__":
     solar_automation_flow()

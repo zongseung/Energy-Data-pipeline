@@ -10,6 +10,7 @@ from typing import List, Optional
 from prefect import flow
 
 from fetch_data.pv.namdong_collect import run_namdong_collection
+from prefect_flows.notify_tasks import assert_rows_loaded
 
 
 @flow(name="Monthly Namdong PV Collection Flow", log_prints=True)
@@ -18,4 +19,6 @@ def monthly_namdong_pv_flow(
     target_end: Optional[str] = None,
     sleep_sec: int = 5,
 ) -> List[Path]:
-    return run_namdong_collection(target_start, target_end, sleep_sec)
+    files = run_namdong_collection(target_start, target_end, sleep_sec)
+    assert_rows_loaded("Namdong PV", files)  # 원천 미공개·다운로드 실패를 성공으로 넘기지 않는다
+    return files

@@ -60,6 +60,19 @@ def collection_start(
     return datetime.combine(day, datetime.min.time())
 
 
+def earliest_start(start_dt: datetime, incomplete: list[date]) -> datetime:
+    """정상 시작일과 '최근 결손일' 중 이른 쪽을 고른다.
+
+    남부 API 는 하루치 호출이 실패해도 그 날짜를 건너뛰고 넘어간다. 시작일을
+    마지막 기록 다음날로만 잡으면 그렇게 뚫린 날은 영영 재조회되지 않는다
+    (2025-12-31 12개소 345시간이 그렇게 굳었다). 최근 결손일이 있으면
+    거기서부터 다시 받아 매일 도는 김에 자동으로 메운다.
+    """
+    if not incomplete:
+        return start_dt
+    return min(start_dt, datetime.combine(min(incomplete), datetime.min.time()))
+
+
 def get_nambu_targets(engine, gencd: str | None = None, hogi: int | None = None) -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(_TARGETS).mappings().all()
