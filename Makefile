@@ -1,7 +1,7 @@
 # Energy-Data-pipeline Makefile
-# 실제 운영: docker/docker-compose.yml 사용
+# 실제 운영: ops/docker/docker-compose.yml 사용
 
-COMPOSE = docker compose -f docker/docker-compose.yml
+COMPOSE = docker compose -f ops/docker/docker-compose.yml
 
 .PHONY: up down logs logs-worker rebuild deploy ps ui db
 

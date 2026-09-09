@@ -34,4 +34,4 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["pipeline/tests"]

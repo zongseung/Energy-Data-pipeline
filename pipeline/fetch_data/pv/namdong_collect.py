@@ -1,0 +1,397 @@
+import asyncio
+import os
+import re
+from datetime import datetime, date, timedelta
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import aiohttp
+import pandas as pd
+from prefect import task
+from sqlalchemy import create_engine, text
+
+from pipeline.fetch_data.common.db_utils import resolve_db_url
+from pipeline.fetch_data.common.generation_core import latest_generation_date
+from pipeline.fetch_data.common.paths import SCRATCH_DIR
+from pipeline.fetch_data.common.logger import get_logger
+from pipeline.fetch_data.common.utils import now_kst
+from pipeline.fetch_data.constants import NamdongAPI
+from pipeline.fetch_data.common.koen import (
+    get_koen_ssl_context,
+    is_probably_csv,
+    split_by_month as koen_split_by_month,
+)
+from pipeline.fetch_data.pv.namdong_transform import read_csv_flexible, hour_columns, extract_hour
+from pipeline.fetch_data.common.generation_core import upsert_generation
+from pipeline.fetch_data.common.notify import send_slack_message
+
+logger = get_logger(__name__)
+
+BASE = NamdongAPI.BASE_URL
+MENU_CD = NamdongAPI.MENU_CD
+
+CSV_URL = NamdongAPI.CSV_URL
+MAIN_URL = f"{BASE}/kosep/gv/nf/dt/nfdt21/main.do"
+
+# 저장 폴더
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_output_dir_env = os.getenv("NAMDONG_OUTPUT_DIR")
+OUTPUT_DIR = Path(_output_dir_env) if _output_dir_env else (SCRATCH_DIR / "namdong_pv")
+NAMDONG_START_DATE = os.getenv("NAMDONG_START_DATE")
+NAMDONG_ORG_NO = os.getenv("NAMDONG_ORG_NO", "").strip()
+NAMDONG_HOKI_S = os.getenv("NAMDONG_HOKI_S", "").strip()
+NAMDONG_HOKI_E = os.getenv("NAMDONG_HOKI_E", "").strip()
+NAMDONG_PAGE_INDEX = os.getenv("NAMDONG_PAGE_INDEX", "1").strip() or "1"
+
+
+# -------------------------
+# Utils
+# -------------------------
+def _sanitize_filename(s: str) -> str:
+    s = s.strip()
+    s = re.sub(r"[^\w\-.가-힣 ]+", "_", s)
+    s = re.sub(r"\s+", "_", s)
+    return s[:180]
+
+
+from pipeline.fetch_data.common.date_utils import (
+    to_yyyymmdd as _to_yyyymmdd,
+    to_date_yyyymmdd as _to_date_yyyymmdd,
+    validate_yyyymmdd as _validate_yyyymmdd,
+)
+
+
+from pipeline.fetch_data.common.date_utils import prev_month_range
+
+
+def split_by_month(date_s: str, date_e: str) -> List[Tuple[str, str]]:
+    return koen_split_by_month(_to_date_yyyymmdd(date_s), _to_date_yyyymmdd(date_e))
+
+
+def build_main_url(page_index: str, org_no: str, hoki_s: str, hoki_e: str, date_s: str, date_e: str) -> str:
+    # 실제 Referer 형태 유지
+    return (
+        f"{MAIN_URL}"
+        f"?pageIndex={page_index}&menuCd={MENU_CD}&xmlText="
+        f"&strOrgNo={org_no}&strHokiS={hoki_s}&strHokiE={hoki_e}"
+        f"&strDateS={date_s}&strDateE={date_e}"
+    )
+
+
+def tag_for_filename(org_no: str, hoki_s: str, hoki_e: str) -> str:
+    if not org_no and not hoki_s and not hoki_e:
+        return "전체"
+    parts = [org_no if org_no else "ALLORG"]
+    if hoki_s or hoki_e:
+        hs = hoki_s if hoki_s else "ALL"
+        he = hoki_e if hoki_e else "ALL"
+        parts.append(f"H{hs}-{he}")
+    return "_".join(parts)
+
+
+# -------------------------
+# Backfill helpers
+# -------------------------
+def latest_loaded_date() -> Optional[date]:
+    """남동 태양광의 마지막 적재일(DB). 없으면 None.
+
+    커서는 DB 다. 내려받은 CSV(pv_data_raw/)는 컨테이너 안에만 생겼다가
+    auto_remove 로 사라져서 파일명을 커서로 쓰면 매달 1년치를 다시 받는다.
+    """
+    return latest_generation_date(operator="namdong", fuel_type="solar")
+
+
+def resolve_backfill_range(
+    target_start: Optional[str],
+    target_end: Optional[str],
+) -> Tuple[date, date]:
+    if target_start:
+        start_dt = _to_date_yyyymmdd(_validate_yyyymmdd(target_start))
+    else:
+        latest = latest_loaded_date()
+        if latest:
+            start_dt = latest + timedelta(days=1)
+        elif NAMDONG_START_DATE:
+            start_dt = _to_date_yyyymmdd(_validate_yyyymmdd(NAMDONG_START_DATE))
+        else:
+            start_dt = date.today() - timedelta(days=365)
+
+    if target_end:
+        end_dt = _to_date_yyyymmdd(_validate_yyyymmdd(target_end))
+    else:
+        end_dt = date.today() - timedelta(days=1)
+
+    return start_dt, end_dt
+
+
+# -------------------------
+# Main downloader
+# -------------------------
+async def download_monthly_csvs(
+    page_index: str,
+    org_no: str,
+    hoki_s: str,
+    hoki_e: str,
+    date_s: str,
+    date_e: str,
+    sleep_sec: int = 5,
+) -> List[Path]:
+    month_ranges = split_by_month(date_s, date_e)
+    logger.info(f"총 {len(month_ranges)}개 구간(월 단위)으로 분할")
+    for i, (ds, de) in enumerate(month_ranges, start=1):
+        logger.info(f"  {i:>2}. {ds} ~ {de}")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    tag = tag_for_filename(org_no, hoki_s, hoki_e)
+
+    headers_common = {
+        "Origin": BASE,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0",
+    }
+
+    saved_files: List[Path] = []
+
+    # koenergy.kr는 중간 인증서를 누락(불완전 체인) → 보충한 SSL 컨텍스트 사용
+    connector = aiohttp.TCPConnector(ssl=get_koen_ssl_context())
+    async with aiohttp.ClientSession(
+        headers={"User-Agent": headers_common["User-Agent"]}, connector=connector
+    ) as session:
+        for idx, (ds, de) in enumerate(month_ranges, start=1):
+            main_url = build_main_url(page_index, org_no, hoki_s, hoki_e, ds, de)
+
+            # 쿠키 확보용 GET (400/500이면 다음으로 넘어가게 처리)
+            try:
+                async with session.get(main_url, timeout=30) as r1:
+                    r1.raise_for_status()
+            except Exception as e:
+                logger.warning(f"main.do GET 실패 ({idx}/{len(month_ranges)}) {ds}~{de}: {e}")
+                if idx < len(month_ranges):
+                    await asyncio.sleep(sleep_sec)
+                continue
+
+            data = {
+                "pageIndex": page_index,
+                "menuCd": MENU_CD,
+                "xmlText": "",
+                "strOrgNo": org_no,   # 빈값이면 전체
+                "strHokiS": hoki_s,   # 빈값이면 전체
+                "strHokiE": hoki_e,   # 빈값이면 전체
+                "strDateS": ds,
+                "strDateE": de,
+                "ptSignature": "",
+            }
+
+            post_headers = dict(headers_common)
+            post_headers["Referer"] = main_url
+
+            try:
+                async with session.post(CSV_URL, data=data, headers=post_headers, timeout=120) as r2:
+                    r2.raise_for_status()
+                    content_type = (r2.headers.get("Content-Type", "") or "").lower()
+                    body = await r2.read()
+            except Exception as e:
+                logger.warning(f"csvDown POST 실패 ({idx}/{len(month_ranges)}) {ds}~{de}: {e}")
+                if idx < len(month_ranges):
+                    await asyncio.sleep(sleep_sec)
+                continue
+
+            if "csv" not in content_type or not is_probably_csv(body, min_len=2000):
+                logger.warning(f"비정상 응답 ({idx}/{len(month_ranges)}) {ds}~{de} "
+                               f"| Content-Type={content_type} | Size={len(body)}B | Head={body[:200]}")
+            else:
+                out_name = _sanitize_filename(f"south_pv_{tag}_{ds}-{de}.csv")
+                out_path = OUTPUT_DIR / out_name
+                out_path.write_bytes(body)
+                saved_files.append(out_path)
+                logger.info(f"Saved ({idx}/{len(month_ranges)}): {out_path} ({len(body)} bytes)")
+
+            if idx < len(month_ranges):
+                logger.info(f"{sleep_sec}초 대기 후 다음 구간 수집")
+                await asyncio.sleep(sleep_sec)
+
+    return saved_files
+
+
+def load_namdong_to_db(files: List[Path], start_dt: date, end_dt: date, db_url: Optional[str]) -> int:
+    resolved_url = resolve_db_url(db_url)
+    if not resolved_url:
+        raise RuntimeError("DB_URL(또는 PV_DATABASE_URL/LOCAL_DB_URL)이 설정되어 있지 않습니다.")
+
+    engine = create_engine(resolved_url)
+
+    long_parts: List[pd.DataFrame] = []
+    for fp in files:
+        df = read_csv_flexible(fp)
+
+        if "발전소명" not in df.columns:
+            if "발전구분" in df.columns:
+                df["발전소명"] = df["발전구분"]
+            else:
+                raise ValueError(f"필수 컬럼(발전구분) 누락: {fp.name}")
+
+        if "호기" in df.columns:
+            df["호기"] = df["호기"].astype(str).str.strip()
+            hogi_counts = df.groupby("발전소명")["호기"].nunique()
+            multi_hogi_plants = set(hogi_counts[hogi_counts > 1].index)
+
+            mask = df["발전소명"].isin(multi_hogi_plants)
+            df.loc[mask, "발전소명"] = df.loc[mask, "발전소명"] + "_" + df.loc[mask, "호기"]
+
+        if "일자" not in df.columns:
+            raise ValueError(f"필수 컬럼(일자) 누락: {fp.name}")
+
+        hcols = hour_columns(df)
+        if not hcols:
+            raise ValueError(f"시간별 발전량 컬럼을 못 찾음: {fp.name}")
+
+        df_long = pd.melt(
+            df,
+            id_vars=["일자", "발전소명"],
+            value_vars=hcols,
+            var_name="시간",
+            value_name="발전량",
+        )
+
+        df_long["hour"] = df_long["시간"].apply(extract_hour).astype("int64")
+        df_long["generation"] = pd.to_numeric(df_long["발전량"], errors="coerce").fillna(0)
+        df_long["date"] = pd.to_datetime(df_long["일자"], errors="coerce")
+        df_long["datetime"] = df_long["date"] + pd.to_timedelta(df_long["hour"] - 1, unit="h")
+        df_long["plant_name"] = df_long["발전소명"]
+
+        long_parts.append(
+            df_long[["datetime", "plant_name", "hour", "generation"]].dropna(subset=["datetime", "plant_name"])
+        )
+
+    if not long_parts:
+        return 0
+
+    merged = pd.concat(long_parts, ignore_index=True)
+
+    # 신규 코어 직접 UPSERT (구 namdong_generation write 대체).
+    # merged["datetime"]는 이미 date+(hour-1) 구간시작 = 코어 timestamp 규약과 동일.
+    core_df = merged.rename(columns={"datetime": "timestamp"})[["timestamp", "plant_name", "generation"]]
+    upsert_generation(core_df, operator="namdong", fuel_type="solar", engine=engine)
+
+    return len(merged)
+
+
+@task(name="남동발전 CSV 수집", retries=3, retry_delay_seconds=300)
+def collect_namdong_csv(
+    page_index: str,
+    org_no: str,
+    hoki_s: str,
+    hoki_e: str,
+    start_dt: date,
+    end_dt: date,
+    sleep_sec: int = 5,
+) -> List[Path]:
+    return asyncio.run(
+        download_monthly_csvs(
+            page_index=page_index,
+            org_no=org_no,
+            hoki_s=hoki_s,
+            hoki_e=hoki_e,
+            date_s=_to_yyyymmdd(start_dt),
+            date_e=_to_yyyymmdd(end_dt),
+            sleep_sec=sleep_sec,
+        )
+    )
+
+
+def _collect_namdong_csv_sync(
+    page_index: str,
+    org_no: str,
+    hoki_s: str,
+    hoki_e: str,
+    start_dt: date,
+    end_dt: date,
+    sleep_sec: int,
+) -> List[Path]:
+    return asyncio.run(
+        download_monthly_csvs(
+            page_index=page_index,
+            org_no=org_no,
+            hoki_s=hoki_s,
+            hoki_e=hoki_e,
+            date_s=_to_yyyymmdd(start_dt),
+            date_e=_to_yyyymmdd(end_dt),
+            sleep_sec=sleep_sec,
+        )
+    )
+
+
+def run_namdong_collection(
+    target_start: Optional[str] = None,
+    target_end: Optional[str] = None,
+    sleep_sec: int = 5,
+    db_url: Optional[str] = None,
+) -> List[Path]:
+    logger.info("=" * 60)
+    logger.info("남동발전 PV 수집 시작")
+    logger.info(f"실행 시각: {now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+
+    try:
+        if target_start is None and target_end is None:
+            prev_start, prev_end = prev_month_range()
+            start_dt, end_dt = prev_start, prev_end
+        else:
+            start_dt, end_dt = resolve_backfill_range(target_start, target_end)
+        if start_dt > end_dt:
+            logger.info("수집 대상이 없습니다. 최신 상태입니다.")
+            send_slack_message(
+                "[Namdong PV 완료]\n- 수집 대상 없음 (최신 상태)"
+            )
+            return []
+
+        logger.info(f"수집 기간: {start_dt} ~ {end_dt}")
+        saved_files = _collect_namdong_csv_sync(
+            NAMDONG_PAGE_INDEX,
+            NAMDONG_ORG_NO,
+            NAMDONG_HOKI_S,
+            NAMDONG_HOKI_E,
+            start_dt,
+            end_dt,
+            sleep_sec,
+        )
+        if saved_files:
+            inserted_rows = load_namdong_to_db(saved_files, start_dt, end_dt, db_url)
+        else:
+            inserted_rows = 0
+
+        send_slack_message(
+            f"[Namdong PV 완료]\n"
+            f"- 기간: {_to_yyyymmdd(start_dt)}~{_to_yyyymmdd(end_dt)}\n"
+            f"- 저장 파일 수: {len(saved_files)}\n"
+            f"- 적재 행수: {inserted_rows}\n"
+            f"- 저장 폴더: {OUTPUT_DIR}"
+        )
+
+        return saved_files
+
+    except Exception as e:
+        error_msg = f"{type(e).__name__}: {e}"
+        logger.error(f"수집 중 에러 발생: {error_msg}")
+        send_slack_message(f"[Namdong PV 실패]\n- 에러: {error_msg}")
+        raise
+
+
+def main():
+    """환경변수 또는 CLI 인수 기반으로 실행합니다."""
+    import argparse
+    parser = argparse.ArgumentParser(description="남동발전 PV 수집")
+    parser.add_argument("--start", default=None, help="시작일 (YYYYMMDD)")
+    parser.add_argument("--end", default=None, help="종료일 (YYYYMMDD)")
+    parser.add_argument("--sleep", default=5, type=int, help="월별 다운로드 간 대기(초)")
+    args = parser.parse_args()
+
+    run_namdong_collection(
+        target_start=args.start,
+        target_end=args.end,
+        sleep_sec=args.sleep,
+    )
+
+
+if __name__ == "__main__":
+    main()

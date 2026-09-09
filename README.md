@@ -19,65 +19,43 @@ Prefect 2로 오케스트레이션하고 PostgreSQL에 저장합니다.
 
 ```
 Energy-Data-pipeline/
-├── fetch_data/                         # 수집·변환 코드 (소스별 패키지)
-│   ├── common/                         # 공통 인프라
-│   │   ├── db_base.py                  #   ★ 엔진/세션 단일 팩토리 (get_engine/get_session)
-│   │   ├── db_utils.py                 #   resolve_db_url (컨테이너/호스트 자동 전환)
-│   │   ├── config.py · logger.py · utils.py · date_utils.py
-│   ├── weather/  asos_collect.py       # ASOS 기상 수집
-│   ├── pv/
-│   │   ├── nambu_collect.py            # 남부 PV 일일 수집(라이브)
-│   │   ├── nambu_backfill.py           # 남부 PV 과거 백필(수동)
-│   │   ├── nambu_transform.py          # 남부 wide→long 변환
-│   │   ├── namdong_collect.py          # 남동 PV 수집(koenergy 스크래핑)
-│   │   ├── namdong_transform.py        # 남동 PV 변환
-│   │   └── database.py                 # PV 테이블 모델
-│   ├── wind/
-│   │   ├── namdong_collect.py          # 남동 풍력(API + CSV 백필)
-│   │   ├── seobu_backfill.py           # 서부 풍력(CSV)
-│   │   ├── hangyoung_backfill.py       # 한경 풍력(CSV)
-│   │   └── database.py
-│   ├── gen/                            # KOEN 비태양광(해양소수력/연료전지/화력)
-│   │   ├── namdong_collect.py · transform_gen.py · pipeline.py · load_gen.py
-│   │   └── capacities.py · locations.py
-│   ├── smp/
-│   │   ├── smp_scraper.py · smp_collect.py · smp_aggregate.py · smp_realtime.py
-│   │   ├── smp_backfill.py · legacy_sync.py · _common.py · database.py
-│   └── jeju/
-│       └── jeju_realtime_collect.py · jeju_sukub_collect.py · jeju_gen_collect.py · jeju_demand_collect.py
+├── pipeline/                       # 파이프라인 본체
+│   ├── fetch_data/                 #   수집기 (소스별)
+│   │   ├── common/                 #     paths·db_utils·generation_core·notify·koen·logger
+│   │   ├── config/                 #     station_list.csv · plant.json
+│   │   ├── pv/                     #     남부·남동·EKR·동서 태양광
+│   │   ├── gen/                    #     KOEN 비태양광 (해양소수력·연료전지·화력·풍력)
+│   │   ├── smp/  weather/  oil/  demand/  jeju/  komipo/
+│   ├── prefect_flows/              #   flow 래퍼 (수집기엔 @flow 없음)
+│   │   └── deploy.py               #     모든 deployment/스케줄 등록 — 정본
+│   └── tests/
 │
-├── prefect_flows/                      # Prefect flow 래퍼 (수집기엔 @flow 없음)
-│   ├── deploy.py                       # 모든 deployment/스케줄 등록
-│   ├── prefect_pipeline.py             # 기상
-│   ├── nambu_pv_flow.py · namdong_pv_flow.py
-│   ├── smp_flow.py · gen_flow.py · jeju_flow.py
-│   └── notify_tasks.py · merge_to_all.py
+├── ops/                            # 운영 자산
+│   ├── docker/                     #   ★ 운영 스택 (docker-compose.yml · Dockerfile)
+│   ├── systemd/                    #   부팅 복구 유닛
+│   ├── scripts/                    #   DB 백업/복원, 일회성 유틸
+│   └── sql/                        #   research 쿼리 · FDW · migrations/
 │
-├── config/                             # 추적되는 설정 파일
-│   ├── station_list.csv                #   ASOS 지점 목록
-│   └── plant.json                      #   남부 gencd → 발전소명 매핑
-├── inputs/wind/                        # 풍력 백필 원본 CSV (gitignore)
-├── scripts/
-│   ├── backup_pv_db.sh · restore_pv_db.sh   # DB 백업/복원 (→ NAS)
-│   └── migrations/                     # 일회성·기록용 (직접 실행 안 함)
-│       ├── schema_migration.py         #   plants/generation 코어 마이그레이션
-│       └── *.sql                       #   dual-write 트리거 등
+├── llm/                            # LLM 데모
+│   ├── mcp-server/                 #   energy-mcp (별도 파이썬 프로젝트)
+│   └── librechat/                  #   LibreChat + nginx + PgBouncer 스택
 │
-├── docker/                             # ★ 운영 스택 (정본)
-│   ├── docker-compose.yml · Dockerfile
-├── notify/slack_notifier.py            # Slack Webhook 알림
-├── Makefile · pyproject.toml · uv.lock · .env
-└── ARCHITECTURE.md · README.md
+├── data/                           # ★ 살아남는 유일한 경로 (컨테이너 마운트)
+│   ├── asos_*.csv  oil/  komipo/  smp/  backups/
+│   └── (중간 산출물은 /tmp/energy-pipeline — DB 가 정본이라 안 쌓는다)
+│
+├── docs/  intake/
+└── Makefile · pyproject.toml · uv.lock · .env · CLAUDE.md · README.md
 ```
 
 > **네이밍 규약**: 수집기 파일명은 역할 동사로 통일합니다 — `*_collect`(라이브 수집) · `*_backfill`(일회성/이력) · `*_transform`(wide→long 변환) · `*_probe`(보조 탐지).
-> **레이어 규칙**: `@flow`는 `prefect_flows/`에만 두고, 수집기는 단일 진입점 `run(...)`을 노출합니다.
+> **레이어 규칙**: `@flow`는 `pipeline/prefect_flows/`에만 두고, 수집기는 단일 진입점 `run(...)`을 노출합니다.
 
 ---
 
-## 운영 스택 (docker/)
+## 운영 스택 (ops/docker/)
 
-실제 운영은 `docker/docker-compose.yml` 스택을 사용합니다 (`Makefile` 기준).
+실제 운영은 `ops/docker/docker-compose.yml` 스택을 사용합니다 (`Makefile` 기준).
 
 | 컨테이너 | 역할 | 포트(host) |
 |---|---|---|
@@ -91,20 +69,20 @@ Energy-Data-pipeline/
 - 컨테이너 내부에선 호스트명 `pv-db`(=pv-data-postgres). `resolve_db_url`이 환경을 자동 전환합니다.
 
 ```bash
-make up        # docker compose -f docker/docker-compose.yml up -d
+make up        # docker compose -f ops/docker/docker-compose.yml up -d
 make rebuild   # 이미지 재빌드 + deployer 재실행 (코드/스케줄 변경 반영)
 make logs-worker
 make ps
 make db        # psql 접속
 ```
 
-> 과거 루트에 있던 옛 `docker-compose.yml`은 2026-08 에 제거했습니다. 운영은 `docker/docker-compose.yml` 스택을 기준으로 하세요.
+> 과거 루트에 있던 옛 `docker-compose.yml`은 2026-08 에 제거했습니다. 운영은 `ops/docker/docker-compose.yml` 스택을 기준으로 하세요.
 
 ---
 
 ## Prefect Flows & 스케줄
 
-`pv-deployer`가 `prefect_flows/deploy.py`로 아래 deployment를 등록합니다 (KST).
+`pv-deployer`가 `pipeline/prefect_flows/deploy.py`로 아래 deployment를 등록합니다 (KST).
 
 | Deployment | 스케줄 | 소스 flow |
 |---|---|---|
@@ -211,7 +189,7 @@ uv run python -m fetch_data.smp.smp_aggregate --period all
 uv run python -m fetch_data.smp.smp_realtime --backfill # 제주 실시간 과거 일괄
 
 # 남부 PV 백필 (메인 DB 5436 으로 적재)
-uv run python fetch_data/pv/nambu_backfill.py \
+uv run python -m pipeline.fetch_data.pv.nambu_backfill \
   --db-url "postgresql+psycopg2://pv:pv@localhost:5436/pv"
   # 옵션: --start --end --gencd --hogi --slack --debug
 
