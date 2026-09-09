@@ -18,6 +18,12 @@ KNOWN_VIEWS = (
 def hint_for(error_message: str) -> str | None:
     """PG 오류 메시지에 맞는 교정 힌트를 돌려준다. 없으면 None."""
     msg = error_message.lower()
+    if "찾지 못했다" in msg and "읍면동" in msg:
+        return (
+            "힌트: 시군구 이름을 research.forecast()의 dong 인자로 쓰지 마라. "
+            "research.forecast_regions(예보종, 시도, 시군구)로 실제 읍면동을 "
+            "먼저 확인하라."
+        )
     if "function round(double precision" in msg:
         return "힌트: PostgreSQL 에서는 round(값::numeric, 자릿수) 로 캐스트해야 한다."
     if "relation" in msg and "does not exist" in msg:

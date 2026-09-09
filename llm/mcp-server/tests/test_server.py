@@ -217,6 +217,19 @@ def test_connection_failure_does_not_leak_traceback_object(monkeypatch):
     assert "Traceback" not in message
 
 
+def test_main_runs_the_selected_mode(monkeypatch):
+    selected = MagicMock()
+    choose = MagicMock(return_value=selected)
+    monkeypatch.setattr(server, "server_for_mode", choose)
+    monkeypatch.setenv("ENERGY_MCP_MODE", "workflow")
+    monkeypatch.setenv("ENERGY_MCP_TRANSPORT", "stdio")
+
+    server.main()
+
+    choose.assert_called_once_with("workflow")
+    selected.run.assert_called_once_with(transport="stdio")
+
+
 # ---------------------------------------------------------------------------
 # 스키마 리소스 마크다운 렌더링 (DB 없이 — 행 튜플만 넣어본다)
 # ---------------------------------------------------------------------------
@@ -237,6 +250,17 @@ def test_schema_markdown_includes_known_pitfalls_without_db():
     assert "영흥태양광" in md
     assert "is_aggregate" in md
     assert "구간시작" in md
+
+
+def test_schema_markdown_explains_forecast_sigungu_discovery():
+    """함수 계약이 빠지면 planner가 종로구를 dong으로 넣고 데이터 없음으로 오판한다."""
+    md = server._render_schema_markdown([])
+
+    assert "research.forecast(text, text, text, text, text)" in md
+    assert "research.forecast_regions(text, text, text)" in md
+    assert "시군구를 `dong` 인자로 넣지 마라" in md
+    assert "존재 여부" in md
+    assert "전체 읍면동인지 특정 읍면동인지" in md
 
 
 def test_수명_지난_익스포트만_지운다(tmp_path) -> None:

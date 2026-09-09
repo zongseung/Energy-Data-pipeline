@@ -15,9 +15,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import csv
 import datetime
+import functools
 import os
 import time
 import uuid
@@ -25,9 +27,24 @@ from decimal import Decimal
 from typing import Any
 
 import psycopg2
+import uvicorn
 from mcp.server.fastmcp import FastMCP
+from pymongo import MongoClient
+from starlette.responses import PlainTextResponse
 
+from energy_mcp.approval import register_approval_routes
 from energy_mcp.hints import hint_for
+from energy_mcp.planner import plan_with_openai
+from energy_mcp.workflow import (
+    _hash,
+    _reject_multi_statement,
+    claim_workflow,
+    fail_planning,
+    finish_workflow,
+    new_workflow,
+    save_decision,
+    utcnow,
+)
 
 DSN_ENV = "ENERGY_MCP_DSN"
 TIMEOUT_ENV = "ENERGY_MCP_STATEMENT_TIMEOUT_S"
@@ -79,9 +96,68 @@ KNOWN_PITFALLS_MD = """\
    한해 보정을 적용하지 않았다 — 실제 값과 ±1시간 어긋날 수 있다.
 """
 
+FORECAST_FUNCTIONS_MD = """\
+## NAS 기상예보 함수
+
+- `research.forecast(text, text, text, text, text)` — 예보종, **읍면동**, 요소,
+  시작 YYYYMM, 종료 YYYYMM 순서로 NAS CSV를 읽는다.
+- `research.forecast_regions(text, text, text)` — 예보종, 시도, 시군구 순서로
+  실제 읍면동 목록을 확인한다.
+- `research.forecast_elements(text)` — 예보종의 요소 목록을 확인한다.
+
+사용자가 `종로구` 같은 시군구로 자연스럽게 질문하는 것은 정상이다.
+시군구를 `dong` 인자로 넣지 마라. **데이터 존재 여부**만 물으면
+`research.forecast_regions('단기예보', '서울특별시', '종로구')`로 확인하고,
+읍면동이 반환되면 데이터가 있다고 답한다. 실제 값을 요청했는데 시군구만 주어졌으면
+전체 읍면동인지 특정 읍면동인지 질문한다. 잘못된 `forecast()` 호출이 실패했다는
+이유만으로 데이터가 없다고 결론 내리지 마라.
+"""
+
 RESOURCE_URI = "energy://schema"
 
-mcp = FastMCP("energy-mcp")
+WORKFLOW_INSTRUCTIONS = """각 HTTP 요청은 무상태다. 모호한 질문은 plan_query가 반환한 질문으로 구체화한다.
+awaiting_confirmation이면 조건, SQL, 승인 링크를 보여주고 사용자가 승인했다고 말할 때까지 execute_query를 호출하지 않는다.
+실행 결과에는 확정 조건과 실제 SQL을 표시한다.
+legacy run_sql은 이 서버에 없다.
+"""
+
+legacy_mcp = FastMCP("energy-mcp-legacy")
+workflow_mcp = FastMCP(
+    "energy-mcp",
+    instructions=WORKFLOW_INSTRUCTIONS,
+    stateless_http=True,
+)
+mcp = legacy_mcp  # 기존 import 호환
+
+
+def server_for_mode(mode: str) -> FastMCP:
+    if mode == "legacy":
+        return legacy_mcp
+    if mode == "workflow":
+        return workflow_mcp
+    raise RuntimeError("ENERGY_MCP_MODE는 legacy 또는 workflow여야 합니다.")
+
+
+@functools.lru_cache(maxsize=1)
+def workflow_collection():
+    uri = os.environ.get("ENERGY_MCP_MONGO_URI")
+    if not uri:
+        raise RuntimeError("ENERGY_MCP_MONGO_URI가 설정되지 않았습니다.")
+    collection = MongoClient(uri, tz_aware=True).get_default_database()["query_workflows"]
+    collection.create_index("expires_at", expireAfterSeconds=0)
+    collection.update_many(
+        {"status": "executing"},
+        {"$set": {
+            "status": "failed",
+            "error_code": "execution_interrupted_uncertain",
+            "executed_at": utcnow(),
+            "duration_ms": None,
+        }},
+    )
+    return collection
+
+
+register_approval_routes(workflow_mcp, workflow_collection)
 
 
 # ---------------------------------------------------------------------------
@@ -146,25 +222,6 @@ def _readonly_cursor(dsn: str, timeout_s: int):
 # ---------------------------------------------------------------------------
 # 쿼리 실행
 # ---------------------------------------------------------------------------
-
-
-def _reject_multi_statement(query: str) -> None:
-    """세미콜론으로 이어진 여러 문장을 거부한다.
-
-    read-only 세션은 데이터 변경만 막을 뿐 `SET statement_timeout = 0` 같은
-    세션 설정 변경은 막지 않는다. 한 호출에 문장 하나만 허용하면 우리가 앞서
-    설정한 statement_timeout을 뒤 문장이 덮어쓸 길이 없어진다.
-    """
-    body = query.strip()
-    if not body:
-        raise ValueError("빈 쿼리입니다.")
-    if body.endswith(";"):
-        body = body[:-1]
-    if ";" in body:
-        raise ValueError(
-            "한 번에 하나의 SQL 문장만 실행할 수 있습니다. "
-            "세미콜론으로 여러 문장을 연결하지 마세요."
-        )
 
 
 def _jsonable(value: Any) -> Any:
@@ -305,7 +362,7 @@ def _execute(query: str) -> dict[str, Any]:
         return result
 
 
-@mcp.tool()
+@legacy_mcp.tool()
 def run_sql(query: str) -> dict[str, Any]:
     """읽기전용 SQL을 `research` 스키마에 대해 실행한다.
 
@@ -422,6 +479,12 @@ def run_sql(query: str) -> dict[str, Any]:
       - 요소 이름을 모르면 `SELECT * FROM research.forecast_elements('단기예보')`,
         지역 이름을 모르면 `SELECT * FROM research.forecast_regions('단기예보','서울특별시')`
         를 먼저 불러라. 요소·읍면동 이름을 지어내면 에러가 난다.
+      - 사용자가 `종로구` 같은 시군구로 묻는 것은 정상이다.
+        시군구를 `dong` 인자로 넣지 마라. **데이터 존재 여부**만 물으면
+        `research.forecast_regions('단기예보','서울특별시','종로구')`로 확인하고,
+        읍면동이 반환되면 데이터가 있다고 답하라. 실제 값을 요청했는데 시군구만
+        주어졌으면 전체 읍면동인지 특정 읍면동인지 질문하라. 잘못된 `forecast()`
+        호출이 실패했다는 이유만으로 데이터가 없다고 결론 내리지 마라.
     - 상세 컬럼·함정은 `energy://schema` 리소스에 있다(읽을 수 있는 클라이언트만).
     - 조회 결과는 **마크다운 표**로 정리해 보여줘라.
     - 응답에 `download_url`이 있으면 반드시 마크다운 링크로 안내하라 —
@@ -430,6 +493,118 @@ def run_sql(query: str) -> dict[str, Any]:
       DB 클라이언트에 붙여넣어 전체 데이터를 직접 추출할 수 있게.
     """
     return _execute(query)
+
+
+@workflow_mcp.tool()
+def plan_query(
+    question: str,
+    workflow_id: str | None = None,
+    answers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """질문을 구체화하고 승인할 조건과 SQL을 계획한다.
+
+    needs_clarification이면 질문을 그대로 전달한다. awaiting_confirmation이면
+    조건, SQL, 승인 URL을 보여주고 브라우저 처리 뒤 채팅으로 돌아와 승인 여부를
+    알려 달라고 안내한다. 이 도구는 SQL을 실행하지 않는다.
+    """
+    collection = workflow_collection()
+    now = utcnow()
+    if workflow_id is None:
+        doc, workflow_id = new_workflow(question, now)
+        doc["answers"] = dict(answers or {})
+        collection.insert_one(doc)
+        revision = doc["revision"]
+    else:
+        live_query = {
+            "_id": workflow_id,
+            "status": "clarifying",
+            "expires_at": {"$gt": now},
+        }
+        doc = collection.find_one(live_query)
+        if doc is None:
+            raise RuntimeError("구체화할 workflow가 없거나 만료됐습니다.")
+        revision = doc["revision"]
+        merged = {**doc.get("answers", {}), **(answers or {})}
+        update_query = {
+            **live_query,
+            "revision": revision,
+            "expires_at": {"$gt": utcnow()},
+        }
+        changed = collection.update_one(
+            update_query,
+            {"$set": {"answers": merged}, "$inc": {"revision": 1}},
+        )
+        if changed.matched_count != 1:
+            raise RuntimeError("workflow가 만료됐거나 이미 다음 단계로 진행됐습니다.")
+        doc["answers"] = merged
+        revision += 1
+    try:
+        decision = plan_with_openai(
+            doc["question"], doc.get("answers", {}), _fetch_schema_markdown()
+        )
+    except Exception as exc:
+        fail_planning(collection, workflow_id, revision, type(exc).__name__, utcnow())
+        raise
+    try:
+        return save_decision(
+            collection,
+            workflow_id,
+            revision,
+            decision,
+            os.environ["ENERGY_MCP_APPROVAL_BASE_URL"],
+            utcnow(),
+        )
+    except ValueError as exc:
+        fail_planning(collection, workflow_id, revision, type(exc).__name__, utcnow())
+        raise
+
+
+@workflow_mcp.tool()
+def execute_query(workflow_id: str) -> dict[str, Any]:
+    """사용자가 승인했다고 채팅에 알린 뒤 저장 SQL을 정확히 한 번 실행한다.
+
+    호출자가 SQL을 전달할 수 없으며 승인 전, 만료, 거절, 재실행은 거부한다.
+    """
+    collection = workflow_collection()
+    stored = claim_workflow(collection, workflow_id)
+    if stored is None:
+        raise RuntimeError("승인됐고 실행 가능한 workflow가 아닙니다.")
+    started_ns = time.monotonic_ns()
+    sql = stored.get("sql")
+    sql_sha256 = stored.get("sql_sha256")
+    approval_sql_sha256 = stored.get("approval_sql_sha256")
+    if (
+        not isinstance(sql, str)
+        or not isinstance(sql_sha256, str)
+        or sql_sha256 != approval_sql_sha256
+        or _hash(sql) != sql_sha256
+    ):
+        duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
+        finish_workflow(
+            collection,
+            workflow_id,
+            None,
+            "sql_integrity_error",
+            duration_ms,
+            utcnow(),
+        )
+        raise RuntimeError("승인된 SQL이 변경됐습니다. 새 workflow를 만드세요.")
+    try:
+        result = _execute(sql)
+    except Exception as exc:
+        duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
+        finish_workflow(
+            collection, workflow_id, None, type(exc).__name__, duration_ms, utcnow()
+        )
+        raise
+    duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
+    finish_workflow(collection, workflow_id, result, None, duration_ms, utcnow())
+    return {
+        **result,
+        "request_summary": stored["summary"],
+        "executed_sql": sql,
+        "workflow_id": workflow_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +646,10 @@ def _render_schema_markdown(table_rows: list[tuple]) -> str:
         )
         section["columns"].append((column_name, data_type, column_comment))
 
-    lines = ["# research 스키마 사전", "", KNOWN_PITFALLS_MD, "## 뷰 목록", ""]
+    lines = [
+        "# research 스키마 사전", "", KNOWN_PITFALLS_MD,
+        FORECAST_FUNCTIONS_MD, "## 뷰 목록", "",
+    ]
     for table_name in sorted(sections):
         section = sections[table_name]
         lines.append(f"### research.{table_name}")
@@ -494,7 +672,7 @@ def _render_schema_markdown(table_rows: list[tuple]) -> str:
     return "\n".join(lines)
 
 
-@mcp.resource(RESOURCE_URI)
+@legacy_mcp.resource(RESOURCE_URI)
 def schema_dictionary() -> str:
     """`research` 스키마의 뷰·컬럼·COMMENT를 DB에서 직접 읽어 마크다운으로 낸다.
 
@@ -504,22 +682,50 @@ def schema_dictionary() -> str:
     return _fetch_schema_markdown()
 
 
+@workflow_mcp.custom_route("/health", methods=["GET"])
+async def workflow_health(request):
+    try:
+        collection = workflow_collection()
+        collection.database.client.admin.command("ping")
+        with _readonly_cursor(_require_dsn(), _env_int(TIMEOUT_ENV, DEFAULT_TIMEOUT_S)) as cur:
+            cur.execute("SELECT 1")
+    except Exception:
+        return PlainTextResponse("unavailable", status_code=503)
+    return PlainTextResponse("ok", status_code=200)
+
+
+async def _run_workflow_streamable_http() -> None:
+    """Run the formal HTTP service without logging bearer-token URLs."""
+    config = uvicorn.Config(
+        workflow_mcp.streamable_http_app(),
+        host=workflow_mcp.settings.host,
+        port=workflow_mcp.settings.port,
+        log_level=workflow_mcp.settings.log_level.lower(),
+        access_log=False,
+    )
+    await uvicorn.Server(config).serve()
+
+
 def main() -> None:
     # stdio(기본) 외에 streamable-http 를 지원한다 — LibreChat 처럼 별도
     # 컨테이너에서 접속하는 클라이언트용. (mcp SDK 1.29 는 FASTMCP_* 환경변수를
     # 읽지 않아 settings 에 직접 넣는다. 기본 바인드는 127.0.0.1:8000)
     transport = os.environ.get("ENERGY_MCP_TRANSPORT", "stdio")
+    selected_mcp = server_for_mode(os.environ.get("ENERGY_MCP_MODE", "legacy"))
     if transport != "stdio":
         from mcp.server.transport_security import TransportSecuritySettings
 
-        mcp.settings.host = os.environ.get("ENERGY_MCP_HOST", "127.0.0.1")
-        mcp.settings.port = int(os.environ.get("ENERGY_MCP_PORT", "8000"))
+        selected_mcp.settings.host = os.environ.get("ENERGY_MCP_HOST", "127.0.0.1")
+        selected_mcp.settings.port = int(os.environ.get("ENERGY_MCP_PORT", "8000"))
         # 기본 DNS rebinding 보호는 Host 가 localhost 가 아니면 421 을 준다.
         # 이 포트는 도커 내부망 전용(호스트 미공개)이라 보호가 불필요하다.
-        mcp.settings.transport_security = TransportSecuritySettings(
+        selected_mcp.settings.transport_security = TransportSecuritySettings(
             enable_dns_rebinding_protection=False
         )
-    mcp.run(transport=transport)
+    if transport == "streamable-http" and selected_mcp is workflow_mcp:
+        asyncio.run(_run_workflow_streamable_http())
+        return
+    selected_mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

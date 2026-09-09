@@ -136,3 +136,4 @@ _workspace/
 battery_round*.md
 battery_round*.log
 docker/llm-demo/librechat.env
+docker/llm-demo/secrets/

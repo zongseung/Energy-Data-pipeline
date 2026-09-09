@@ -136,6 +136,13 @@ CASES = [
         "q": "서울 개포1동의 2023년 1월 1시간기온 단기예보를 보여줘",
         "sql_must": [r"research\.forecast\s*\(", r"개포1동", r"1시간기온"],
     },
+    {
+        # 시군구 존재 확인은 유효한 자연어다. 종로구를 dong 으로 오인하면 안 된다.
+        "id": "forecast-sigungu-exists",
+        "q": "단기예보 데이터 중 서울특별시 종로구 데이터가 있는지 확인해봐",
+        "sql_must": [r"research\.forecast_regions\s*\(", r"서울특별시", r"종로구"],
+        "sql_must_not": [r"research\.forecast\s*\(\s*'단기예보'\s*,\s*'종로구'"],
+    },
 ]
 
 
