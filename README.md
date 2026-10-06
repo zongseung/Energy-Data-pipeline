@@ -3,10 +3,9 @@
 대한민국 발전·전력 데이터를 수집·전처리·적재하는 ETL 파이프라인입니다. 조회는 직접 SQL과 LibreChat+MCP 자연어 서비스로 제공합니다.
 Prefect 2로 오케스트레이션하고 PostgreSQL에 저장합니다.
 
-정식 LLM·MCP 승인 서비스는 공용 읽기전용 role `demo_ro`로 사용자가 확인한 SQL만
-한 번 실행하도록 구현돼 있습니다. 다만 현재 호스팅 서비스는 아직 레거시 `run_sql`
-모드이므로 SQL이 승인 화면 없이 즉시 실행됩니다. 실제 운영 모드는 GitBook의
-`LLM·MCP 데이터 처리와 투명성` 페이지에서 확인합니다.
+LibreChat 자연어 조회는 질문의 조건과 SQL을 먼저 보여주고, 브라우저에서 승인한
+뒤 공용 읽기전용 role `demo_ro`로 한 번 실행합니다. 사용 흐름과 OpenAI 전송·데이터
+보존 범위는 [GitBook 안내](docs/gitbook/README.md)에서 확인하세요.
 
 **수집 도메인**
 - **태양광(PV)** — 남부발전(API), 남동발전(koenergy.kr 스크래핑)
@@ -41,7 +40,7 @@ Energy-Data-pipeline/
 │   ├── scripts/                    #   DB 백업/복원, 일회성 유틸
 │   └── sql/                        #   research 쿼리 · FDW · migrations/
 │
-├── llm/                            # LLM 데모
+├── llm/                            # LibreChat 운영 조회 서비스
 │   ├── mcp-server/                 #   energy-mcp (별도 파이썬 프로젝트)
 │   └── librechat/                  #   LibreChat + nginx + PgBouncer 스택
 │

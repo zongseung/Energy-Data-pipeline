@@ -1,4 +1,4 @@
-# LLM 데모 스택 — LibreChat + OpenAI gpt-4o-mini + energy-mcp.
+# LibreChat 운영 조회 — 조건 구체화 → SQL 승인 → 실행.
 # (로컬 Qwen 스택은 2026-08-21 제거 — GPU/CUDA 복구 시 git 역사에서 복원)
 #
 #   docker compose -f llm/librechat/compose.yml up -d --build
@@ -61,7 +61,11 @@ services:
       context: ../..
       dockerfile: llm/librechat/mcp.Dockerfile
     container_name: energy-mcp
+    # planner용 API key와 workflow MongoDB 계정만 주입한다(비밀값, git 미추적).
+    env_file: [mcp.env]
     environment:
+      ENERGY_MCP_MODE: workflow
+      ENERGY_MCP_APPROVAL_BASE_URL: http://${DEMO_HOST:-100.127.20.105}:8099/approval
       ENERGY_MCP_DSN: postgresql://demo_ro:${DEMO_RO_PW:?llm/librechat/.env 에 DEMO_RO_PW 를 넣어라}@pgbouncer:5432/pv
       ENERGY_MCP_TRANSPORT: streamable-http
       ENERGY_MCP_HOST: 0.0.0.0
@@ -77,6 +81,7 @@ services:
       - exports:/exports
     depends_on:
       - pgbouncer
+      - mongodb
     networks:
       - pvnet
     restart: unless-stopped

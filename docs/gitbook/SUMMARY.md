@@ -24,4 +24,5 @@
 ## 정책과 참고
 
 * [이용조건 · 보안 서약](05-terms.md)
+* [LLM·MCP 데이터 처리와 투명성](06-llm-transparency.md)
 * [부록: 로컬 LLM](appendix-local-llm.md)

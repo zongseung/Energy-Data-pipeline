@@ -256,7 +256,7 @@ def test_schema_markdown_explains_forecast_sigungu_discovery():
     """함수 계약이 빠지면 planner가 종로구를 dong으로 넣고 데이터 없음으로 오판한다."""
     md = server._render_schema_markdown([])
 
-    assert "research.forecast(text, text, text, text, text)" in md
+    assert "research.forecast(text, text, text, text, text, text, text)" in md
     assert "research.forecast_regions(text, text, text)" in md
     assert "시군구를 `dong` 인자로 넣지 마라" in md
     assert "존재 여부" in md

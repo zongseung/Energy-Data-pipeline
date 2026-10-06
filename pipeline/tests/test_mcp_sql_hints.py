@@ -51,3 +51,9 @@ def test_forecast_sigungu_error_suggests_region_discovery():
 
 def test_unknown_error_returns_none():
     assert hints.hint_for("deadlock detected") is None
+
+
+def test_forecast_timeout_corrects_region_scope_instead_of_only_dates():
+    hint = hints.hint_for("canceling statement due to statement timeout\nPL/pgSQL function research.forecast(text,text,text,text,text)")
+    assert "sido_filter" in hint
+    assert "sigungu_filter" in hint

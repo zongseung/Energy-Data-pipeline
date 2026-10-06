@@ -5,7 +5,7 @@ import pytest
 from openai import OpenAI
 from pydantic import ValidationError
 
-from energy_mcp.planner import PLANNER_PROMPT, PlannerDecision, plan_with_openai
+from energy_mcp.planner import PLANNER_PROMPT, ForecastRequest, PlannerDecision, plan_with_openai
 
 
 EXPECTED_SCHEMA = {
@@ -54,7 +54,9 @@ EXPECTED_SCHEMA = {
 
 
 def _sdk_client(answer: dict, captured: dict) -> OpenAI:
+    answers = iter(answer) if isinstance(answer, list) else None
     def respond(request: httpx.Request) -> httpx.Response:
+        current = next(answers) if answers is not None else answer
         captured.update(json.loads(request.content))
         return httpx.Response(
             200,
@@ -72,7 +74,7 @@ def _sdk_client(answer: dict, captured: dict) -> OpenAI:
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": json.dumps(answer, ensure_ascii=False),
+                                "text": json.dumps(current, ensure_ascii=False),
                                 "annotations": [],
                             }
                         ],
@@ -116,24 +118,26 @@ def test_real_sdk_serializes_strict_planner_schema_and_exact_request():
     assert captured["store"] is False
     assert captured["input"] == [
         {"role": "system", "content": PLANNER_PROMPT},
+        {"role": "developer", "content": "research.generation(timestamp, fuel_type, gen_kwh)"},
         {
             "role": "user",
-            "content": json.dumps(
-                {
-                    "question": "태양광 비교해줘",
-                    "answers": {"지역": "제주"},
-                    "schema": "research.generation(timestamp, fuel_type, gen_kwh)",
-                },
-                ensure_ascii=False,
-            ),
+            "content": '태양광 비교해줘\n추가 답변: {"지역": "제주"}',
         },
     ]
-    assert captured["text"]["format"] == {
-        "type": "json_schema",
-        "strict": True,
-        "name": "PlannerDecision",
-        "schema": EXPECTED_SCHEMA,
-    }
+    schema = captured["text"]["format"]["schema"]
+    assert captured["text"]["format"]["strict"] is True
+    assert captured["text"]["format"]["name"] == "PlannerDecision"
+    assert schema["properties"]["forecast"] == {"anyOf": [{"$ref": "#/$defs/ForecastRequest"}, {"type": "null"}]}
+    assert "forecast" in schema["required"]
+    assert schema["$defs"]["ForecastRequest"]["required"] == [
+        "forecast_type", "sido", "sigungu", "dong", "element", "from_ym", "to_ym"
+    ]
+    assert schema["$defs"]["ForecastRequest"]["properties"]["forecast_type"]["enum"] == [
+        "단기예보", "초단기예보", "초단기실황"
+    ]
+    # 기존 일반 SQL 계획 계약도 유지한다.
+    for name, field in EXPECTED_SCHEMA["properties"].items():
+        assert schema["properties"][name] == field
 
     def assert_strict_objects(node):
         if isinstance(node, dict):
@@ -163,3 +167,18 @@ def test_planner_rejects_duplicate_condition_names():
 def test_ready_decision_requires_summary_and_sql():
     with pytest.raises(ValidationError):
         PlannerDecision(status="ready", questions=[], conditions=[])
+
+
+def test_invalid_forecast_sql_is_replanned_once_before_it_can_be_approved():
+    forecast = dict(forecast_type="단기예보", sido="서울특별시", sigungu="중구", dong="필동",
+                    element="1시간기온", from_ym="202301", to_ym="202301")
+    wrong = dict(status="ready", questions=[], conditions=[], summary="기온 예보", forecast=forecast,
+                 sql="SELECT * FROM research.forecast('단기예보','서울특별시','필동')")
+    correct = wrong | {"sql": None}
+    captured = {}
+    client = _sdk_client([wrong, correct], captured)
+    result = plan_with_openai("필동 2023년 1월 예보", {}, "schema", client=client)
+    assert result.forecast.dong == "필동"
+    assert result.sql is None
+    assert len(captured["input"]) == 4
+    assert "예보 값 조회는 sql 대신 forecast" in captured["input"][-1]["content"]

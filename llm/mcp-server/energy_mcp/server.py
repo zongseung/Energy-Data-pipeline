@@ -1,8 +1,7 @@
-"""energy-mcp stdio 서버 — 연구원용 읽기전용 `run_sql` 툴 + `research` 스키마 리소스.
+"""energy-mcp — 호스팅 승인 workflow와 호환용 stdio 읽기전용 조회 서버.
 
 이 파일은 Energy-Data-pipeline 저장소의 다른 코드를 import하지 않는다(독립 패키지).
-연구원 본인의 role DSN(`ENERGY_MCP_DSN`)으로 Postgres에 접속하므로 개인별 감사
-추적(`log_statement='all'`, role 발급 시 설정됨)이 유지된다.
+호스팅 운영은 공용 demo_ro DSN으로 접속하며, 개인별 DSN을 쓰는 stdio 모드도 남아 있다.
 
 읽기전용은 두 겹으로 강제한다.
   1) DB 권한 — role 자체가 `research` 스키마 SELECT만 가짐 (여기서 설정하지 않음)
@@ -34,7 +33,7 @@ from starlette.responses import PlainTextResponse
 
 from energy_mcp.approval import register_approval_routes
 from energy_mcp.hints import hint_for
-from energy_mcp.planner import plan_with_openai
+from energy_mcp.planner import PlannerDecision, plan_with_openai
 from energy_mcp.workflow import (
     _hash,
     _reject_multi_statement,
@@ -67,9 +66,10 @@ EXPORT_TTL_HOURS = 24
 KNOWN_PITFALLS_MD = """\
 ## 반드시 알아야 할 함정 6가지
 
-1. **시간 표기**: 모든 timestamp 컬럼은 이미 **KST 구간시작**으로 통일돼 있다
+1. **시간 표기**: 연구 뷰의 timestamp 컬럼은 이미 **KST 구간시작**으로 통일돼 있다
    (예: 09:00 값은 [09:00, 10:00) 구간). 원천 데이터의 hour-ending 표기는 뷰
    단계에서 이미 보정 완료됐으므로 추가로 시간을 옮기지 마라.
+   예외: NAS 예보 함수의 base_at/target_at은 원천 UTC 라벨이다.
 2. **`research.generation`은 이미 걸러져 있다.** 시간별로 믿을 수 없는 구간
    (`data_quality='전면무효'` 전체, `'시간별무효'`의 `hourly_valid_from` 이전)은
    이 뷰에 아예 없다. 그러니 `data_quality`로 또 필터링하지 마라 — 이중으로
@@ -99,16 +99,28 @@ KNOWN_PITFALLS_MD = """\
 FORECAST_FUNCTIONS_MD = """\
 ## NAS 기상예보 함수
 
-- `research.forecast(text, text, text, text, text)` — 예보종, **읍면동**, 요소,
-  시작 YYYYMM, 종료 YYYYMM 순서로 NAS CSV를 읽는다.
+- `research.forecast(text, text, text, text, text, text, text)` — 예보종, **읍면동**, 요소,
+  시작 YYYYMM, 종료 YYYYMM, 시도, 시군구 순서로 NAS CSV를 읽는다.
 - `research.forecast_regions(text, text, text)` — 예보종, 시도, 시군구 순서로
   실제 읍면동 목록을 확인한다.
 - `research.forecast_elements(text)` — 예보종의 요소 목록을 확인한다.
+- `research.forecast_months(text, text, text, text, text)` — 예보종, 시도, 시군구,
+  읍면동, 요소에 실제 CSV가 있는 YYYYMM 목록을 확인한다.
+
+`forecast_data`의 반환 컬럼:
+`sido`, `sigungu`, `dong_name`, `element_name`, `grid`,
+`base_at`(발표 시각), `lead_hours`(시간), `target_at`(예보 대상 시각), `value`(요소 값).
+기온의 단위는 °C다. 예보 시각은 원천 CSV 라벨(UTC)을 그대로 보존하며,
+발전량·수요(KST)와 조인할 때는 UTC에 9시간을 더한다.
+ASOS와 비교할 때는 실측 시차가 다를 수 있으므로 기상예보 카탈로그의 시차 검증을 따른다.
+초단기실황은 lead_hours=NULL, target_at=base_at이다.
+예보 월 파일은 발표월(base_at) 기준이다. 대상시각(target_at) 기준 요청은 집계 SQL에서 별도로 필터한다.
 
 사용자가 `종로구` 같은 시군구로 자연스럽게 질문하는 것은 정상이다.
 시군구를 `dong` 인자로 넣지 마라. **데이터 존재 여부**만 물으면
 `research.forecast_regions('단기예보', '서울특별시', '종로구')`로 확인하고,
-읍면동이 반환되면 데이터가 있다고 답한다. 실제 값을 요청했는데 시군구만 주어졌으면
+읍면동 반환은 지역 폴더 존재만 뜻한다. 실제 값이나 기간별 파일 존재를 증명하지 않는다.
+실제 값을 요청했는데 시군구만 주어졌으면
 전체 읍면동인지 특정 읍면동인지 질문한다. 잘못된 `forecast()` 호출이 실패했다는
 이유만으로 데이터가 없다고 결론 내리지 마라.
 """
@@ -116,9 +128,13 @@ FORECAST_FUNCTIONS_MD = """\
 RESOURCE_URI = "energy://schema"
 
 WORKFLOW_INSTRUCTIONS = """각 HTTP 요청은 무상태다. 모호한 질문은 plan_query가 반환한 질문으로 구체화한다.
+추가 답변을 받으면 같은 workflow_id와 answers로 plan_query를 다시 호출한다.
+질문에 명시된 조건도 answers에 넣는다. 예보는 시도·시군구·읍면동·예보종·요소·시작월·종료월·출력을 전달한다.
 awaiting_confirmation이면 조건, SQL, 승인 링크를 보여주고 사용자가 승인했다고 말할 때까지 execute_query를 호출하지 않는다.
 실행 결과에는 확정 조건과 실제 SQL을 표시한다.
 legacy run_sql은 이 서버에 없다.
+목록/마스터 정보와 실제 시계열 데이터를 구분한다. 지역 목록을 예보 값으로 설명하지 않는다.
+예보 값 요청은 지역·요소·시작월·종료월을 모두 확인한다. 결과의 download_url은 반드시 링크로 제공한다.
 """
 
 legacy_mcp = FastMCP("energy-mcp-legacy")
@@ -320,6 +336,9 @@ def _execute(query: str) -> dict[str, Any]:
             "row_count": len(rows),
             "truncated": truncated,
         }
+        if columns and set(columns) <= {"sido_name", "sigungu_name", "dong_name", "element_name", "month"}:
+            result["result_kind"] = "catalog"
+            result["catalog_note"] = "예보 지역·요소·제공 월 목록입니다. 실제 예보 값 조회 결과가 아닙니다."
 
         export_dir = os.environ.get(EXPORT_DIR_ENV)
         if export_dir and fetched:
@@ -470,7 +489,7 @@ def run_sql(query: str) -> dict[str, Any]:
       말이 없으면 쓰지 마라. 둘을 섞어 조인하지도 마라.
     - 기상청 동네예보 3종은 뷰가 아니라 **함수**로 제공된다(NAS 에서 직접 읽으며
       적재본이 없다). 반드시 읍면동과 요소를 지정하고 기간을 좁혀서 불러라:
-        `SELECT * FROM research.forecast('단기예보','개포1동','1시간기온','202301','202303')`
+        `SELECT * FROM research.forecast('단기예보','개포1동','1시간기온','202301','202303','서울특별시','강남구')`
       - 인자: 예보종(`단기예보`|`초단기예보`|`초단기실황`), 읍면동, 요소,
         시작 YYYYMM, 종료 YYYYMM. 기간을 생략하면 30개월치를 통째로 읽는다.
       - 결과: sido, sigungu, dong_name, element_name, grid, base_at(발표시각),
@@ -482,7 +501,8 @@ def run_sql(query: str) -> dict[str, Any]:
       - 사용자가 `종로구` 같은 시군구로 묻는 것은 정상이다.
         시군구를 `dong` 인자로 넣지 마라. **데이터 존재 여부**만 물으면
         `research.forecast_regions('단기예보','서울특별시','종로구')`로 확인하고,
-        읍면동이 반환되면 데이터가 있다고 답하라. 실제 값을 요청했는데 시군구만
+        읍면동 반환은 지역 폴더 존재만 뜻한다. 실제 기간별 CSV 존재는
+        research.forecast_months()로 확인하라. 실제 값을 요청했는데 시군구만
         주어졌으면 전체 읍면동인지 특정 읍면동인지 질문하라. 잘못된 `forecast()`
         호출이 실패했다는 이유만으로 데이터가 없다고 결론 내리지 마라.
     - 상세 컬럼·함정은 `energy://schema` 리소스에 있다(읽을 수 있는 클라이언트만).
@@ -503,9 +523,13 @@ def plan_query(
 ) -> dict[str, Any]:
     """질문을 구체화하고 승인할 조건과 SQL을 계획한다.
 
+    첫 호출도 질문에 명시된 조건을 answers에 이름과 값으로 전달한다.
+    예보 조건 예: {"시도":"서울특별시","시군구":"중구","읍면동":"필동",
+    "예보종":"단기예보","요소":"1시간기온","시작월":"202301","종료월":"202301","출력":"원시 CSV"}.
+    추가 답변은 반환된 동일 workflow_id와 answers로 다시 호출한다.
     needs_clarification이면 질문을 그대로 전달한다. awaiting_confirmation이면
     조건, SQL, 승인 URL을 보여주고 브라우저 처리 뒤 채팅으로 돌아와 승인 여부를
-    알려 달라고 안내한다. 이 도구는 SQL을 실행하지 않는다.
+    알려 달라고 안내한다. 이 도구는 스키마·파일 존재를 검증하지만 승인 대상 SQL을 실행하지 않는다.
     """
     collection = workflow_collection()
     now = utcnow()
@@ -542,6 +566,7 @@ def plan_query(
         decision = plan_with_openai(
             doc["question"], doc.get("answers", {}), _fetch_schema_markdown()
         )
+        decision = _prepare_forecast_decision(decision)
     except Exception as exc:
         fail_planning(collection, workflow_id, revision, type(exc).__name__, utcnow())
         raise
@@ -610,6 +635,45 @@ def execute_query(workflow_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # 스키마 리소스
 # ---------------------------------------------------------------------------
+
+def _prepare_forecast_decision(decision):
+    """예보 파일 존재를 확인하고 승인할 SQL은 구조화된 조건에서 만든다."""
+    forecast = getattr(decision, "forecast", None)
+    if decision.status != "ready" or forecast is None:
+        return decision
+    names = (forecast.forecast_type, forecast.sido, forecast.sigungu,
+             forecast.dong, forecast.element)
+    with _readonly_cursor(_require_dsn(), _env_int(TIMEOUT_ENV, DEFAULT_TIMEOUT_S)) as cur:
+        try:
+            cur.execute("SELECT month FROM research.forecast_months(%s,%s,%s,%s,%s)", names)
+            months = sorted(row[0] for row in cur.fetchall())
+        except psycopg2.Error as exc:
+            if exc.pgcode != "22023":
+                raise
+            return PlannerDecision(status="needs_clarification", questions=[exc.diag.message_primary])
+        requested = []
+        year, month = int(forecast.from_ym[:4]), int(forecast.from_ym[4:])
+        while f"{year:04d}{month:02d}" <= forecast.to_ym:
+            requested.append(f"{year:04d}{month:02d}")
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+        missing = sorted(set(requested) - set(months))
+        if missing:
+            available = f"{months[0]}~{months[-1]}" if months else "없음"
+            return PlannerDecision(status="needs_clarification", questions=[
+                f"{forecast.dong} {forecast.element}: 요청 {forecast.from_ym}~{forecast.to_ym} 중 "
+                f"예보 CSV가 없는 월은 {', '.join(missing)}입니다. 제공 범위: {available}. "
+                "조회할 기간을 다시 지정해 주세요."
+            ])
+        query = cur.mogrify(
+            "SELECT * FROM research.forecast(forecast_type => %s, dong => %s, element => %s, "
+            "from_ym => %s, to_ym => %s, sido_filter => %s, sigungu_filter => %s)",
+            (forecast.forecast_type, forecast.dong, forecast.element, forecast.from_ym,
+             forecast.to_ym, forecast.sido, forecast.sigungu),
+        ).decode()
+        if decision.sql:
+            query = f"WITH forecast_data AS ({query}) {decision.sql}"
+    return decision.model_copy(update={"sql": query})
+
 
 _SCHEMA_QUERY = """
 SELECT

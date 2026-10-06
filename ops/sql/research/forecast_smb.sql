@@ -41,13 +41,19 @@
 -- =============================================================================
 
 \set ON_ERROR_STOP on
+BEGIN;
+
+-- 5인자 호출도 아래의 기본값으로 유지한다. 기존 오버로드는 모호한 호출을 막기 위해 교체한다.
+DROP FUNCTION IF EXISTS research.forecast(text, text, text, text, text);
 
 CREATE OR REPLACE FUNCTION research.forecast(
     forecast_type text,
     dong          text,
     element       text,
     from_ym       text DEFAULT NULL,   -- 'YYYYMM', NULL 이면 처음부터
-    to_ym         text DEFAULT NULL    -- 'YYYYMM', NULL 이면 끝까지
+    to_ym         text DEFAULT NULL,   -- 'YYYYMM', NULL 이면 끝까지
+    sido_filter   text DEFAULT NULL,
+    sigungu_filter text DEFAULT NULL
 )
 RETURNS TABLE (
     sido       text,
@@ -55,7 +61,7 @@ RETURNS TABLE (
     dong_name  text,
     element_name text,
     grid       text,          -- 기상청 격자 nx_ny
-    base_at    timestamp,     -- 발표 시각 (KST)
+    base_at    timestamp,     -- 원천 CSV 발표 시각 라벨 (UTC, 변환 없음)
     lead_hours int,           -- 예보 리드타임(시간). 초단기실황은 NULL
     target_at  timestamp,     -- 예보 대상 시각 = base_at + lead_hours
     value      double precision
@@ -92,24 +98,27 @@ BEGIN
                         '요소 예: 1시간기온, 습도, 풍속, 하늘상태, 강수확률';
     END IF;
 
-    IF from_ym IS NOT NULL AND from_ym !~ '^\d{6}$' THEN
+    IF from_ym IS NOT NULL AND (from_ym !~ '^[0-9]{4}(0[1-9]|1[0-2])$' OR left(from_ym,4) = '0000') THEN
         RAISE EXCEPTION 'from_ym 은 YYYYMM 형식이어야 한다 (받은 값: %)', from_ym;
     END IF;
-    IF to_ym IS NOT NULL AND to_ym !~ '^\d{6}$' THEN
+    IF to_ym IS NOT NULL AND (to_ym !~ '^[0-9]{4}(0[1-9]|1[0-2])$' OR left(to_ym,4) = '0000') THEN
         RAISE EXCEPTION 'to_ym 은 YYYYMM 형식이어야 한다 (받은 값: %)', to_ym;
+    END IF;
+    IF from_ym IS NOT NULL AND to_ym IS NOT NULL AND from_ym > to_ym THEN
+        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = '시작월은 종료월보다 늦을 수 없습니다.';
     END IF;
 
     -- (2) 시도 → 시군구를 훑어 읍면동을 찾는다. 여기서 나오는 이름은 전부
-    --     파일시스템 실측값이다. 17개 시도 전수 탐색이 0.19초라 인덱스가 필요 없다.
+    --     파일시스템 실측값이다. 운영 조회는 시도·시군구를 지정해 SMB 전국 탐색을 피한다.
     FOR v_sido IN
         SELECT f FROM pg_catalog.pg_ls_dir(root || '/' || forecast_type) AS f
-        WHERE f NOT LIKE '.%'          -- .DS_Store 등 (디렉터리가 아니라 pg_ls_dir 이 실패한다)
+        WHERE f NOT LIKE '.%' AND (sido_filter IS NULL OR f = sido_filter)
         ORDER BY f
     LOOP
         FOR v_sigungu IN
             SELECT f FROM pg_catalog.pg_ls_dir(
                        root || '/' || forecast_type || '/' || v_sido) AS f
-            WHERE f NOT LIKE '.%'
+            WHERE f NOT LIKE '.%' AND (sigungu_filter IS NULL OR f = sigungu_filter)
             ORDER BY f
         LOOP
             -- 사용자가 준 dong 을 실존 항목 목록과 동등비교만 한다(경로 조립 아님).
@@ -214,17 +223,23 @@ BEGIN
         RAISE EXCEPTION
             '% / % 를 찾지 못했다. 읍면동과 요소 이름이 정확한지 확인하라. '
             '요소 목록은 research.forecast_elements(예보종) 으로 볼 수 있다.',
-            dong, element;
+            dong, element USING ERRCODE = '22023';
+    END IF;
+    IF v_read = 0 THEN
+        RAISE EXCEPTION
+            '요청 기간 %~%에 예보 CSV가 없습니다. research.forecast_months()로 제공 월을 확인하세요.', from_ym, to_ym
+            USING ERRCODE = '22023';
     END IF;
 END
 $fn$;
 
-COMMENT ON FUNCTION research.forecast(text, text, text, text, text) IS
+COMMENT ON FUNCTION research.forecast(text, text, text, text, text, text, text) IS
     '기상청 동네예보를 NAS 에서 직접 읽는다(적재본 없음). '
-    '예: SELECT * FROM research.forecast(''단기예보'',''개포1동'',''1시간기온'',''202301'',''202303''). '
-    '인자: 예보종(단기예보|초단기예보|초단기실황), 읍면동, 요소, 시작YYYYMM, 종료YYYYMM. '
+    '예: SELECT * FROM research.forecast(''단기예보'',''개포1동'',''1시간기온'',''202301'',''202303'',''서울특별시'',''강남구''). '
+    '인자: 예보종(단기예보|초단기예보|초단기실황), 읍면동, 요소, 시작YYYYMM, 종료YYYYMM, 시도, 시군구. '
     'base_at 은 발표 시각, target_at 은 예보 대상 시각이다(초단기실황은 둘이 같고 lead_hours 가 NULL). '
-    '기간을 안 주면 전 기간(약 30개월)을 읽으니 되도록 좁혀서 부를 것.';
+    'sido_filter와 sigungu_filter를 함께 지정하면 전국 탐색 없이 해당 지역에서만 읽는다. '
+    '기간을 안 주면 전 기간을 읽으니 반드시 기간과 지역을 좁혀서 부를 것.';
 
 
 -- -----------------------------------------------------------------------------
@@ -318,18 +333,64 @@ COMMENT ON FUNCTION research.forecast_regions(text, text, text) IS
     '예: SELECT * FROM research.forecast_regions(''단기예보'', ''서울특별시'', ''강남구'').';
 
 
+CREATE OR REPLACE FUNCTION research.forecast_months(
+    forecast_type text, sido text, sigungu text, dong text, element text
+)
+RETURNS TABLE (month text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog
+AS $fn$
+DECLARE
+    region record;
+    available_regions text;
+    dir text;
+BEGIN
+    IF sido IS NULL OR sigungu IS NULL OR dong IS NULL OR element IS NULL THEN
+        RAISE EXCEPTION '시도, 시군구, 읍면동, 요소를 모두 지정해야 합니다.' USING ERRCODE = '22023';
+    END IF;
+    SELECT * INTO region FROM research.forecast_regions(forecast_type, sido, sigungu) r
+    WHERE r.dong_name = dong;
+    IF NOT FOUND THEN
+        SELECT string_agg(r.sigungu_name, ', ' ORDER BY r.sigungu_name) INTO available_regions
+        FROM research.forecast_regions(forecast_type, sido) r WHERE r.dong_name = dong;
+        RAISE EXCEPTION
+            '% %에 % 예보 지역이 없습니다. 해당 읍면동이 있는 시군구: %. 지역을 확인해 주세요.',
+            sido, sigungu, dong, COALESCE(available_regions, '없음') USING ERRCODE = '22023';
+    END IF;
+    dir := '/nas-weather/' || forecast_type || '/' || region.sido_name || '/'
+           || region.sigungu_name || '/' || region.dong_name;
+    IF NOT EXISTS (SELECT 1 FROM pg_ls_dir(dir) f WHERE f = element) THEN
+        RAISE EXCEPTION
+            '%에 % 요소가 없습니다. research.forecast_elements()로 요소를 확인해 주세요.', dong, element
+            USING ERRCODE = '22023';
+    END IF;
+    RETURN QUERY
+    SELECT DISTINCT substring(f, '_(\d{6})')
+    FROM pg_ls_dir(dir || '/' || element) f
+    WHERE f LIKE '%.csv' AND substring(f, '_(\d{6})') IS NOT NULL ORDER BY 1;
+END
+$fn$;
+
+COMMENT ON FUNCTION research.forecast_months(text,text,text,text,text) IS
+    '검증된 예보 지역과 요소에 실제 CSV가 있는 YYYYMM 목록. 시계열 값은 반환하지 않는다.';
+
+
 -- -----------------------------------------------------------------------------
 -- 권한 — PUBLIC 에서 회수한 뒤 research_ro 에만 준다.
 --   SECURITY DEFINER 함수는 생성 시 PUBLIC 에 EXECUTE 가 자동으로 붙는다.
 --   회수하지 않으면 이 DB 에 접속 가능한 누구나 서버 파일 읽기 함수를 부를 수 있다.
 -- -----------------------------------------------------------------------------
-REVOKE ALL ON FUNCTION research.forecast(text, text, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION research.forecast(text, text, text, text, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION research.forecast_elements(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION research.forecast_regions(text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION research.forecast_months(text,text,text,text,text) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION research.forecast(text, text, text, text, text) TO research_ro;
+GRANT EXECUTE ON FUNCTION research.forecast(text, text, text, text, text, text, text) TO research_ro;
 GRANT EXECUTE ON FUNCTION research.forecast_elements(text) TO research_ro;
 GRANT EXECUTE ON FUNCTION research.forecast_regions(text, text, text) TO research_ro;
+GRANT EXECUTE ON FUNCTION research.forecast_months(text,text,text,text,text) TO research_ro;
+
+COMMIT;
 
 
 -- =============================================================================

@@ -34,6 +34,9 @@ def hint_for(error_message: str) -> str | None:
     if "column" in msg and "does not exist" in msg:
         return "힌트: SELECT * FROM <뷰> LIMIT 1 로 실제 컬럼 이름을 먼저 확인하라."
     if "statement timeout" in msg or "canceling statement due to" in msg:
+        if "research.forecast(" in msg:
+            return ("힌트: 예보 조회에는 sido_filter와 sigungu_filter를 함께 지정해 "
+                    "NAS 전국 디렉터리 탐색을 피하라. 기간만 줄여서는 지역 탐색이 줄지 않는다.")
         return "힌트: 조회 범위가 너무 크다. WHERE 로 기간을 좁히거나 GROUP BY 집계로 바꿔라."
     if "syntax error" in msg:
         return "힌트: 세미콜론 없이 단일 SELECT 문만 실행할 수 있다."

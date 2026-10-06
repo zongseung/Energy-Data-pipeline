@@ -15,30 +15,29 @@ def test_landing_distinguishes_formal_and_personal_access_boundaries() -> None:
     assert "직접 SQL" in text
     assert "LLM·MCP" in text
     assert "Tailscale" in text
-    assert "정식 호스팅" in text
+    assert "LibreChat" in text
     assert "공용 읽기전용 role `demo_ro`" in text
-    assert "로컬 stdio" in text
     assert "개인별 읽기전용 role" in text
-    assert "현재 서비스" in text
-    assert "`run_sql`" in text
+    assert "승인" in text
     assert "데이터 처리와 투명성" in text
     assert "공개" in text
 
 
-def test_architecture_shows_distinct_formal_and_legacy_boundaries() -> None:
+def test_architecture_shows_hosted_workflow_and_personal_sql_boundaries() -> None:
     text = read("01-architecture.md")
     assert "```mermaid" in text
     assert "flowchart TB" in text
     assert "psql" in text
-    assert "energy-mcp" in text
+    assert "energy-db MCP" in text
     assert "Tailscale 폐쇄망" in text
     assert "개인별 읽기전용" in text
-    assert "정식 호스팅 LibreChat" in text
-    assert "공용 demo_ro" in text
-    assert "현재 호스팅" in text
+    assert "LibreChat" in text
+    assert "`demo_ro`" in text
+    assert "plan_query" in text
+    assert "execute_query" in text
     assert "승인 workflow" in text
     assert "MongoDB" in text
-    assert "research 스키마" in text
+    assert "research" in text
 
 
 def test_direct_sql_guide_is_complete() -> None:
@@ -58,10 +57,19 @@ def test_direct_sql_guide_is_complete() -> None:
 def test_root_readme_calls_the_hosted_workflow_production_not_demo() -> None:
     text = Path("README.md").read_text(encoding="utf-8")
 
-    assert "정식 LLM·MCP 승인 서비스" in text
+    assert "LibreChat" in text
     assert "공용 읽기전용 role `demo_ro`" in text
-    assert "현재 호스팅 서비스" in text
-    assert "레거시 `run_sql`" in text
+    assert "승인" in text
+    assert "레거시 `run_sql`" not in text
+
+
+def test_librechat_guide_covers_the_production_workflow_without_desktop_setup():
+    text = read("03-llm-mcp.md")
+    for required in ("로그인", "energy-db", "plan_query", "needs_clarification", "execute_query", "승인", "CSV"):
+        assert required in text
+    assert "Claude Desktop" not in text
+    assert "claude_desktop_config" not in text
+    assert "06-llm-transparency.md" in read("SUMMARY.md")
 
 
 FINAL_PAGES = {

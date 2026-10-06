@@ -14,7 +14,7 @@
 
 ## 예보 3종
 
-기상청 동네예보 3종은 NAS에 CSV로 쌓여 있습니다. **DB에는 적재하지 않습니다.** 단기예보만 690,154개 파일 × 32,576행 ≈ **225억 행**이라 넣을 자리도 없습니다. 전 읍면동 예보는 발전량 연구라는 목적에도 맞지 않습니다. 대신 호출할 때마다 필요한 파일만 읽는 함수를 뒀습니다. 읍면동 1곳 × 요소 1개 × 30개월이 **0.5초**면 읽힙니다.
+기상청 동네예보 3종은 NAS에 CSV로 쌓여 있습니다. **시계열은 PostgreSQL에 적재하지 않습니다.** 조회 함수가 요청한 파일을 NAS에서 읽습니다. 지역 목록 조회는 NAS의 디렉터리 이름을 읽으며, 이 결과를 CSV로 내려받을 수도 있습니다. 지역 목록에는 월별 예보값이 없으며, 지역이 목록에 있어도 특정 월 자료가 없을 수 있습니다.
 
 | 예보종     | 내용        | 리드타임                    | 수집된 시도 |
 | ------- | --------- | ----------------------- | ------ |
@@ -26,7 +26,7 @@
 
 **요소는 예보종마다 다릅니다.** 단기예보는 12종(1시간기온 · 습도 · 풍속 · 하늘상태 · 강수확률 · 1시간강수량 · 1시간적설 · 강수형태 · 일최고기온 · 일최저기온 · 동서바람성분 · 남북바람성분), 초단기실황은 6종(기온 · 습도 · 풍속 · 풍향 · 강수 · 강수형태)입니다. 이름도 다릅니다 — 단기예보의 `1시간기온`이 초단기실황에서는 `기온`입니다. `research.forecast_elements()`로 확인하고 쓰세요.
 
-**기간**: 2023-01 \~ 2025-06
+**확인한 파일 범위**: 필동·방배3동 등 확인한 지역에서는 2023년 자료가 있고 2021년 파일은 확인하지 못했습니다. 이는 확인한 지역의 범위이며 모든 예보종·지역에 대한 전체 NAS 범위를 뜻하지 않습니다. 가장 최신 월은 NAS가 갱신될 수 있으므로 고정값으로 적지 않습니다. 특정 지역·요소의 실제 월 목록은 `research.forecast_months()`로 확인하세요.
 
 ### 시군구 이름으로 물어봐도 됩니다
 
@@ -39,9 +39,9 @@ SELECT *
 FROM research.forecast_regions('단기예보', '서울특별시', '종로구');
 ```
 
-2023년 종로구에는 청운효자동·사직동·삼청동 등 **17개 행정동**, 동별 월 파일
-12개씩 총 **204개 `1시간기온` CSV**가 있습니다. 따라서 이 사례에 “데이터 없음”이라고
-답하면 잘못된 결과입니다.
+이 함수가 반환하는 지역 목록은 NAS 디렉터리에서 확인한 읍면동 폴더입니다.
+월별 시계열 CSV가 있다는 뜻은 아닙니다. 실제 자료 월은 아래 `forecast_months`로
+따로 확인합니다.
 
 `research.forecast()`의 두 번째 인자는 시군구가 아니라 정확한 읍면동입니다.
 `종로구`를 그 자리에 넣지 마세요. 존재 확인은 위 함수로 바로 답하고, 실제 값을
@@ -57,9 +57,39 @@ SELECT * FROM research.forecast_elements('단기예보');
 -- 지역 이름을 모를 때 (인자 없이 부르면 시도·시군구, 시도를 주면 읍면동까지)
 SELECT * FROM research.forecast_regions('단기예보', '서울특별시', '강남구');
 
+-- 실제 시계열 파일이 있는 월 목록 확인 (최신 월은 이 목록에서 확인)
+SELECT month
+FROM research.forecast_months(
+    '단기예보', '서울특별시', '중구', '필동', '1시간기온'
+)
+ORDER BY month;
+
 -- 실제 조회 — 기간은 되도록 좁혀서
-SELECT * FROM research.forecast('단기예보', '개포1동', '1시간기온', '202301', '202303');
+SELECT * FROM research.forecast('단기예보', '개포1동', '1시간기온', '202301', '202303',
+                               sido_filter => '서울특별시', sigungu_filter => '강남구');
+
+-- 지역이 같은 이름으로 중복될 수 있으면 시도·시군구를 함께 지정한다.
+SELECT * FROM research.forecast(
+    '단기예보', '필동', '1시간기온', '202301', '202301',
+    sido_filter => '서울특별시', sigungu_filter => '중구'
+);
 ```
+
+`forecast` 입력은 예보종, 읍면동, 요소, 시작월(`from_ym`), 종료월(`to_ym`),
+시도 필터(`sido_filter`), 시군구 필터(`sigungu_filter`) 순서입니다. 뒤의 시도·시군구
+필터는 선택값이라 기존 5인자 호출도 동작합니다. 동 이름이 중복될 수 있으므로
+운영 LibreChat 조회에서는 시도와 시군구까지 확인합니다. `from_ym`과 `to_ym`은
+포함 범위의 `YYYYMM`입니다.
+
+`forecast_months`는 예보종, 시도, 시군구, 읍면동, 요소를 받아 그 조합에 실제
+시계열 CSV가 존재하는 `YYYYMM` 목록을 반환합니다. 지역 인덱스 목록과 달리 월별
+파일을 확인하는 메타데이터 함수입니다. LibreChat은 조회를 계획할 때 이 목록과
+요청한 월을 대조합니다. 요청 범위에 파일이 없는 월이 섞이면 부분 결과를 완전한
+추출처럼 반환하지 않고, 빠진 월과 제공 범위를 알려 기간을 다시 묻습니다.
+
+평균·합계 같은 집계 질문도 가능합니다. 서버가 검증한 `forecast` 조회를
+`forecast_data` CTE로 제공하고, 계획 SQL은 그 자료를 집계합니다. 질문에 원하는
+기간과 집계 단위를 구체적으로 적으세요.
 
 | 반환 컬럼                                          | 의미                                                    |
 | ---------------------------------------------- | ----------------------------------------------------- |
@@ -109,7 +139,8 @@ UTC 00시에 9시간을 더한 09시가 아니라 10시가 맞아떨어집니다
 ```sql
 WITH fc AS (   -- 원본 중복부터 접는다
     SELECT DISTINCT base_at, target_at, value
-    FROM research.forecast('단기예보', '개포1동', '1시간기온', '202301', '202301')
+    FROM research.forecast('단기예보', '개포1동', '1시간기온', '202301', '202301',
+                           sido_filter => '서울특별시', sigungu_filter => '강남구')
 ), latest AS ( -- 대상 시각마다 가장 늦은 발표
     SELECT target_at, max(base_at) AS base_at FROM fc GROUP BY target_at
 )
@@ -125,7 +156,8 @@ ORDER BY target_kst;
 ```sql
 WITH nowcast AS (
     SELECT DISTINCT target_at, value
-    FROM research.forecast('초단기실황', '청운효자동', '기온', '202406', '202406')
+    FROM research.forecast('초단기실황', '청운효자동', '기온', '202406', '202406',
+                           sido_filter => '서울특별시', sigungu_filter => '종로구')
 ), lags AS (SELECT generate_series(6, 13) AS lag)
 SELECT lag AS 시차_시간,
        round(avg(abs(nowcast.value - w.temperature))::numeric, 2) AS 평균절대오차_c
@@ -145,7 +177,8 @@ ORDER BY 평균절대오차_c;
 ```sql
 WITH fc AS (
     SELECT DISTINCT base_at, target_at, lead_hours, value
-    FROM research.forecast('단기예보', '개포1동', '1시간기온', '202301', '202301')
+    FROM research.forecast('단기예보', '개포1동', '1시간기온', '202301', '202301',
+                           sido_filter => '서울특별시', sigungu_filter => '강남구')
     WHERE target_at >= '2023-01-02' AND target_at < '2023-02-01'   -- 1일 제외
 )
 SELECT fc.lead_hours,

@@ -128,6 +128,14 @@ def _render_compose(path: Path, env: dict[str, str]):
     return yaml.safe_load(result.stdout)
 
 
+def test_production_mcp_connects_the_existing_clarification_workflow():
+    mcp = CONFIG["services"]["energy-mcp"]
+    assert mcp["environment"]["ENERGY_MCP_MODE"] == "workflow"
+    assert "ENERGY_MCP_APPROVAL_BASE_URL" in mcp["environment"]
+    assert mcp["env_file"] == ["mcp.env"]
+    assert "mongodb" in mcp["depends_on"]
+
+
 def test_loader_profiles_execute_commands_and_preserve_trailing_spaces(tmp_path):
     values = _write_loader_secrets(tmp_path / "secrets")
     checks = {

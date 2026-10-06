@@ -46,7 +46,7 @@ WHERE table_schema='research' AND table_name='generation';
 
 | 이름 | 내용 | 행수 | 기간 | 갱신 |
 | --- | --- | --- | --- | --- |
-| `research.forecast()`   | 기상청 동네예보 3종 (NAS 직독) | 적재 없음     | 2023-01 \~ 2025-06       | 정적       |
+| `research.forecast()`   | 기상청 동네예보 3종 (NAS CSV 직독) | 적재 없음     | 확인한 지역은 2023년부터 | 실제 월은 `research.forecast_months()`로 확인 |
 
 > **시각이 UTC입니다.** 위 관측(KST)과 기준이 다릅니다.
 
