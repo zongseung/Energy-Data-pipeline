@@ -62,7 +62,7 @@ services:
       dockerfile: llm/librechat/mcp.Dockerfile
     container_name: energy-mcp
     # planner용 API key와 workflow MongoDB 계정만 주입한다(비밀값, git 미추적).
-    env_file: [mcp.env]
+    env_file: [mcp.env, weather.env]
     environment:
       ENERGY_MCP_MODE: workflow
       ENERGY_MCP_APPROVAL_BASE_URL: http://${DEMO_HOST:-100.127.20.105}:8099/approval
@@ -79,6 +79,10 @@ services:
       ENERGY_MCP_EXPORT_URL: http://${DEMO_HOST:-100.127.20.105}:8098
     volumes:
       - exports:/exports
+      - /mnt/nvme/weather-data/src:/mnt/nvme/weather-data/src:ro
+      - "/mnt/nvme/weather-data/지역코드 copy.csv:/mnt/nvme/weather-data/지역코드 copy.csv:ro"
+      - /mnt/nvme/weather-data/nas-weather:/mnt/nvme/weather-data/nas-weather
+      - weather-state:/weather-state
     depends_on:
       - pgbouncer
       - mongodb
@@ -111,8 +115,10 @@ services:
       # Tailscale 에 초대된 사람만 8099 에 닿으므로 가입은 열어둔다.
       # (초대 승인이 곧 심사다 — 구글 폼 서약을 보고 관리자가 승인한다)
       ALLOW_REGISTRATION: "true"
+      DEPLOYMENT_SKILLS_DIR: /app/skill
     volumes:
       - ./librechat.yaml:/app/librechat.yaml:ro
+      - ../skills:/app/skill:ro
     networks:
       - pvnet
     restart: unless-stopped
@@ -120,6 +126,9 @@ services:
 volumes:
   exports:
   mongo-data:
+  weather-state:
+    name: energy-weather-state
+    external: true
 
 networks:
   pvnet:

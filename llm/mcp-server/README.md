@@ -1,7 +1,8 @@
 # energy-mcp
 
 호스팅 LibreChat에서 PostgreSQL `research` 스키마를 계획하고 읽기전용으로
-조회하는 MCP 서버입니다. 운영 `workflow` 모드는 `plan_query`와 `execute_query`를
+조회하는 MCP 서버입니다. 운영 `workflow` 모드는 `plan_query`와 `execute_query`,
+누락 예보 수집용 `collect_forecast`와 `forecast_collection_status`를
 제공하며, 승인 없이 즉시 실행하는 레거시 `run_sql` 도구는 제공하지 않습니다.
 
 ## 호스팅 workflow
@@ -28,6 +29,25 @@ workflow MongoDB 연결용 `ENERGY_MCP_MONGO_URI`를 설정합니다. Compose는
 계획기는 승인 전에 요청한 각 월을 `forecast_months` 결과와 비교합니다. 없는 월이
 있으면 부분 범위 조회를 진행하지 않고 기간을 다시 묻습니다. 평균 등 집계 질의는
 서버가 검증한 원본을 `forecast_data` CTE로 넣어 실행합니다.
+
+## NAS 예보 수집
+
+LibreChat의 `collect-weather-nas` 배포 Skill은 `collect_forecast`를 사용합니다.
+기본 `confirmed=false`는 실제 파일 검증만 합니다. 사용자의 수집 요청 후 true로
+호출하면 기존 `/mnt/nvme/weather-data` 수집기를 별도 프로세스에서 실행합니다.
+한 번에 한 읍면동·한 요소·최대 12개월 중 없는 월만 수집하며, 두 배포가 공통
+파일 잠금을 사용합니다. 작업 상태는 `forecast_collection_status(job_id)`로 확인합니다.
+
+운영자는 git에서 제외된 `llm/librechat/weather.env`에 `KMA_ID`, `KMA_PW`를
+등록합니다. 사용자별 계정 등록은 아직 지원하지 않습니다. CIFS 마운트를 검증하고
+다운로드한 CSV를 검증한 뒤 NAS에 원자적으로 반영합니다. 수집은 20분 제한이며
+완료 후 기존 SQL 승인·조회 절차를 다시 거칩니다. 수집 작업 메타데이터는 MongoDB에서
+7일 뒤 만료됩니다. DB의 공용 읽기전용 권한은 그대로 유지합니다.
+
+첫 배포 전 `docker volume create energy-weather-state`로 공통 작업 잠금 볼륨을
+만듭니다. LibreChat 시작 후 호스트에서
+`docker exec -i librechat node < llm/librechat/provision_weather_agent.cjs`를 실행하면
+배포 Skill과 네 도구를 사용하는 공용 `NAS 기상 조회` Agent를 등록합니다.
 
 ## 레거시 stdio 모드
 

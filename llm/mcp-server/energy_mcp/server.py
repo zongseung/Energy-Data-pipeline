@@ -1,9 +1,9 @@
-"""energy-mcp — 호스팅 승인 workflow와 호환용 stdio 읽기전용 조회 서버.
+"""energy-mcp — 승인 조회 workflow와 제한된 NAS 기상 수집 서버.
 
 이 파일은 Energy-Data-pipeline 저장소의 다른 코드를 import하지 않는다(독립 패키지).
 호스팅 운영은 공용 demo_ro DSN으로 접속하며, 개인별 DSN을 쓰는 stdio 모드도 남아 있다.
 
-읽기전용은 두 겹으로 강제한다.
+DB 읽기전용은 두 겹으로 강제한다. NAS 수집은 별도의 명시적 도구로만 실행한다.
   1) DB 권한 — role 자체가 `research` 스키마 SELECT만 가짐 (여기서 설정하지 않음)
   2) 이 서버 — 커넥션마다 `set_session(readonly=True)`로 세션 전체를 읽기전용으로
      고정한다. 이는 PostgreSQL의 `SET SESSION CHARACTERISTICS AS TRANSACTION
@@ -33,7 +33,8 @@ from starlette.responses import PlainTextResponse
 
 from energy_mcp.approval import register_approval_routes
 from energy_mcp.hints import hint_for
-from energy_mcp.planner import PlannerDecision, plan_with_openai
+from energy_mcp.planner import ForecastRequest, PlannerDecision, plan_with_openai
+from energy_mcp import weather
 from energy_mcp.workflow import (
     _hash,
     _reject_multi_statement,
@@ -133,6 +134,8 @@ WORKFLOW_INSTRUCTIONS = """각 HTTP 요청은 무상태다. 모호한 질문은 
 awaiting_confirmation이면 조건, SQL, 승인 링크를 보여주고 사용자가 승인했다고 말할 때까지 execute_query를 호출하지 않는다.
 실행 결과에는 확정 조건과 실제 SQL을 표시한다.
 legacy run_sql은 이 서버에 없다.
+NAS 예보 누락은 collect_forecast로 확인한다. 사용자가 수집을 요청한 경우만 confirmed=true로 호출한다.
+수집 작업은 forecast_collection_status로 확인하고 완료 뒤 plan_query부터 다시 조회한다.
 목록/마스터 정보와 실제 시계열 데이터를 구분한다. 지역 목록을 예보 값으로 설명하지 않는다.
 예보 값 요청은 지역·요소·시작월·종료월을 모두 확인한다. 결과의 download_url은 반드시 링크로 제공한다.
 """
@@ -635,6 +638,45 @@ def execute_query(workflow_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # 스키마 리소스
 # ---------------------------------------------------------------------------
+
+def _collection_available_months(forecast):
+    with _readonly_cursor(_require_dsn(), _env_int(TIMEOUT_ENV, DEFAULT_TIMEOUT_S)) as cur:
+        try:
+            cur.execute('SELECT month FROM research.forecast_months(%s,%s,%s,%s,%s)',
+                        (forecast.forecast_type, forecast.sido, forecast.sigungu, forecast.dong, forecast.element))
+            return weather.verified_months(forecast, [row[0] for row in cur.fetchall()])
+        except psycopg2.Error as exc:
+            if exc.pgcode != '22023':
+                raise
+            return []
+
+
+@workflow_mcp.tool()
+def collect_forecast(forecast: ForecastRequest, confirmed: bool = False) -> dict[str, Any]:
+    """NAS 예보 누락 월을 확인하고 사용자 요청이 확정되면 기존 수집기를 실행한다.
+
+    forecast에 예보종·시도·시군구·읍면동·요소·from_ym·to_ym을 전달한다.
+    confirmed=false는 존재 확인만 한다. 사용자가 수집을 요청했을 때만 true로 전달한다.
+    로그인 정보는 서버 계정으로 처리하며 인자로 받지 않는다. 한 요청은 최대 12개월이다.
+    running이면 job_id로 forecast_collection_status를 확인하고 완료 후 plan_query를 호출한다.
+    """
+    weather.validate_runtime_scope(forecast)
+    available = set(_collection_available_months(forecast))
+    requested = weather.requested_months(forecast)
+    missing = sorted(set(requested) - available)
+    result = {'forecast': forecast.model_dump(), 'available_months': sorted(available), 'missing_months': missing}
+    if not missing:
+        return {'status': 'available', **result}
+    if not confirmed:
+        return {'status': 'needs_collection_confirmation', **result,
+                'message': '누락 월의 원천 자료를 수집할지 사용자에게 확인하세요.'}
+    return weather.start_collection(forecast, missing)
+
+
+@workflow_mcp.tool()
+def forecast_collection_status(job_id: str) -> dict[str, Any]:
+    """실제 수집 작업의 상태·검증된 월·자료 행 수를 확인한다. 완료 후 plan_query로 재조회한다."""
+    return weather.collection_status(job_id)
 
 def _prepare_forecast_decision(decision):
     """예보 파일 존재를 확인하고 승인할 SQL은 구조화된 조건에서 만든다."""

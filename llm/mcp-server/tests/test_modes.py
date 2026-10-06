@@ -83,6 +83,8 @@ def test_workflow_mode_cannot_bypass_approval_with_run_sql():
     assert tool_names(server.server_for_mode("workflow")) == {
         "plan_query",
         "execute_query",
+        "collect_forecast",
+        "forecast_collection_status",
     }
     assert resource_uris(server.server_for_mode("workflow")) == set()
 
