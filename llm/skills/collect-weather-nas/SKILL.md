@@ -18,7 +18,7 @@ description: Use when a user requests missing 기상청 동네예보 CSV data fo
 
 시도, 시군구, 읍면동, 예보종, 요소, 시작월·종료월(`YYYYMM`)을 확정한다. 질문에 이미 있는 조건은 재사용하고 빠진 조건만 묻는다. 지역 목록은 실제 예보 값이나 파일 존재를 증명하지 않는다.
 
-지역은 `/mnt/nvme/weather-data/지역코드 copy.csv`의 `Level1,Level2,Level3`와 정확히 일치하는 행으로 선택하고 `ReqList_Last`를 사용한다. 예보종과 요소는 `src/weather_downloader/config.py`의 `WeatherConfig`로 검증한다. 초단기실황 기온의 요소명은 `기온`이다.
+지역은 `/mnt/nvme/weather-data/지역코드 copy.csv`의 `Level1,Level2,Level3`에 등록된 행으로 선택하고 `ReqList_Last`를 사용한다. 서버는 시군구의 공백 차이를 실제 등록 이름으로 확인한다. 예를 들어 `성남시 수정구`는 `성남시수정구`로 처리하므로 사용자가 다른 지역을 고르게 하지 않는다. 예보종과 요소는 `src/weather_downloader/config.py`의 `WeatherConfig`로 검증한다. 초단기실황 기온의 요소명은 `기온`이다.
 
 기상청 계정은 실행 백엔드의 자격증명 또는 `KMA_ID`, `KMA_PW`를 사용한다. 비밀번호·쿠키·NAS 접속 정보는 채팅, 모델 인자, 생성 파일, 로그에 넣지 않는다. 계정이 없으면 서비스의 계정 등록 경로를 안내한다. 사용자별 `connection_id`를 받는 환경에서는 백엔드가 사용자 소유권을 확인하고 계정을 주입해야 한다. 이 연결 ID 처리 기능이 이미 구현됐다고 가정하지 않는다.
 

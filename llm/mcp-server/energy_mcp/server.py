@@ -660,7 +660,8 @@ def collect_forecast(forecast: ForecastRequest, confirmed: bool = False) -> dict
     로그인 정보는 서버 계정으로 처리하며 인자로 받지 않는다. 한 요청은 최대 12개월이다.
     running이면 job_id로 forecast_collection_status를 확인하고 완료 후 plan_query를 호출한다.
     """
-    weather.validate_runtime_scope(forecast)
+    region = weather.validate_runtime_scope(forecast)
+    forecast = forecast.model_copy(update={'sigungu': region['Level2']})
     available = set(_collection_available_months(forecast))
     requested = weather.requested_months(forecast)
     missing = sorted(set(requested) - available)
@@ -683,10 +684,19 @@ def _prepare_forecast_decision(decision):
     forecast = getattr(decision, "forecast", None)
     if decision.status != "ready" or forecast is None:
         return decision
-    names = (forecast.forecast_type, forecast.sido, forecast.sigungu,
-             forecast.dong, forecast.element)
     with _readonly_cursor(_require_dsn(), _env_int(TIMEOUT_ENV, DEFAULT_TIMEOUT_S)) as cur:
         try:
+            # Match human spacing, then retain the real NAS folder name (including its spaces).
+            cur.execute("SELECT DISTINCT sigungu_name FROM research.forecast_regions(%s,%s) "
+                        "WHERE regexp_replace(sigungu_name,'[[:space:]]','','g') = "
+                        "regexp_replace(%s,'[[:space:]]','','g') AND dong_name = %s",
+                        (forecast.forecast_type, forecast.sido, forecast.sigungu, forecast.dong))
+            regions = cur.fetchall()
+            if len(regions) == 1:
+                forecast = forecast.model_copy(update={'sigungu': regions[0][0]})
+                decision = decision.model_copy(update={'forecast': forecast})
+            names = (forecast.forecast_type, forecast.sido, forecast.sigungu,
+                     forecast.dong, forecast.element)
             cur.execute("SELECT month FROM research.forecast_months(%s,%s,%s,%s,%s)", names)
             months = sorted(row[0] for row in cur.fetchall())
         except psycopg2.Error as exc:

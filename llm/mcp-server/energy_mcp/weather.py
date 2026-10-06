@@ -81,8 +81,8 @@ def validate_scope(forecast, catalog, mapping):
         raise ValueError('해당 예보종에서 지원하지 않는 요소입니다.')
     with Path(catalog).open(encoding='utf-8-sig', newline='') as handle:
         rows = [r for r in csv.DictReader(handle) if
-                (r['Level1'], r['Level2'], r['Level3']) ==
-                (forecast.sido, forecast.sigungu, forecast.dong)]
+                (r['Level1'], re.sub(r'\s+', '', r['Level2']), r['Level3']) ==
+                (forecast.sido, re.sub(r'\s+', '', forecast.sigungu), forecast.dong)]
     if len(rows) != 1 or not re.fullmatch(r'\d+_\d+', rows[0]['ReqList_Last']):
         raise ValueError('지역코드에 정확히 일치하는 시도·시군구·읍면동이 없습니다.')
     for value in (forecast.sido, forecast.sigungu, forecast.dong, forecast.element):

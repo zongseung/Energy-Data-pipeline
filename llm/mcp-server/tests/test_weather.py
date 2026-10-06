@@ -30,7 +30,8 @@ def test_scope_uses_exact_catalog_region_and_element(tmp_path):
     catalog.write_text('Level1,Level2,Level3,ReqList_Last\n경기도,성남시수정구,복정동,62_124\n')
     mapping = {'단기예보': {'1시간기온': 'TMP'}}
     assert weather.validate_scope(request(), catalog, mapping)['ReqList_Last'] == '62_124'
-    for changed in [{'sigungu': '성남시 수정구'}, {'dong': '../../etc'}, {'element': '../기온'}]:
+    assert weather.validate_scope(request(sigungu='성남시 수정구'), catalog, mapping)['Level2'] == '성남시수정구'
+    for changed in [{'sigungu': '성남시분당구'}, {'dong': '../../etc'}, {'element': '../기온'}]:
         with pytest.raises(ValueError):
             weather.validate_scope(request(**changed), catalog, mapping)
 
@@ -59,7 +60,7 @@ def test_native_invalid_days_are_filtered_like_postgres(tmp_path):
 
 def test_check_does_not_start_collection_without_explicit_confirmation(monkeypatch):
     from energy_mcp import server
-    monkeypatch.setattr(weather, 'validate_runtime_scope', lambda *_: {'ReqList_Last': '62_124'})
+    monkeypatch.setattr(weather, 'validate_runtime_scope', lambda *_: {'ReqList_Last': '62_124', 'Level2': '성남시수정구'})
     monkeypatch.setattr(server, '_collection_available_months', lambda *_: ['202301'])
     start = MagicMock()
     monkeypatch.setattr(weather, 'start_collection', start)
@@ -73,12 +74,13 @@ def test_check_does_not_start_collection_without_explicit_confirmation(monkeypat
 
 def test_missing_only_is_sent_to_worker(monkeypatch):
     from energy_mcp import server
-    monkeypatch.setattr(weather, 'validate_runtime_scope', lambda *_: {'ReqList_Last': '62_124'})
+    monkeypatch.setattr(weather, 'validate_runtime_scope', lambda *_: {'ReqList_Last': '62_124', 'Level2': '성남시수정구'})
     monkeypatch.setattr(server, '_collection_available_months', lambda *_: ['202301'])
     start = MagicMock(return_value={'status': 'running', 'job_id': 'f' * 32})
     monkeypatch.setattr(weather, 'start_collection', start)
-    result = server.collect_forecast(request(from_ym='202301', to_ym='202302'), confirmed=True)
+    result = server.collect_forecast(request(sigungu='성남시 수정구', from_ym='202301', to_ym='202302'), confirmed=True)
     assert result['job_id'] == 'f' * 32
+    assert start.call_args.args[0].sigungu == '성남시수정구'
     assert start.call_args.args[1] == ['202302']
 
 

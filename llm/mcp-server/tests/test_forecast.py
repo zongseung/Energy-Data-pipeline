@@ -37,7 +37,9 @@ def test_forecast_cte_cannot_be_schema_qualified():
 
 def prepare(monkeypatch, months, request):
     cursor = MagicMock()
-    cursor.fetchall.return_value = [(month,) for month in months]
+    canonical = '성남시수정구' if request.forecast.sigungu == '성남시 수정구' else request.forecast.sigungu
+    cursor.fetchall.side_effect = lambda: ([(canonical,)] if 'forecast_regions' in cursor.execute.call_args.args[0]
+                                          else [(month,) for month in months])
     cursor.mogrify.side_effect = lambda sql, params: (sql % tuple("'" + p.replace("'", "''") + "'" for p in params)).encode()
 
     @contextmanager
@@ -59,6 +61,19 @@ def test_forecast_uses_named_arguments_instead_of_llm_sql(monkeypatch):
     assert "from_ym => '202301'" in result.sql
     assert result.condition_mapping()["시군구"] == "중구"
     assert result.condition_mapping()["요소"] == "1시간기온"
+
+
+def test_forecast_resolves_spaced_district_to_actual_nas_name(monkeypatch):
+    result = prepare(monkeypatch, ['202301'], decision(sido='경기도', sigungu='성남시 수정구', dong='복정동'))
+    assert result.status == 'ready'
+    assert result.forecast.sigungu == '성남시수정구'
+    assert "sigungu_filter => '성남시수정구'" in result.sql
+
+
+def test_forecast_preserves_spaces_in_actual_catalog_name(monkeypatch):
+    result = prepare(monkeypatch, ['202301'], decision(sido='경상남도', sigungu='창원시 마산합포구', dong='가포동'))
+    assert result.forecast.sigungu == '창원시 마산합포구'
+    assert "sigungu_filter => '창원시 마산합포구'" in result.sql
 
 
 def test_unavailable_year_asks_again_without_saving_executable_sql(monkeypatch):
