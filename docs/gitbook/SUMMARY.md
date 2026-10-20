@@ -6,10 +6,6 @@
 * [접속 준비하기](start/access.md)
 * [첫 질문 해보기](start/first-query.md)
 
-***
-
-* [데이터 제공 구조](01-architecture.md)
-
 ## 데이터 조회 방법 <a href="#query" id="query"></a>
 
 * [직접 SQL로 조회](02-direct-sql.md)
@@ -17,6 +13,7 @@
 
 ## 데이터 구성 <a href="#data" id="data"></a>
 
+* [데이터 제공 구조](data/01-architecture.md)
 * [데이터 카탈로그 · 스키마 사전](04-data-catalog.md)
   * [발전소와 발전량](catalog/generation.md)
   * [SMP 가격](catalog/smp.md)
