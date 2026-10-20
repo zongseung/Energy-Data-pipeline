@@ -19,7 +19,7 @@ Tailscale 계정은 만들지 마세요. 설치 후 나오는 **로그인 버튼
 
 ## 1단계. 서약하고 신청하기
 
-[이용·보안 서약 제출하기](https://docs.google.com/forms/d/e/1FAIpQLSdFUMpwgGI4bBBjh5kUX_6Kk9SnaAqYF6XRIf2W1fwhdl3ylw/viewform)에서 **성명, 소속, 연락처, 이메일**을 적고 동의 항목에 체크해 제출합니다. 이메일은 관리자가 명령어를 보내는 주소입니다. 나중에 LibreChat에 가입할 때도 같은 이메일을 쓰니 자주 확인하는 주소를 적으세요. 서약 내용은 [이용조건 · 보안 서약](../05-terms.md)에 있습니다.
+[이용·보안 서약 제출하기](https://docs.google.com/forms/d/e/1FAIpQLSdFUMpwgGI4bBBjh5kUX_6Kk9SnaAqYF6XRIf2W1fwhdl3ylw/viewform)에서 **성명, 소속, 연락처, 이메일**을 적고 동의 항목에 체크해 제출합니다. 이메일은 관리자가 명령어를 보내는 주소입니다. **나중에 LibreChat에 가입할 때도 같은 이메일을 쓰니 자주 확인하는 주소를 적으세요.** 서약 내용은 [이용조건 · 보안 서약](https://eax-1.gitbook.io/energy-research-data/policy/05-terms)에 있습니다.
 
 ## 2단계. 명령어 받기
 
@@ -40,7 +40,7 @@ Tailscale 계정은 만들지 마세요. 설치 후 나오는 **로그인 버튼
 
 아래는 붙여 넣은 모습의 예시입니다. 실제 명령어에는 접속 키와 기기 이름이 채워져 있습니다.
 
-![PowerShell에 명령어를 붙여 넣은 예시 화면](<../.gitbook/assets/powershell-example (3).png>)
+![PowerShell에 명령어를 붙여 넣은 예시 화면](https://4036897161-files.gitbook.io/~/files/v0/b/gitbook-x-prod.appspot.com/o/spaces%2FNA6ui3V9mGeIm2NUKh45%2Fuploads%2FCY5nHmsM1jrpuHkZyNQb%2Fpowershell-example.png?alt=media)
 
 명령어는 `&`로 시작합니다. 맨 앞의 `&`까지 빠지지 않게 한 줄 전체를 복사하세요. 줄 앞이 `>>`로 바뀌며 계속 다음 줄로 넘어가면 `Ctrl+C`로 취소하고 다시 붙여 넣습니다.
 
@@ -59,7 +59,7 @@ Mac용 명령어는 Windows와 앞부분이 다르고 모양은 아래와 같습
 
 ## 5단계. 연결 확인
 
-브라우저에서 관리자가 보낸 서비스 주소를 엽니다. 로그인 화면이 나오면 연결된 것입니다. 다음은 [첫 질문 해보기](first-query.md)입니다.
+브라우저에서 관리자가 보낸 서비스 주소를 엽니다. 로그인 화면이 나오면 연결된 것입니다. 다음은 [첫 질문 해보기](https://eax-1.gitbook.io/energy-research-data/start/first-query)입니다.
 
 연결 상태를 명령어로 확인하려면 아래를 실행합니다. 목록에 관리자 서버가 보이면 연결된 것입니다.
 
