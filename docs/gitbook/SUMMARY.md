@@ -5,11 +5,7 @@
 * [GIS-EnergyHub](README.md)
 * [접속 준비하기](start/access.md)
 * [첫 질문 해보기](start/first-query.md)
-
-## 데이터 조회 방법 <a href="#query" id="query"></a>
-
-* [직접 SQL로 조회](02-direct-sql.md)
-* [LibreChat에서 자연어로 조회](03-llm-mcp.md)
+* [질문 요령](start/ask.md)
 
 ## 데이터 구성 <a href="#data" id="data"></a>
 
@@ -19,6 +15,7 @@
   * [SMP 가격](catalog/smp.md)
   * [기상 관측](catalog/weather.md)
   * [기상 예보](catalog/forecast.md)
+  * [기상 예보 수집 요청](data/04-data-catalog/forecast-collect.md)
   * [전력수요와 수급](catalog/demand.md)
   * [국제유가](catalog/oil.md)
   * [송배전망](catalog/grid.md)
@@ -27,4 +24,3 @@
 
 * [이용조건 · 보안 서약](05-terms.md)
 * [LLM·MCP 데이터 처리와 투명성](06-llm-transparency.md)
-* [부록: 로컬 LLM](appendix-local-llm.md)
