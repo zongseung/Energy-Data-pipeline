@@ -46,8 +46,8 @@ OpenAI API 입력·출력은 기본적으로 모델 학습에 사용되지 않�
 
 ## 8. 서약 제출
 
-아래 구글 폼에 성명·소속·연락처를 적고 동의 항목에 체크해 제출해 주세요. 관리자 확인 후 접속 권한(role)을 발급합니다.
+아래 구글 폼에 성명·소속·이메일·전화번호를 적고 동의 항목 8개에 모두 체크해 제출해 주세요. 관리자 확인 후 접속 권한(role)을 발급합니다.
 
-📝 [**이용·보안 서약 제출하기**](https://docs.google.com/forms/d/e/1FAIpQLSdFUMpwgGI4bBBjh5kUX_6Kk9SnaAqYF6XRIf2W1fwhdl3ylw/viewform)
+📝 [**이용·보안 서약 제출하기**](https://docs.google.com/forms/d/e/1FAIpQLSeZA7YHBDeVmIvhqITWAlpWsLbyAF6cxX8o2uowQlq_mEG67Q/viewform)
 
 폼 제출 자체가 서명을 갈음합니다. 별도 인쇄·날인은 필요 없습니다. 동의 항목의 상세 내용은 이 문서에 있으니 제출 전에 읽어 주세요. 폼이 열리지 않으면 과제 관리자에게 문의해 주세요.

@@ -19,7 +19,7 @@ Tailscale 계정은 만들지 마세요. 설치 후 나오는 **로그인 버튼
 
 ## 1단계. 서약하고 신청하기
 
-[이용·보안 서약 제출하기](https://docs.google.com/forms/d/e/1FAIpQLSdFUMpwgGI4bBBjh5kUX_6Kk9SnaAqYF6XRIf2W1fwhdl3ylw/viewform)에서 **성명, 소속, 연락처, 이메일**을 적고 동의 항목에 체크해 제출합니다. 이메일은 관리자가 명령어를 보내는 주소입니다. **나중에 LibreChat에 가입할 때도 같은 이메일을 쓰니 자주 확인하는 주소를 적으세요.** 서약 내용은 [이용조건 · 보안 서약](https://eax-1.gitbook.io/energy-research-data/policy/05-terms)에 있습니다.
+[이용·보안 서약 제출하기](https://docs.google.com/forms/d/e/1FAIpQLSeZA7YHBDeVmIvhqITWAlpWsLbyAF6cxX8o2uowQlq_mEG67Q/viewform)에서 **성명, 소속, 이메일, 전화번호**를 적고 동의 항목 8개에 모두 체크해 제출합니다. 이메일은 관리자가 명령어를 보내는 주소입니다. **나중에 LibreChat에 가입할 때도 같은 이메일을 쓰니 자주 확인하는 주소를 적으세요.** 서약 내용은 [이용조건 · 보안 서약](https://eax-1.gitbook.io/energy-research-data/policy/05-terms)에 있습니다.
 
 ## 2단계. 명령어 받기
 
