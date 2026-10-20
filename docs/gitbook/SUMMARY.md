@@ -2,7 +2,7 @@
 
 ## 시작하기 <a href="#start" id="start"></a>
 
-* [이 서비스는 무엇인가요](README.md)
+* [GIS-EnergyHub](README.md)
 * [접속 준비하기](start/access.md)
 * [첫 질문 해보기](start/first-query.md)
 
