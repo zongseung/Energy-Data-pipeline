@@ -6,7 +6,7 @@
 기준일은 **2026-10-20**입니다. 데이터는 계속 쌓이므로 기간의 끝은 이후에 늘어납니다. 가장 최신 시점이 궁금하면 LibreChat에 "발전량 데이터가 언제까지 있어?"처럼 물어보세요.
 {% endhint %}
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>발전소와 발전량</strong></td><td>태양광·풍력·화력 등 발전소 96기와 시간별 발전량</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation</a></td></tr><tr><td><strong>SMP 가격</strong></td><td>전력 도매가격 (시간별·15분·평균)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp</a></td></tr><tr><td><strong>전력수요와 수급</strong></td><td>전국·제주 전력 수요, 발전원별 발전, 열수요</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand</a></td></tr><tr><td><strong>기상 관측</strong></td><td>실제로 관측된 날씨 (시간별·일별)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather</a></td></tr><tr><td><strong>기상 예보</strong></td><td>기상청 동네예보 (시각이 UTC)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/forecast">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/forecast</a></td></tr><tr><td><strong>국제유가</strong></td><td>브렌트·WTI 시간별 시세</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil</a></td></tr><tr><td><strong>송배전망</strong></td><td>변전소·송전선로 위치, 한전 접속 여유용량</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>발전소와 발전량</strong></td><td>태양광·석탄·LNG복합·풍력 등 발전소 142기와 시간별 발전량</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/generation</a></td></tr><tr><td><strong>SMP 가격</strong></td><td>전력 도매가격 (시간별·15분·평균)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/smp</a></td></tr><tr><td><strong>전력수요와 수급</strong></td><td>전국·제주 전력 수요, 발전원별 발전, 열수요</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/demand</a></td></tr><tr><td><strong>기상 관측</strong></td><td>실제로 관측된 날씨 (시간별·일별)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/weather</a></td></tr><tr><td><strong>기상 예보</strong></td><td>기상청 동네예보 (시각이 UTC)</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/forecast">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/forecast</a></td></tr><tr><td><strong>국제유가</strong></td><td>브렌트·WTI 시간별 시세</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/oil</a></td></tr><tr><td><strong>송배전망</strong></td><td>변전소·송전선로 위치, 한전 접속 여유용량</td><td><a href="https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid">https://eax-1.gitbook.io/energy-research-data/data/04-data-catalog/grid</a></td></tr></tbody></table>
 
 ***
 
@@ -14,7 +14,7 @@
 
 | 분야   | 데이터               | 영문 이름                         | 기간                                | 갱신             |
 | ---- | ----------------- | ----------------------------- | --------------------------------- | -------------- |
-| 발전   | 발전소 목록            | `plants`                      | 96기                               | 발전소가 추가될 때     |
+| 발전   | 발전소 목록            | `plants`                      | 142기                              | 발전소가 추가될 때     |
 | 발전   | 시간별 발전량 (kWh)     | `generation`                  | 2013-01 \~ 어제                     | 발전사마다 다름       |
 | 가격   | SMP 시간별           | `smp_hourly`                  | 2001-05 \~ 어제                     | 매일             |
 | 가격   | 제주 실시간 SMP 15분    | `smp_realtime_jeju`           | 2024-03 \~ 어제 (중간 공백 있음)          | 매일             |
@@ -52,7 +52,3 @@
 ## 컬럼 이름은 영어입니다
 
 질문은 한국어로 하면 됩니다. 영어 컬럼 이름은 답변에 나온 SQL을 읽을 때, 그리고 값의 뜻을 확인할 때 쓰세요. 각 페이지의 컬럼 표에 뜻과 단위를 적어 두었습니다.
-
-## 어디부터 읽을까요
-
-처음이라면 **발전소와 발전량**부터 읽으세요. 주의할 점이 가장 많고, 다른 데이터와 함께 쓸 때 기준이 되는 자료가 대부분 이 두 뷰입니다.
