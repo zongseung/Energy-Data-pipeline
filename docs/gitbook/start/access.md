@@ -31,6 +31,8 @@ Tailscale 계정은 필요 없습니다. 구글·학교·회사 이메일로 가
 & "$env:ProgramFiles\Tailscale\tailscale.exe" up --auth-key=<받은 키> --hostname=<받은 기기 이름>
 ```
 
+명령 맨 앞의 `&`까지 한 줄 전체를 그대로 붙여 넣으세요. 줄 앞이 `>>`로 바뀌며 계속 다음 줄로 넘어가면 `Ctrl+C`로 취소하고 다시 붙여 넣습니다.
+
 Linux와 Mac은 터미널에서 같은 명령을 씁니다. Mac은 설치 방식에 따라 명령 위치가 다를 수 있으니 막히면 관리자에게 문의하세요.
 
 ```bash
