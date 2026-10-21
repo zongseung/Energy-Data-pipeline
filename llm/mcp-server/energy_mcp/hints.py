@@ -10,8 +10,12 @@ from __future__ import annotations
 KNOWN_VIEWS = (
     "research.plants, research.generation, research.smp_hourly, "
     "research.smp_realtime_jeju, research.smp_weighted_avg, research.weather_asos, "
-    "research.jeju_supply_demand, research.demand_5min, "
-    "research.heat_demand, research.heat_demand_location"
+    "research.aws_obs_daily, research.demand_5min, research.gen_mix_5min, "
+    "research.jeju_supply_demand, research.jeju_demand_hourly, "
+    "research.jeju_generation_mix, research.heat_demand, "
+    "research.heat_demand_location, research.oil_hourly, research.oil_hourly_raw, "
+    "research.substations, research.power_lines, research.kepco_grid "
+    "(함수: research.forecast, forecast_regions, forecast_months, forecast_elements)"
 )
 
 

@@ -128,11 +128,12 @@ def _render_compose(path: Path, env: dict[str, str]):
     return yaml.safe_load(result.stdout)
 
 
-def test_production_mcp_connects_the_existing_clarification_workflow():
+def test_production_mcp_runs_in_legacy_mode_without_approval_workflow():
+    # 2026-10-21: 계획기·승인 방식은 질문 범위를 좁혀서 legacy(run_sql)로 되돌렸다.
     mcp = CONFIG["services"]["energy-mcp"]
-    assert mcp["environment"]["ENERGY_MCP_MODE"] == "workflow"
+    assert mcp["environment"]["ENERGY_MCP_MODE"] == "legacy"
     assert "ENERGY_MCP_APPROVAL_BASE_URL" in mcp["environment"]
-    assert mcp["env_file"] == ["mcp.env"]
+    assert mcp["env_file"] == ["mcp.env", "weather.env"]
     assert "mongodb" in mcp["depends_on"]
 
 

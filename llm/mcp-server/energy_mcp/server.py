@@ -75,9 +75,9 @@ KNOWN_PITFALLS_MD = """\
    (`data_quality='전면무효'` 전체, `'시간별무효'`의 `hourly_valid_from` 이전)은
    이 뷰에 아예 없다. 그러니 `data_quality`로 또 필터링하지 마라 — 이중으로
    걸면 영흥태양광 #3의 2025-07-01 이후 정상 구간까지 날아간다.
-   `research.plants`에는 여전히 91기 전부가 있으므로, **발전소 개수를 세는
+   `research.plants`에는 여전히 96기 전부가 있으므로, **발전소 개수를 세는
    질문은 `plants`를, 발전량은 `generation`을** 봐야 한다.
-3. **`research.plants.data_quality`는 4단계다**: `정상`(태양광 33기) /
+3. **`research.plants.data_quality`는 4단계다**: `정상`(38기) /
    `시간별무효`(10기) / `전면무효`(2기) / `미검증`(비태양광 46기 — "깨졌다"가
    아니라 "감사 대상이 아니었다"는 뜻. 정상이라 단정하지 마라).
    제외된 구간의 **일별** 합계는 유효할 수 있다(`daily_valid_from`~`daily_valid_to`)
@@ -140,7 +140,51 @@ NAS 예보 누락은 collect_forecast로 확인한다. 사용자가 수집을 �
 예보 값 요청은 지역·요소·시작월·종료월을 모두 확인한다. 결과의 download_url은 반드시 링크로 제공한다.
 """
 
-legacy_mcp = FastMCP("energy-mcp-legacy")
+# legacy 모드: GPT 가 SQL 을 직접 써서 조회한다(승인 절차 없음). 모델이 이 서버에 연결되면
+# 대화마다 이 안내문을 받는다 — 무엇이 있는지 알고, 일반 질문은 스스로 답하고,
+# 목록·기간 같은 질문은 바로 조회하게 하는 것이 목적이다. 너무 빡빡하게 쓰지 말 것.
+LEGACY_INSTRUCTIONS = """\
+이 서버는 한국 에너지 연구 데이터(발전량·SMP·수요·기상·유가·송배전망)를 `research` 스키마에서
+읽기 전용으로 조회한다.
+
+## 이렇게 일해라
+- 일반 질문·개념 설명·분석 방법 상담은 도구 없이 직접 답한다. 도구는 이 데이터가 필요할 때 쓴다.
+- "어떤 데이터가 있어?", "이 데이터가 뭐야?", 컬럼 뜻, 단위, 주의점, 기간 같은 **데이터 자체에 대한
+  질문**은 SQL 을 쓰기 전에 describe_data 를 먼저 호출하고, 돌려준 설명서와 live_ranges(DB 실측 기간)로 답한다.
+  설명서에 없는 내용은 지어내지 말고 없다고 말한다. 이런 호출은 되묻거나 허락받지 말고 바로 한다.
+- 조회·집계·다운로드는 run_sql 로 SQL 을 직접 작성해 실행한다. 컬럼이 궁금하면
+  `SELECT * FROM research.<뷰> LIMIT 3` 로 확인한다. 결과는 표로 보여주고, 사용한 SQL 과
+  download_url(CSV 링크)을 함께 안내한다.
+- 조건이 조금 모호해도 합리적으로 가정해서 먼저 조회하고, 가정한 내용을 답에 밝힌다.
+  되묻는 것은 결과가 크게 달라질 때만 한다.
+- 요청한 기간·지역에 데이터가 없으면(0행) describe_data 의 live_ranges 나 min/max 조회로 있는 범위를
+  알려주고 가까운 대안을 제안한다.
+- NAS 기상예보에 없는 월은 collect_forecast(confirmed=false) 로 확인한다. 사용자가 수집을 요청한 경우에만
+  confirmed=true 로 호출하고, 진행은 forecast_collection_status 로 확인한 뒤 다시 조회한다.
+
+## 데이터 지도 (뷰 이름과 내용만 — 기간은 describe_data 가 DB 에서 실측해 준다)
+| 분야 | 뷰 | 내용 |
+| --- | --- | --- |
+| 발전 | plants | 발전소 마스터 142기. fuel_type=solar·coal·combined·wind·fuel_cell·hydro·biomass (thermal 은 2026-10 에 coal/combined/biomass 로 쪼개 없어졌다). operator=nambu·namdong·jungbu·dongseo·seobu·nongeochon |
+| 발전 | generation | 시간별 발전량(kWh), 발전소별. 품질 불량 구간은 이미 빠져 있다 |
+| 가격 | smp_hourly | 하루전시장 시간별 SMP (region: land·jeju, 제주 분리 전은 unified) |
+| 가격 | smp_realtime_jeju | 제주 실시간 15분 SMP |
+| 가격 | smp_weighted_avg | SMP 가중평균 일·월·연 |
+| 수요 | demand_5min | 전국 수요·공급 5분 (MW) |
+| 수요 | gen_mix_5min | 발전원별 발전 5분 (MW) |
+| 수요 | jeju_supply_demand | 제주 수요·공급 5분 |
+| 수요 | jeju_demand_hourly, jeju_generation_mix | 제주 시간별 수요, 연료원별 거래량 |
+| 수요 | heat_demand, heat_demand_location | 지역난방 열수요(지사별, 종료된 자료) |
+| 기상 | weather_asos | ASOS 시간별 관측 |
+| 기상 | aws_obs_daily | AWS·ASOS 일자료 |
+| 기상 | forecast() 함수 | 기상청 동네예보 (NAS, 시각 UTC) |
+| 유가 | oil_hourly | 브렌트·WTI 시간 캔들 (현물 아님) |
+| 송배전망 | substations, power_lines, kepco_grid | 변전소·송전선(OSM), 한전 접속 여유용량 |
+
+시각은 한국 시간(KST) 구간 시작이다. 예보만 UTC다. 자세한 규칙은 run_sql 도구 설명을 따른다.
+"""
+
+legacy_mcp = FastMCP("energy-mcp-legacy", instructions=LEGACY_INSTRUCTIONS, stateless_http=True)
 workflow_mcp = FastMCP(
     "energy-mcp",
     instructions=WORKFLOW_INSTRUCTIONS,
@@ -391,12 +435,16 @@ def run_sql(query: str) -> dict[str, Any]:
     ## 반드시 지킬 3가지 (틀리면 답 자체가 틀린다)
 
     1. **연료를 지정한 질문에는 반드시 `fuel_type` 을 WHERE 에 넣어라.**
-       `research.generation` 은 태양광 전용이 아니라 5개 연료가 전부 섞인
-       뷰다(solar 146만행 / thermal 95만 / wind 36만 / fuel_cell 32만 /
-       hydro 16만). 필터를 빠뜨리면 "태양광 상위 5곳" 질문에 화력발전소가
-       나온다.
-         태양광→'solar'  풍력→'wind'  수력→'hydro'  화력→'thermal'
-         연료전지→'fuel_cell'
+       `research.generation` 은 태양광 전용이 아니라 7개 연료가 전부 섞인
+       뷰다(태양광이 절반 가까이이고 나머지는 석탄·LNG복합·풍력·연료전지·
+       해양소수력·바이오매스다). 필터를 빠뜨리면 "태양광 상위 5곳" 질문에
+       석탄발전소가 나온다.
+         태양광→'solar'   풍력→'wind'        해양소수력→'hydro'
+         석탄→'coal'      LNG복합→'combined'  연료전지→'fuel_cell'
+         바이오매스→'biomass'
+       **"화력" 은 한 값이 아니다** — 2026-10 에 `thermal` 을 실제 연료로 쪼갰다.
+       화력 전체를 묻는 질문은 `fuel_type IN ('coal','combined','biomass')` 다.
+       `fuel_type = 'thermal'` 은 0행이다.
     2. **"발전소별/월별/지역별/연도별 …" 집계 질문에는 GROUP BY 와 집계함수를
        같이 써라.** 원시 행을 ORDER BY … LIMIT 로 자르면 같은 발전소의 시간별
        행이 반복돼 순위가 통째로 틀린다. 그리고 GROUP BY 를 쓸 때는 `SELECT *`
@@ -410,6 +458,12 @@ def run_sql(query: str) -> dict[str, Any]:
 
     ## 나머지 규칙
 
+    - **무슨 데이터가 있는지·기간·컬럼 뜻**을 묻는 질문은 SQL 보다 먼저
+      `describe_data` 를 호출하라(되묻지 말고 바로). 특정 조건의 기간은
+      `SELECT min("timestamp"), max("timestamp") FROM research.<뷰> WHERE ...`,
+      컬럼은 `SELECT * FROM research.<뷰> LIMIT 3` 로 확인한다.
+    - 요청한 기간에 0행이 나오면 거기서 멈추지 말고 min/max 로 실제 범위를
+      확인해 알려주라(예: 열수요는 2021~2023 뿐이다).
     - **한 번에 한 문장만** 실행할 수 있다. 세미콜론으로 두 문장을 이어 보내면
       무조건 에러다. "A 와 B 를 같이 보여줘" 는 JOIN 하나로 쓰거나, run_sql 을
       **두 번 나눠서** 호출하라 — 한 번에 두 문장을 보내는 선택지는 없다.
@@ -426,7 +480,7 @@ def run_sql(query: str) -> dict[str, Any]:
       잘린 것이다 — `note`를 확인하라.
     - 코드성 컬럼 값은 **한국어**다. 영어로 번역하지 마라. 예:
       `data_quality IN ('정상','시간별무효','전면무효','미검증')`,
-      `fuel_type IN ('solar','wind','hydro','thermal','fuel_cell')` (이건 영어).
+      `fuel_type IN ('solar','coal','combined','wind','fuel_cell','hydro','biomass')` (이건 영어).
     - 존재하는 뷰는 아래가 전부다. 다른 테이블 이름을 지어내지 마라:
       - `research.plants` — 발전소 마스터(plant_id, plant_name, unit_no,
         operator, fuel_type, region, capacity_mw, lat, lon, sido, sigungu,
@@ -445,8 +499,12 @@ def run_sql(query: str) -> dict[str, Any]:
         `region='land'`, 제주는 `'jeju'`(2010-01-01 이전은 단일시장이라
         `'unified'`). station_type 같은 컬럼은 없다.
       - `research.smp_realtime_jeju` — 제주 실시간 15분 SMP(timestamp, region,
-        price, is_confirmed). 음수 가격이 정상적으로 나온다.
-      - `research.smp_weighted_avg` — SMP 가중평균.
+        price, is_confirmed). 음수 가격이 정상적으로 나온다. 2026-06-01~08-18 은
+        원천이 공표하지 않아 비어 있다.
+      - `research.smp_weighted_avg` — SMP 가중평균(period_type daily|monthly|yearly,
+        period, region land|jeju|unified, price_type smp|blmp, weighted_avg).
+        blmp 는 2001~2006 육지 값만 있다. 육지·제주는 2010 년부터, 2009 년까지는
+        region='unified' 다. 끝 날짜는 단위마다 달라 describe_data 의 live_ranges 로 확인한다.
       - `research.weather_asos` — 시간별 기상(timestamp, station_name,
         temperature, humidity, solar_radiation, has_solar_sensor).
       - `research.jeju_supply_demand` — 제주 계통 수급 5분(실시간, timestamp,
@@ -471,11 +529,13 @@ def run_sql(query: str) -> dict[str, Any]:
         어긋난다**: 공급능력은 `current_supply`, 최대예측수요는
         `supply_capacity` 다(이름이 서로 바뀐 것처럼 보이지만 그게 맞다).
         그 외 timestamp, current_demand, supply_reserve, reserve_rate.
-      - `research.demand_weather_1h` — 전국 수요+기상 시간별 결합
-        (timestamp, station_name, temperature, humidity, demand_avg).
-        지점 수만큼 수요값이 반복되므로 수요만 필요하면 demand_5min 을 써라.
-      - `research.heat_demand` / `research.heat_demand_location` — 열수요
-        (2023년까지의 정적 데이터셋).
+      - `research.oil_hourly` — 시간별 국제유가 캔들(timestamp,
+        **symbol('brent'|'wti')**, open, high, low, close, volume, trades). USD.
+        Hyperliquid 거래소 체결 캔들이라 현물 고시가가 아니다. WTI 는
+        2026-01-07, 브렌트는 2026-03-05 부터 있다. 24시간 거래된다.
+      - `research.heat_demand` / `research.heat_demand_location` — 지역난방
+        열수요(timestamp, branch, heat_demand …; 지사 19곳). 2021-01~2023-12 로
+        끝난 정적 데이터셋이라 2024년 이후는 없다.
       - `research.substations` — OSM 기반 변전소 위치(name, voltage, operator,
         sido, lon, lat). 전국 1,185개 — 공식 전수 아님.
       - `research.power_lines` — OSM 기반 송전선로(name, power_type, voltage,
@@ -516,6 +576,102 @@ def run_sql(query: str) -> dict[str, Any]:
       DB 클라이언트에 붙여넣어 전체 데이터를 직접 추출할 수 있게.
     """
     return _execute(query)
+
+
+# ---------------------------------------------------------------------------
+# 데이터 설명 — GitBook 카탈로그(사람용 문서)를 그대로 GPT 에게 준다
+# ---------------------------------------------------------------------------
+
+DOCS_DIR_ENV = "ENERGY_MCP_DOCS_DIR"  # docs/gitbook 을 읽기전용으로 마운트한 경로
+# 주제 → (설명 문서, 실제 기간을 DB 에서 재 볼 뷰). 문서가 단일 출처라 따로 요약본을 두지 않는다.
+DATA_TOPICS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "overview": ("04-data-catalog.md", ()),
+    "generation": ("catalog/generation.md", ("generation",)),
+    "smp": ("catalog/smp.md", ("smp_hourly", "smp_realtime_jeju", "smp_weighted_avg")),
+    "weather": ("catalog/weather.md", ("weather_asos", "aws_obs_daily")),
+    "forecast": ("catalog/forecast.md", ()),
+    "forecast-collect": ("catalog/forecast-collect.md", ()),
+    "demand": ("catalog/demand.md", (
+        "demand_5min", "gen_mix_5min", "jeju_supply_demand", "jeju_demand_hourly",
+        "jeju_generation_mix", "heat_demand")),
+    "oil": ("catalog/oil.md", ("oil_hourly",)),
+    "grid": ("catalog/grid.md", ()),
+}
+# 뷰 → (시간 컬럼, 구분 컬럼). 여기 없는 뷰(plants·송배전망 등)는 기간이 없는 마스터/정적 자료다.
+RANGE_SPECS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "generation": ("timestamp", ()),
+    "smp_hourly": ("timestamp", ("region",)),
+    "smp_realtime_jeju": ("timestamp", ()),
+    "smp_weighted_avg": ("period", ("period_type", "region", "price_type")),
+    "weather_asos": ("timestamp", ()),
+    "aws_obs_daily": ("date", ()),
+    "demand_5min": ("timestamp", ()),
+    "gen_mix_5min": ("timestamp", ()),
+    "jeju_supply_demand": ("timestamp", ()),
+    "jeju_demand_hourly": ("timestamp", ()),
+    "jeju_generation_mix": ("timestamp", ()),
+    "heat_demand": ("timestamp", ()),
+    "oil_hourly": ("timestamp", ("symbol",)),
+}
+RANGE_TTL_S = 600
+_range_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _view_range(view: str) -> Any:
+    """뷰의 실제 첫·끝 시각을 DB 에서 읽는다(10분 캐시). 실패해도 다른 뷰 결과는 살린다."""
+    hit = _range_cache.get(view)
+    if hit and time.monotonic() - hit[0] < RANGE_TTL_S:
+        return hit[1]
+    column, groups = RANGE_SPECS[view]
+    select = ", ".join([*groups, f"min({column})::text AS first", f"max({column})::text AS last"])
+    group = f" GROUP BY {', '.join(groups)} ORDER BY {', '.join(groups)}" if groups else ""
+    try:  # 식별자는 위 상수표에서만 오므로 SQL 주입 경로가 없다
+        with _readonly_cursor(_require_dsn(), _env_int(TIMEOUT_ENV, DEFAULT_TIMEOUT_S)) as cur:
+            cur.execute(f"SELECT {select} FROM research.{view}{group}")
+            names = [d[0] for d in cur.description]
+            value: Any = [dict(zip(names, row)) for row in cur.fetchall()]
+    except (psycopg2.Error, RuntimeError) as exc:
+        return {"error": f"기간 조회 실패: {type(exc).__name__}"}  # 실패는 캐시하지 않는다
+    _range_cache[view] = (time.monotonic(), value)
+    return value
+
+
+def _read_doc(relative: str) -> str | None:
+    path = os.path.join(os.environ.get(DOCS_DIR_ENV, "/docs"), relative)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("{%"))
+
+
+@legacy_mcp.tool()
+def describe_data(topic: str = "") -> dict[str, Any]:
+    """데이터 설명서와 DB 에서 실측한 기간(live_ranges)을 돌려준다.
+
+    사용자가 "어떤 데이터가 있어?", "이 데이터가 뭐야?", 컬럼 뜻·단위·주의점·기간을
+    물으면 SQL 을 쓰기 전에 이 도구를 먼저 호출하라. topic 을 비우면 전체 소개 문서와
+    모든 뷰의 기간을, 아래 주제 이름이나 뷰 이름을 주면 그 설명 문서 전문과 해당 뷰의
+    기간을 준다. 주제: overview·generation·smp·weather·forecast·forecast-collect·demand·oil·grid.
+    문서의 기간 서술이 live_ranges 와 다르면 live_ranges 를 따르라. 문서에 없는 내용은 지어내지 마라.
+    """
+    key = (topic or "overview").strip().lower().replace("_", "-")
+    if key not in DATA_TOPICS:  # 뷰 이름(smp_hourly 등)으로 물어도 그 주제로 보낸다
+        key = next((t for t, (_, views) in DATA_TOPICS.items()
+                    if key.replace("-", "_") in views), key)
+    if key not in DATA_TOPICS:
+        return {"error": f"알 수 없는 주제: {topic!r}", "topics": sorted(DATA_TOPICS)}
+    doc, views = DATA_TOPICS[key]
+    if key == "overview":
+        views = tuple(RANGE_SPECS)
+    text = _read_doc(doc)
+    return {
+        "topic": key,
+        "document": text if text is not None else "설명 문서를 읽지 못했다(서버 설정 확인 필요).",
+        "live_ranges": {view: _view_range(view) for view in views},
+        "other_topics": sorted(DATA_TOPICS),
+    }
 
 
 @workflow_mcp.tool()
@@ -651,6 +807,7 @@ def _collection_available_months(forecast):
             return []
 
 
+@legacy_mcp.tool()
 @workflow_mcp.tool()
 def collect_forecast(forecast: ForecastRequest, confirmed: bool = False) -> dict[str, Any]:
     """NAS 예보 누락 월을 확인하고 사용자 요청이 확정되면 기존 수집기를 실행한다.
@@ -658,7 +815,7 @@ def collect_forecast(forecast: ForecastRequest, confirmed: bool = False) -> dict
     forecast에 예보종·시도·시군구·읍면동·요소·from_ym·to_ym을 전달한다.
     confirmed=false는 존재 확인만 한다. 사용자가 수집을 요청했을 때만 true로 전달한다.
     로그인 정보는 서버 계정으로 처리하며 인자로 받지 않는다. 한 요청은 최대 12개월이다.
-    running이면 job_id로 forecast_collection_status를 확인하고 완료 후 plan_query를 호출한다.
+    running이면 job_id로 forecast_collection_status를 확인하고, 완료되면 다시 조회한다.
     """
     region = weather.validate_runtime_scope(forecast)
     forecast = forecast.model_copy(update={'sigungu': region['Level2']})
@@ -674,9 +831,10 @@ def collect_forecast(forecast: ForecastRequest, confirmed: bool = False) -> dict
     return weather.start_collection(forecast, missing)
 
 
+@legacy_mcp.tool()
 @workflow_mcp.tool()
 def forecast_collection_status(job_id: str) -> dict[str, Any]:
-    """실제 수집 작업의 상태·검증된 월·자료 행 수를 확인한다. 완료 후 plan_query로 재조회한다."""
+    """실제 수집 작업의 상태·검증된 월·자료 행 수를 확인한다. 완료되면 다시 조회한다."""
     return weather.collection_status(job_id)
 
 def _prepare_forecast_decision(decision):

@@ -1,4 +1,5 @@
-# LibreChat 운영 조회 — 조건 구체화 → SQL 승인 → 실행.
+# LibreChat 운영 조회 — GPT 가 SQL 을 직접 써서 조회·CSV 내보내기(legacy 모드).
+# (2026-10-06~21 에는 계획기+브라우저 승인 방식 workflow 모드였다. 필요하면 ENERGY_MCP_MODE 를 되돌린다)
 # (로컬 Qwen 스택은 2026-08-21 제거 — GPU/CUDA 복구 시 git 역사에서 복원)
 #
 #   docker compose -f llm/librechat/compose.yml up -d --build
@@ -9,7 +10,8 @@
 # 커넥션은 DEFAULT_POOL_SIZE 로 캡핑된다.
 #
 # OPENAI_API_KEY 는 같은 디렉토리의 librechat.env 에 넣는다(git 미추적).
-# user_provided 로 두면 각 사용자가 UI 설정에서 자기 키를 입력해야 한다.
+# 지금은 관리자의 공용 키가 들어 있어 사용자는 키를 넣지 않는다.
+# user_provided 로 바꾸면 각 사용자가 UI 설정에서 자기 키를 입력해야 한다.
 #
 # 주의: 질문·DB 조회 결과가 OpenAI 로 전송된다 — 폐쇄망 전제가 깨지는 지점.
 # 프로젝트명 고정 — 폴더를 docker/llm-demo 에서 옮겼어도
@@ -23,7 +25,9 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     # Tailscale 주소에만 바인딩한다. 0.0.0.0 이면 사내 LAN 에서도 열려서
-    # 가입을 열 수 없었다 — 문지기를 Tailscale 초대 승인 하나로 모은다.
+    # 가입을 열 수 없었다 — 문지기를 Tailscale 접속 권한 하나로 모은다.
+    # 연구원은 관리자가 승인해 발급한 1회용 authkey(tag:researcher)로 합류하고,
+    # ACL 이 그 태그에 8098/8099 만 허용한다. 절차와 양식은 ops/tailscale/.
     ports:
       - "${DEMO_HOST:-100.127.20.105}:8099:8099"  # 채팅 UI
       - "${DEMO_HOST:-100.127.20.105}:8098:8098"  # CSV 다운로드
@@ -61,10 +65,11 @@ services:
       context: ../..
       dockerfile: llm/librechat/mcp.Dockerfile
     container_name: energy-mcp
-    # planner용 API key와 workflow MongoDB 계정만 주입한다(비밀값, git 미추적).
+    # weather.env 의 Mongo 계정은 NAS 기상 수집 작업 상태용, mcp.env 의 API key 는 workflow 모드 계획기용(비밀값, git 미추적).
     env_file: [mcp.env, weather.env]
     environment:
-      ENERGY_MCP_MODE: workflow
+      # legacy: run_sql(GPT 가 SQL 작성) + NAS 기상 수집 도구. workflow: plan_query→승인→execute_query.
+      ENERGY_MCP_MODE: legacy
       ENERGY_MCP_APPROVAL_BASE_URL: http://${DEMO_HOST:-100.127.20.105}:8099/approval
       ENERGY_MCP_DSN: postgresql://demo_ro:${DEMO_RO_PW:?llm/librechat/.env 에 DEMO_RO_PW 를 넣어라}@pgbouncer:5432/pv
       ENERGY_MCP_TRANSPORT: streamable-http
@@ -79,6 +84,8 @@ services:
       ENERGY_MCP_EXPORT_URL: http://${DEMO_HOST:-100.127.20.105}:8098
     volumes:
       - exports:/exports
+      # describe_data 도구가 읽는 사람용 문서(GitBook 원본). 문서를 고치면 재빌드 없이 반영된다.
+      - ../../docs/gitbook:/docs:ro
       - /mnt/nvme/weather-data/src:/mnt/nvme/weather-data/src:ro
       - "/mnt/nvme/weather-data/지역코드 copy.csv:/mnt/nvme/weather-data/지역코드 copy.csv:ro"
       - /mnt/nvme/weather-data/nas-weather:/mnt/nvme/weather-data/nas-weather
@@ -112,8 +119,10 @@ services:
       ENDPOINTS: openAI,agents
       OPENAI_MODELS: gpt-4o-mini
       SEARCH: "false"             # Meilisearch 미기동 — 데모에 검색 불필요
-      # Tailscale 에 초대된 사람만 8099 에 닿으므로 가입은 열어둔다.
-      # (초대 승인이 곧 심사다 — 구글 폼 서약을 보고 관리자가 승인한다)
+      # authkey 를 받아 Tailscale 에 합류한 사람만 8099 에 닿으므로 가입은 열어둔다.
+      # (키 발급 승인이 곧 심사다 — 구글 폼 서약을 보고 관리자가 승인한다)
+      # 가입 이름·이메일은 서약 폼과 같게 쓰도록 안내하고, 관리자가
+      # `docker exec librechat npm run list-users` 로 대장과 가끔 대조한다.
       ALLOW_REGISTRATION: "true"
       DEPLOYMENT_SKILLS_DIR: /app/skill
     volumes:

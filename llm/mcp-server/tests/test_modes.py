@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from energy_mcp import server
+from energy_mcp import hints, server
 from energy_mcp.planner import PlannerDecision
 from energy_mcp.workflow import _hash
 
@@ -89,11 +89,41 @@ def test_workflow_mode_cannot_bypass_approval_with_run_sql():
     assert resource_uris(server.server_for_mode("workflow")) == set()
 
 
-def test_legacy_mode_keeps_run_sql_and_schema_resource_only():
+def test_legacy_mode_exposes_run_sql_weather_collection_and_schema_resource():
     legacy = server.server_for_mode("legacy")
 
-    assert tool_names(legacy) == {"run_sql"}
+    assert tool_names(legacy) == {
+        "run_sql", "describe_data", "collect_forecast", "forecast_collection_status"
+    }
     assert resource_uris(legacy) == {server.RESOURCE_URI}
+    # 승인 절차 없이 바로 조회한다 — 계획·승인 도구 설명이 새어 들어오면 안 된다.
+    for tool in tools_by_name(legacy).values():
+        assert "plan_query" not in tool.description
+        assert "execute_query" not in tool.description
+
+
+def test_legacy_instructions_give_a_data_map_and_do_not_demand_approval():
+    legacy = server.server_for_mode("legacy")
+
+    assert legacy.settings.stateless_http is True
+    text = legacy.instructions
+    # 데이터 지도: 사용자가 보는 모든 research 뷰가 한 번은 나와야 "무슨 데이터가 있어?" 에 답한다.
+    for view in hints.KNOWN_VIEWS.split("(")[0].replace("research.", "").split(","):
+        view = view.strip()
+        if view and view != "oil_hourly_raw":
+            assert view in text, view
+    assert "되묻거나 허락받지 말고 바로" in text
+    assert "승인" not in text
+
+
+def test_legacy_run_sql_guide_matches_the_database():
+    description = tools_by_name(server.legacy_mcp)["run_sql"].description
+
+    assert "oil_hourly" in description
+    assert "demand_weather_1h" not in description  # 존재하지 않는 뷰
+    assert "2021-01~2023-12" in description  # heat_demand 의 실제 범위
+    assert "91기" not in server.KNOWN_PITFALLS_MD
+    assert "96기" in server.KNOWN_PITFALLS_MD
 
 
 def test_legacy_tool_explains_forecast_sigungu_discovery():
@@ -564,3 +594,60 @@ def test_health_is_registered_on_workflow_http_server(monkeypatch):
 
     assert response.status_code == 200
     assert response.text == "ok"
+
+
+DOCS = str(__import__("pathlib").Path(__file__).resolve().parents[3] / "docs" / "gitbook")
+
+
+def test_describe_data_serves_the_catalog_page_and_live_ranges(monkeypatch):
+    monkeypatch.setenv(server.DOCS_DIR_ENV, DOCS)
+    monkeypatch.setattr(server, "_view_range", lambda view: [{"first": "A", "last": "B"}])
+
+    result = server.describe_data("heat_demand")  # 뷰 이름으로 물어도 주제로 연결된다
+
+    assert result["topic"] == "demand"
+    assert "열수요" in result["document"]
+    assert "{%" not in result["document"]  # GitBook 전용 지시문은 걷어낸다
+    assert result["live_ranges"]["heat_demand"] == [{"first": "A", "last": "B"}]
+
+
+def test_describe_data_overview_covers_every_ranged_view_and_unknown_topic_lists_topics(monkeypatch):
+    monkeypatch.setenv(server.DOCS_DIR_ENV, DOCS)
+    monkeypatch.setattr(server, "_view_range", lambda view: [])
+
+    assert set(server.describe_data()["live_ranges"]) == set(server.RANGE_SPECS)
+    bad = server.describe_data("없는주제")
+    assert "error" in bad and "smp" in bad["topics"]
+
+
+def test_every_topic_points_at_an_existing_catalog_page():
+    import os
+    for doc, views in server.DATA_TOPICS.values():
+        assert os.path.exists(os.path.join(DOCS, doc)), doc
+        assert set(views) <= set(server.RANGE_SPECS)
+
+
+def test_view_range_caches_success_and_does_not_cache_failure(monkeypatch):
+    server._range_cache.clear()
+    calls = []
+
+    class Cur:
+        description = [("first",), ("last",)]
+        def execute(self, sql): calls.append(sql)
+        def fetchall(self): return [("2021", "2023")]
+
+    class Ctx:
+        def __enter__(self): return Cur()
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(server, "_require_dsn", lambda: "dsn")
+    monkeypatch.setattr(server, "_readonly_cursor", lambda dsn, t: Ctx())
+    assert server._view_range("heat_demand") == [{"first": "2021", "last": "2023"}]
+    server._view_range("heat_demand")
+    assert len(calls) == 1  # 두 번째는 캐시
+
+    def boom(dsn, t): raise RuntimeError("DB 연결 실패")
+    monkeypatch.setattr(server, "_readonly_cursor", boom)
+    assert "error" in server._view_range("oil_hourly")
+    assert "oil_hourly" not in server._range_cache
+    server._range_cache.clear()

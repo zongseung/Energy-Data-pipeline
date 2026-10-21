@@ -3,8 +3,8 @@
 대한민국 발전·전력 데이터를 수집·전처리·적재하는 ETL 파이프라인입니다. 조회는 직접 SQL과 LibreChat+MCP 자연어 서비스로 제공합니다.
 Prefect 2로 오케스트레이션하고 PostgreSQL에 저장합니다.
 
-LibreChat 자연어 조회는 질문의 조건과 SQL을 먼저 보여주고, 브라우저에서 승인한
-뒤 공용 읽기전용 role `demo_ro`로 한 번 실행합니다. 사용 흐름과 OpenAI 전송·데이터
+LibreChat 자연어 조회는 AI가 SQL을 작성해 공용 읽기전용 role `demo_ro`로 바로 실행하고,
+사용한 SQL과 CSV 링크를 함께 보여줍니다. 사용 흐름과 OpenAI 전송·데이터
 보존 범위는 [GitBook 안내](docs/gitbook/README.md)에서 확인하세요.
 
 **수집 도메인**
