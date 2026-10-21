@@ -137,3 +137,6 @@ battery_round*.md
 battery_round*.log
 docker/llm-demo/librechat.env
 docker/llm-demo/secrets/
+
+# Tailscale 키 발급 대장 — 실명·연락처 포함, 공개 저장소에 올리지 않는다
+ops/tailscale/ledger.csv
