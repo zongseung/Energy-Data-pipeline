@@ -48,6 +48,21 @@ def _log_debug(msg: str, debug: bool, debug_log: Optional[list[str]]) -> None:
     debug_log.append(msg)
 
 
+def _parse_items(root: ET.Element) -> list[dict]:
+    """응답 포맷이 두 가지다.
+
+    1) <items><item>…</item><item>…</item></items>
+    2) <items>…</items><items>…</items>   ← item 래퍼 없이 레코드마다 items 태그
+
+    2번을 `find` 로 읽으면 첫 레코드(최신일) 하나만 잡혀 나머지를 통째로 잃는다.
+    997D 로 8/1~8/7 을 요청하면 7건이 오는데 1건만 남던 버그가 여기였다 (2026-09-10).
+    """
+    items = root.findall(".//item")
+    if items:
+        return [{child.tag: child.text for child in item} for item in items]
+    return [{child.tag: child.text for child in node} for node in root.findall(".//items")]
+
+
 async def _fetch_api_days(
     session: aiohttp.ClientSession,
     api_key: str,
@@ -101,17 +116,7 @@ async def _fetch_api_days(
                         debug,
                         debug_log,
                     )
-            # 응답 포맷이 두 가지:
-            # 1) <items><item>...</item></items>
-            # 2) <items><ymd>...</ymd>...</items>
-            items = root.findall(".//item")
-            if items:
-                return [{child.tag: child.text for child in item} for item in items]
-
-            items_node = root.find(".//items")
-            if items_node is not None:
-                return [{child.tag: child.text for child in items_node}]
-            return []
+            return _parse_items(root)
     except Exception:
         if debug:
             _log_debug(
