@@ -5,9 +5,14 @@
   - dataTerm(MONTH/3MONTH/YEAR)은 서버가 무시한다 — 뭘 넣어도 같은 2일치
   - 개발계정 1,000회/일 제한 → --budget 으로 끊어 받고 다음 실행에서 이어받는다
 
-daypower 의 단위가 확정되지 않아(원본 문서에 없음, 실측값이 설비용량을 초과)
-generation 코어에는 넣지 않는다. 파싱한 long 데이터를
-komipo_data_raw/{station}_{year}.parquet 로만 쌓는다.
+파싱한 long 데이터를 `data/komipo/{station}_{year}.parquet` 로 쌓는다.
+generation 코어 적재는 `load.py` 가 맡는다 (전처리 규칙을 거친다).
+
+**재개 커서는 DB + parquet 을 합쳐서 본다** (2026-10-21):
+적재 전에는 parquet 이 유일한 상태 기록이었는데, 지금은 `operator='jungbu'` 로
+DB 에 들어가 있다. DB 를 먼저 보므로 **parquet 이 사라져도 재수집하지 않는다**.
+parquet 은 전처리 전 원본으로 남겨 둔다 — DB 에는 스파이크·야간값이 NULL 로 들어가서
+교정 규칙을 바꿀 때 원본이 필요하다.
 
 사용:
     uv run python -m pipeline.fetch_data.komipo.collect --budget 800
@@ -81,13 +86,39 @@ def _parquet_path(out_dir: Path, station: str, year: int) -> Path:
     return out_dir / f"{station}_{year}.parquet"
 
 
+def db_dates(station: str) -> Set[date]:
+    """DB(generation)에 이미 적재된 날짜 집합. 본부 단위로 센다.
+
+    `load.py` 가 `plants.site_name` 에 원본 `siteterm`('보령발전본부')을 넣으므로
+    STATIONS 의 값에 '발전본부' 를 붙여 맞춘다. DB 가 닫혀 있으면 빈 집합을 돌려주고
+    parquet 커서만 쓴다 — 수집이 DB 때문에 멈추지는 않게 한다.
+    """
+    site = f"{STATIONS.get(station, '')}발전본부"
+    try:
+        from sqlalchemy import create_engine, text
+
+        from pipeline.fetch_data.common.db_utils import resolve_db_url
+        eng = create_engine(resolve_db_url())
+        with eng.connect() as conn:
+            rows = conn.execute(text("""
+                SELECT DISTINCT g.timestamp::date
+                  FROM generation g JOIN plants p USING (plant_id)
+                 WHERE p.operator = 'jungbu' AND p.site_name = :site
+            """), {"site": site}).fetchall()
+        return {r[0] for r in rows}
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[{site}] DB 커서 조회 실패 — parquet 커서만 쓴다: {e}")
+        return set()
+
+
 def load_existing(out_dir: Path, station: str) -> Tuple[pd.DataFrame, Set[date]]:
-    """이미 받아둔 데이터와 그 날짜 집합(재개용)."""
+    """이미 받아둔 데이터와 그 날짜 집합(재개용). DB + parquet 합집합이다."""
     files = sorted(out_dir.glob(f"{station}_*.parquet"))
+    have = db_dates(station)
     if not files:
-        return pd.DataFrame(columns=["siteterm", "unitterm", "timestamp", "daypower"]), set()
+        return pd.DataFrame(columns=["siteterm", "unitterm", "timestamp", "daypower"]), have
     df = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
-    return df, set(pd.to_datetime(df["timestamp"]).dt.date.unique())
+    return df, have | set(pd.to_datetime(df["timestamp"]).dt.date.unique())
 
 
 def to_long(rows: List[dict]) -> pd.DataFrame:
@@ -99,13 +130,14 @@ def to_long(rows: List[dict]) -> pd.DataFrame:
     return df[["siteterm", "unitterm", "timestamp", "daypower"]].dropna(subset=["timestamp"])
 
 
-def run(start: date, end: date, budget: int, out_dir: Path = DEFAULT_OUT) -> int:
+def run(start: date, end: date, budget: int, out_dir: Path = DEFAULT_OUT,
+        stations: Dict[str, str] = STATIONS) -> int:
     """[start, end] 를 본부별로 훑는다. 호출 예산 소진 시 중단(다음 실행이 이어받음)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     calls = 0
     fails = 0  # 연속 실패 — 쿼터 소진이면 전 범위를 헛돌지 않게 끊는다
 
-    for station, name in STATIONS.items():
+    for station, name in stations.items():
         old, have = load_existing(out_dir, station)
         new: List[pd.DataFrame] = []
         day = start
@@ -162,12 +194,16 @@ def main() -> None:
     p.add_argument("--end", default=None, help="종료일 YYYYMMDD (기본 어제)")
     p.add_argument("--budget", type=int, default=800, help="이번 실행의 최대 호출 수 (기본 800)")
     p.add_argument("--out-dir", default=str(DEFAULT_OUT))
+    p.add_argument("--station", default=None,
+                   help="본부 코드 쉼표목록 (기본 전체). 예: 8710,9180 — 앞 본부 재탐색 낭비를 막는다")
     a = p.parse_args()
     run(
         start=_to_date(a.start) if a.start else EARLIEST,
         end=_to_date(a.end) if a.end else date.today() - timedelta(days=1),
         budget=a.budget,
         out_dir=Path(a.out_dir),
+        stations={k: v for k, v in STATIONS.items() if k in a.station.split(",")}
+        if a.station else STATIONS,
     )
 
 
