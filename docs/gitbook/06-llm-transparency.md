@@ -5,7 +5,7 @@
 뜻합니다. 발전량·기상·수요 같은 원본 연구 데이터는 PostgreSQL `research`
 스키마 또는 NAS에 있습니다.
 
-## LibreChat 승인 workflow에서 질문이 처리되는 경로
+## LibreChat에서 질문이 처리되는 경로
 
 ```mermaid
 sequenceDiagram
@@ -13,47 +13,37 @@ sequenceDiagram
     participant L as LibreChat
     participant O as OpenAI
     participant M as energy-mcp
-    participant W as workflow MongoDB
     participant P as PostgreSQL
 
-    U->>L: 일상적인 자연어 질문
-    L->>O: 질문과 필요한 대화 문맥
-    O->>M: plan_query 호출
-    M->>O: 질문·구체화 답변·스키마로 별도 계획 요청
-    O-->>M: 구조화된 조건·SQL 계획
-    M->>W: 질문·조건·SQL·승인 상태 저장
-    M-->>L: 조건·SQL·승인 링크
-    U->>M: 승인 페이지에서 최종 확인
-    M->>W: confirmed 상태 저장
-    U->>L: 채팅으로 돌아와 승인했다고 알림
-    L->>O: 대화 계속
-    O->>M: execute_query 호출
-    M->>W: 승인된 동일 SQL 1회 점유
+    U->>L: 자연어 질문
+    L->>O: 질문, 필요한 대화 문맥, 도구 목록과 사용법
+    O->>M: 필요하면 데이터 설명 요청
+    M-->>O: 카탈로그 문서와 실제 기간
+    O->>M: AI가 작성한 SQL 실행 요청
     M->>P: 읽기전용 SQL 실행
     P-->>M: 조회 결과
-    M-->>O: 미리보기 또는 CSV 링크
+    M-->>O: 미리보기(최대 10행)와 CSV 링크
     O-->>L: 설명과 실제 실행 SQL
     L-->>U: 최종 답변
 ```
 
-운영 workflow의 SQL 계획에는 OpenAI API 호출이 하나 더 사용됩니다. 이 호출에는
-질문 원문, 지금까지 받은 구체화 답변, `research` 스키마 설명이 전달됩니다.
-계획이 검증에 실패하면 오류를 반영해 한 번 다시 계획할 수 있습니다.
-계획이 끝난 뒤 실제 조회 결과도 최종 답변을 만들 수 있도록 OpenAI에 전달됩니다.
-이 경로에서 SQL 계획과 실제 조회는 별도 단계입니다. 계획 응답에 조건·SQL·승인
-승인 뒤에만 저장된 조회 SQL을 실행합니다. 계획 단계에서는 PostgreSQL 스키마와
-NAS의 지역·요소·월별 파일 존재 여부를 먼저 조회해 조건을 검증합니다.
+SQL은 채팅 AI가 직접 작성하고, 실행된 SQL을 답변에 함께 보여 주므로 사용자가
+결과를 검증할 수 있습니다. 도구를 호출할 때마다 OpenAI가
+다시 호출되고, 도구 결과(설명서, 조회 미리보기)는 최종 답변을 만들 수 있도록
+OpenAI에 전달됩니다. 기상 예보는 NAS의 지역·요소·월별 파일 존재 여부를 먼저
+확인하고 조회합니다.
 
 ## MongoDB는 두 가지 용도로 나뉩니다
 
 | DB·컬렉션 | 언제 사용 | 저장되는 내용 | 저장하지 않는 내용 |
 | --- | --- | --- | --- |
 | LibreChat의 `LibreChat` DB | LibreChat 이용 시 | 계정·대화·메시지·도구 호출과 응답·설정·사용량 관련 메타데이터 | PostgreSQL 원본 전체를 별도 복제한 테이블 |
-| `energy_mcp.query_workflows` | MCP 승인 workflow | 질문 원문, 구체화 답변, 정규화 조건, 요약, SQL, SQL SHA-256, 승인 상태, 생성·만료·실행 시각, 행 수, 실행 시간, 오류 코드 | 조회 결과 행, CSV 내용, API 키·DB 비밀번호·JWT·승인 토큰 원문 |
+| `energy_mcp.weather_collection_jobs` | 기상 예보 수집을 요청했을 때 | 작업 번호, 상태, 요청한 예보종·지역·요소·월, 생성·종료 시각, 결과 요약·오류 코드 | 기상청 계정·비밀번호, 조회 결과 행, CSV 내용 |
 
 두 DB는 같은 MongoDB 서버를 사용하더라도 별도 DB와 별도 `readWrite` 계정을
 사용합니다. LibreChat 계정은 `LibreChat` DB만, MCP 계정은 `energy_mcp` DB만
-읽고 쓸 수 있도록 구성합니다.
+읽고 쓸 수 있도록 구성합니다. 일반 조회(SQL 실행)에는 MCP가 질문이나 SQL을
+MongoDB에 저장하지 않습니다.
 
 ### 대화 기록과 대화 간 기억은 다릅니다
 
@@ -64,28 +54,21 @@ LibreChat은 같은 대화의 메시지 기록을 MongoDB에 저장하므로 앞
 
 LibreChat 대화 기록에는 사용자가 본 미리보기, SQL, 도구 호출 결과가 포함될 수
 있습니다. 현재 프로젝트 설정에는 이 대화 기록을 자동 삭제하는 별도 TTL이 없으므로
-사용자 또는 관리자가 삭제하기 전까지 남을 수 있습니다.
+사용자 또는 관리자가 삭제하기 전까지 남을 수 있습니다. 질문 원문도 이 대화 기록에
+포함됩니다.
 
-## 승인 workflow가 저장하는 상태
+## 기상 수집 작업이 저장하는 상태
 
-정식 workflow는 HTTP 요청 자체를 무상태로 처리하고, 여러 번의 구체화와 승인
-사이에 필요한 최소 상태만 MongoDB에 둡니다.
-
-`clarifying` → `awaiting_confirmation` → `confirmed` → `executing` → `done`
-
-거절하면 `declined`, 계획 또는 실행이 실패하면 `failed`가 됩니다. 동시에 두 답변이
-반영되지 않도록 `revision`을 비교하고, 승인 시점과 실행 시점의 SQL SHA-256이
-다르면 실행하지 않습니다. 승인 토큰과 CSRF 토큰은 원문이 아니라 해시만 저장합니다.
-
-구체화 단계는 최초 질문부터 최대 **30분**이며, 실행 가능한 SQL 계획이 완성되면
-그 시점부터 30분으로 갱신됩니다. `expires_at`에 MongoDB TTL 인덱스가 걸려 있지만
-TTL 삭제는 백그라운드에서 비동기 실행되므로 문서가 정확히 만료 시각에 물리적으로
-사라진다는 뜻은 아닙니다. 만료 뒤에는 승인·실행에 사용할 수 없습니다.
+기상 예보 수집을 요청하면 작업 하나가 `running`으로 시작해 `completed`, `partial`,
+`unavailable`, `failed` 중 하나로 끝납니다. 이 상태가 작업 번호와 함께 MongoDB에
+저장되고, 사용자는 작업 번호로 진행 상태를 다시 확인할 수 있습니다. 작업 기록은
+생성 후 **7일**이 지나면 사용할 수 없고, `expires_at`에 걸린 MongoDB TTL 인덱스가
+백그라운드에서 비동기로 삭제하므로 정확히 그 시각에 물리적으로 사라진다는 뜻은 아닙니다.
 
 ## 조회 결과와 CSV
 
 - 채팅 미리보기는 최대 10행이며 LibreChat 대화 기록에 남을 수 있습니다.
-- 조회 결과 행과 CSV 본문은 `energy_mcp.query_workflows`에 저장하지 않습니다.
+- 조회 결과 행과 CSV 본문은 MCP의 MongoDB에 저장하지 않습니다.
 - 큰 결과는 최대 300,000행의 CSV로 `/exports` 볼륨에 저장될 수 있습니다.
 - CSV 파일명이 무작위여도 링크 자체에 별도 사용자 인증은 없습니다. 링크를 공유하지 마세요.
 - 24시간이 지난 CSV는 **다음 CSV를 만들 때** 정리합니다. 정기 삭제 작업이 아니므로
@@ -93,16 +76,14 @@ TTL 삭제는 백그라운드에서 비동기 실행되므로 문서가 정확�
 
 ## OpenAI로 전송되는 정보
 
-질문, 답변에 필요한 대화 문맥, MCP 도구 설명과 결과가 OpenAI API로 전송됩니다.
-SQL 계획기는 질문·구체화 답변·스키마 설명을 별도로 전송합니다. 개인 DB
-비밀번호, 서비스 OpenAI API 키, LibreChat JWT·암호화키를 프롬프트에 넣지 마세요.
+질문, 답변에 필요한 대화 문맥, MCP 도구 설명과 결과(데이터 설명서, 조회 미리보기)가
+OpenAI API로 전송됩니다. 개인 DB 비밀번호, 서비스 OpenAI API 키, LibreChat
+JWT·암호화키를 프롬프트에 넣지 마세요.
 
 OpenAI는 API 입력과 출력을 기본적으로 모델 학습에 사용하지 않는다고 안내합니다.
 다만 기본 abuse-monitoring 로그에는 프롬프트와 응답 일부가 포함될 수 있고 최대
-30일 보존될 수 있습니다. 정식 SQL 계획기의 Responses API 호출에는 `store=false`를
-명시해 별도 application state 저장을 비활성화합니다. 이 저장소 설정만으로는
-**Zero Data Retention** 적용 여부를 증명할 수 없으므로 abuse-monitoring에는 기본
-정책을 전제로 사용해야 합니다.
+30일 보존될 수 있습니다. 이 저장소 설정만으로는 **Zero Data Retention** 적용
+여부를 증명할 수 없으므로 abuse-monitoring에는 기본 정책을 전제로 사용해야 합니다.
 
 - [OpenAI API 데이터 제어](https://developers.openai.com/api/docs/guides/your-data)
 - [OpenAI 비즈니스 데이터 보호](https://openai.com/business-data/)
@@ -111,23 +92,21 @@ OpenAI는 API 입력과 출력을 기본적으로 모델 학습에 사용하지 
 
 ## 운영 설정과 자격증명
 
-관리자는 LibreChat의 `librechat.env`와 MCP 서버의 Git 미추적 `llm/librechat/mcp.env`를
-운영 환경에 맞게 관리합니다. `mcp.env`에는 planner가 쓰는 `OPENAI_API_KEY`와
-workflow 저장소 접속용 `ENERGY_MCP_MONGO_URI`가 필요하고, Compose는
-`ENERGY_MCP_MODE=workflow`로 MCP를 시작합니다. 실제 값은 GitBook이나 추적되는
-파일에 기록하지 않습니다. 사용자는 개인 OpenAI API 키나 개인 PostgreSQL 비밀번호를
-LibreChat 프롬프트에 입력할 필요가 없습니다.
+관리자는 LibreChat의 `librechat.env`와 MCP 서버의 Git 미추적 `llm/librechat/*.env`를
+운영 환경에 맞게 관리합니다. 기상 수집 작업 저장소 접속용 `ENERGY_MCP_MONGO_URI`와
+기상청 계정이 서버에만 있으며, 실제 값은 GitBook이나 추적되는 파일에 기록하지
+않습니다. 사용자는 개인 OpenAI API 키나 개인 PostgreSQL 비밀번호를 LibreChat
+프롬프트에 입력할 필요가 없습니다.
 
 ## 보존 범위 요약
 
 | 위치 | 현재 확인된 보존 동작 |
 | --- | --- |
 | LibreChat 대화 기록 | 별도 프로젝트 TTL 없음. 사용자·관리자 삭제 전까지 남을 수 있음 |
-| MCP 승인 workflow | 실행 가능 시간 30분. 이후 사용 불가, 물리 삭제는 MongoDB TTL의 비동기 처리 |
+| 기상 수집 작업 기록 | 생성 후 7일. 이후 사용 불가, 물리 삭제는 MongoDB TTL의 비동기 처리 |
 | CSV 내보내기 | 24시간 경과 파일을 다음 내보내기 시 정리 |
 | PostgreSQL 감사 로그 | 별도 만료·로테이션 정책 없음 |
-| OpenAI API | 기본 abuse-monitoring 로그 최대 30일. SQL 계획기 Responses API는 `store=false`; 별도 데이터 제어 적용 여부는 저장소만으로 확인 불가 |
+| OpenAI API | 기본 abuse-monitoring 로그 최대 30일. 별도 데이터 제어 적용 여부는 저장소만으로 확인 불가 |
 
-민감정보나 외부 제공이 금지된 분석은 자연어 서비스에 입력하지 말고 직접 SQL 경로를
-사용하세요. 채팅 답변을 논문·보고서에 사용하기 전에는 표시된 실제 SQL과 원본
+민감정보나 외부 제공이 금지된 내용은 질문에 넣지 마세요. 채팅 답변을 논문·보고서에 사용하기 전에는 표시된 실제 SQL과 원본
 데이터를 다시 검증해야 합니다.

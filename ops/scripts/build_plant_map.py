@@ -63,9 +63,12 @@ CITIES = [
     ("제주", 33.4996, 126.5312),
 ]
 
+# 2026-10-21: thermal 을 실제 연료로 쪼갰다 (coal/combined/biomass). thermal 은 남겨 두되
+# 미분류 전원이 생길 때만 쓰인다 — 현재 DB 에는 0기다.
 FUEL_LABEL = {
-    "solar": "태양광", "wind": "풍력", "hydro": "수력",
-    "thermal": "화력", "fuel_cell": "연료전지",
+    "solar": "태양광", "wind": "풍력", "hydro": "해양소수력",
+    "coal": "석탄", "combined": "LNG복합", "fuel_cell": "연료전지",
+    "biomass": "바이오매스", "thermal": "화력(미분류)",
 }
 
 
@@ -111,7 +114,8 @@ TEMPLATE = r"""<!doctype html>
 :root{
   --paper:#E6EBF1; --panel:#F2F5F8; --ink:#16202B; --ink-2:#4A5A6B;
   --rule:#B4C2CE; --rule-soft:#CFD9E2; --focus:#0B5FA5;
-  --solar:#C4820A; --wind:#2E7D91; --hydro:#3F63A8; --thermal:#A8462F; --fuel_cell:#5F5199;
+  --solar:#C4820A; --wind:#2E7D91; --hydro:#3F63A8; --coal:#A8462F; --fuel_cell:#5F5199;
+  --combined:#8A6D3B; --biomass:#4F7A3F; --thermal:#777777;
   --bad:#A8462F; --warn:#9A6B00;
   --sp:clamp(12px,2vw,20px);
 }
@@ -120,14 +124,16 @@ TEMPLATE = r"""<!doctype html>
   :root:not([data-theme="light"]){
     --paper:#101820; --panel:#18232E; --ink:#DFE8F0; --ink-2:#93A5B5;
     --rule:#33465A; --rule-soft:#243343; --focus:#6FB4EC;
-    --solar:#E6A92C; --wind:#5FB6CB; --hydro:#7C9BE0; --thermal:#DC7A5F; --fuel_cell:#9C8BD8;
+    --solar:#E6A92C; --wind:#5FB6CB; --hydro:#7C9BE0; --coal:#DC7A5F; --fuel_cell:#9C8BD8;
+    --combined:#C9A227; --biomass:#7FB069; --thermal:#9E9E9E;
     --bad:#DC7A5F; --warn:#D7A22B;
   }
 }
 :root[data-theme="dark"]{
   --paper:#101820; --panel:#18232E; --ink:#DFE8F0; --ink-2:#93A5B5;
   --rule:#33465A; --rule-soft:#243343; --focus:#6FB4EC;
-  --solar:#E6A92C; --wind:#5FB6CB; --hydro:#7C9BE0; --thermal:#DC7A5F; --fuel_cell:#9C8BD8;
+  --solar:#E6A92C; --wind:#5FB6CB; --hydro:#7C9BE0; --coal:#DC7A5F; --fuel_cell:#9C8BD8;
+  --combined:#C9A227; --biomass:#7FB069; --thermal:#9E9E9E;
   --bad:#DC7A5F; --warn:#D7A22B;
 }
 
@@ -270,7 +276,7 @@ footer{
 
 <script>
 const DATA = /*__DATA__*/null;
-const FUELS = ["solar","wind","hydro","thermal","fuel_cell"];
+const FUELS = ["solar","coal","combined","wind","fuel_cell","hydro","biomass"];
 const active = new Set(FUELS);
 let query = "", selected = null;
 
