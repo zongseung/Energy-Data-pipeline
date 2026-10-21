@@ -42,7 +42,7 @@ logger = get_logger(__name__)
 DATASET = "15099650"
 DATASET_PAGE = f"https://www.data.go.kr/data/{DATASET}/fileData.do"
 DOWNLOAD_URL = "https://www.data.go.kr/cmm/cmm/fileDownload.do"
-OPERATOR = "ewp"   # 한국동서발전
+OPERATOR = "dongseo"   # 한국동서발전
 FUEL = "solar"
 
 # 페이지에서 atchFileId 를 못 찾을 때 쓰는 폴백 (2026-08 실측)
@@ -118,8 +118,7 @@ def _update_master(raw: pd.DataFrame, engine) -> int:
         .reset_index()
     )
     sql = text("""
-        UPDATE plants SET lat = :lat, lon = :lon,
-                          capacity_mw = :cap, capacity_confidence = '확실'
+        UPDATE plants SET lat = :lat, lon = :lon, capacity_mw = :cap
         WHERE plant_name = :name AND operator = :op
     """)
     n = 0

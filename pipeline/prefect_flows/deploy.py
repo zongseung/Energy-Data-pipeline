@@ -268,7 +268,7 @@ DEPLOYMENTS = [
         "name": "yearly-ekr-pv-collection",
         "cron": "0 4 8 1 *",  # 차기 등록 2027-01-06 이후
         "label": "매년 1월 8일 04:00 (농어촌공사 영암/율치 PV → generation 코어)",
-        "tags": ["pv", "ekr", "yearly"],
+        "tags": ["pv", "nongeochon", "yearly"],
         "description": "매년 1월 한국농어촌공사 영암/율치 PV(odcloud 15005796) 전체 연도 멱등 수집 → generation 코어",
     },
     {
@@ -284,7 +284,7 @@ DEPLOYMENTS = [
         "name": "yearly-ewp-pv-collection",
         "cron": "0 5 8 2 *",  # 원천이 1월 하순에 갱신되므로 2월에 받는다
         "label": "매년 2월 8일 05:00 (동서발전 지점별 PV → generation 코어)",
-        "tags": ["pv", "ewp", "yearly"],
+        "tags": ["pv", "dongseo", "yearly"],
         "description": "매년 한국동서발전 지점별 태양광(data.go.kr 15099650) 전체 기간 멱등 수집 → generation 코어 + plants 좌표·용량 갱신",
     },
     {

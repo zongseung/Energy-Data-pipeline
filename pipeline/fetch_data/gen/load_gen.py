@@ -5,9 +5,8 @@ transform_gen 이 만든 gen_data/{category}_long.csv ([timestamp, plant_name, g
 plants/generation 코어 테이블에 멱등 UPSERT 한다. 구테이블·dual-write 트리거를 두지 않고
 코어에 직접 쓴다 (비태양광은 FDW/구테이블 소비자가 없음).
 
-- plants     : (plant_name, unit_no='1') 기준 upsert. operator='namdong'(=KOEN 한국남동발전),
-               fuel_type=카테고리 매핑, 용량/좌표는 capacities/locations 에서 보강.
-               이미 있으면 건드리지 않음(ON CONFLICT DO NOTHING).
+- plants     : **만들지 않는다.** 없는 설비가 오면 RuntimeError 로 멈춘다 — 원천이 표기를
+               바꾸면 조용히 새 행이 생겨 시계열이 쪼개진다. 새 설비는 사람이 등록한다.
 - generation : plant_name -> plant_id 매핑 후 (timestamp, plant_id) upsert.
                gen_kwh = CSV generation 값 그대로 (원본 헤더는 MWh지만 실제 kWh — 변환 안 함).
                source='api'.
@@ -34,8 +33,6 @@ from sqlalchemy import create_engine, text
 
 from pipeline.fetch_data.common.db_utils import resolve_db_url
 from pipeline.fetch_data.common.logger import get_logger
-from pipeline.fetch_data.gen.capacities import resolve_capacity
-from pipeline.fetch_data.gen.locations import resolve_location
 from pipeline.fetch_data.gen.transform_gen import DEFAULT_OUT_DIR
 
 logger = get_logger(__name__)
@@ -52,14 +49,6 @@ FUEL_MAP: Dict[str, str] = {
     "thermal": "thermal",
 }
 
-UPSERT_PLANT = text("""
-    INSERT INTO plants (plant_name, unit_no, fuel_type, operator, region,
-                        capacity_mw, capacity_confidence, lat, lon, address, site_name)
-    VALUES (:name, '1', :fuel, :op, 'mainland',
-            :cap_mw, :conf, :lat, :lon, :addr, :site)
-    ON CONFLICT (plant_name, unit_no) DO NOTHING
-""")
-
 UPSERT_GEN = text("""
     INSERT INTO generation (timestamp, plant_id, gen_kwh, source)
     VALUES (:ts, :pid, :kwh, :src)
@@ -68,25 +57,18 @@ UPSERT_GEN = text("""
 """)  # 충돌 시 gen_kwh 만 갱신. source 는 보존(기존 backfill 이력 유지, 신규 월만 'api' insert).
 
 
-def _ensure_plants(conn, fuel: str, names) -> Dict[str, int]:
-    """카테고리 발전소들을 plants 에 upsert 하고 {plant_name: plant_id} 반환."""
-    for name in names:
-        cap = resolve_capacity(name)
-        loc = resolve_location(name)
-        conn.execute(UPSERT_PLANT, {
-            "name": name,
-            "fuel": fuel,
-            "op": OPERATOR,
-            "cap_mw": cap["capacity_mw"] if cap else None,
-            "conf": cap["confidence"] if cap else "불확실",
-            "lat": loc["lat"] if loc else None,
-            "lon": loc["lon"] if loc else None,
-            "addr": loc["address"] if loc else None,
-            "site": loc["site"] if loc else None,
-        })
-    return dict(conn.execute(text(
+def _plant_ids(conn, fuel: str, names) -> Dict[str, int]:
+    """{plant_name: plant_id} 반환. 없는 설비가 있으면 만들지 않고 멈춘다."""
+    id_map = dict(conn.execute(text(
         "SELECT plant_name, plant_id FROM plants WHERE operator = :op AND fuel_type = :f"
     ), {"op": OPERATOR, "f": fuel}).fetchall())
+    unknown = sorted(set(names) - id_map.keys())
+    if unknown:
+        raise RuntimeError(
+            f"[{fuel}] plants 에 없는 설비 {len(unknown)}종 — 자동 생성하지 않는다. "
+            f"확인 후 등록하고 다시 돌려라: {unknown[:10]}"
+        )
+    return id_map
 
 
 def load_category(engine, category: str, out_dir: Path) -> int:
@@ -106,7 +88,7 @@ def load_category(engine, category: str, out_dir: Path) -> int:
     df = df.dropna(subset=["timestamp"])
 
     with engine.begin() as conn:
-        id_map = _ensure_plants(conn, fuel, df["plant_name"].unique())
+        id_map = _plant_ids(conn, fuel, df["plant_name"].unique())
         df["plant_id"] = df["plant_name"].map(id_map)
 
         unmapped = sorted(df.loc[df["plant_id"].isna(), "plant_name"].unique())

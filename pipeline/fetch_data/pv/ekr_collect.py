@@ -4,7 +4,7 @@
 - 연간 갱신: 2019~ '통합 발전량 현황' 연 1파일(영암1차/영암2차/율치 × 365일, 시간별 wide, kWh).
   2026 데이터는 미등록(차기 등록 2027-01-06) → 스케줄은 연 1회.
 - OAS에서 uddi를 **동적 enumerate**(연도별 최신 '현황' 파일) → 비동기 수집 → wide→long →
-  generation/plants 코어에 upsert (operator='ekr', fuel='solar').
+  generation/plants 코어에 upsert (operator='nongeochon', fuel='solar').
 - 컬럼 스키마가 연도마다 다름(구 `01시`/`날짜`/`발전기명` ↔ 신 `1시`/`월`·`일`/`시설명`) → 패턴 기반 처리.
 - 시간 `N시`는 구간종료 표기로 보고 (N-1)시 구간시작으로 적재.
 """
@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 DATASET = "15005796"
 OAS_URL = f"https://infuser.odcloud.kr/oas/docs?namespace={DATASET}/v1"
 API_BASE = f"https://api.odcloud.kr/api/{DATASET}/v1"
-OPERATOR = "ekr"   # 한국농어촌공사
+OPERATOR = "nongeochon"   # 한국농어촌공사
 FUEL = "solar"
 
 # 시설명/발전기명 약칭 → 정식 발전소명

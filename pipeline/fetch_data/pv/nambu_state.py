@@ -9,7 +9,7 @@ _TARGETS = text(
     """
     SELECT
       p.plant_id,
-      p.plant_code AS gencd,
+      p.official_code AS gencd,
       p.unit_no AS hogi,
       p.plant_name,
       MAX(g.timestamp) AS last_dt
@@ -17,9 +17,9 @@ _TARGETS = text(
     LEFT JOIN generation g ON g.plant_id = p.plant_id
     WHERE p.operator = 'nambu'
       AND p.fuel_type = 'solar'
-      AND p.plant_code IS NOT NULL
-    GROUP BY p.plant_id, p.plant_code, p.unit_no, p.plant_name
-    ORDER BY p.plant_code, p.unit_no
+      AND p.official_code IS NOT NULL
+    GROUP BY p.plant_id, p.official_code, p.unit_no, p.plant_name
+    ORDER BY p.official_code, p.unit_no
     """
 )
 
