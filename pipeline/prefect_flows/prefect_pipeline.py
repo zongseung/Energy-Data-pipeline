@@ -20,7 +20,7 @@ from pipeline.fetch_data.weather.asos_collect import (
     station_ids,
 )
 from pipeline.fetch_data.weather.database import load_asos_df
-from pipeline.prefect_flows.merge_to_all import merge_to_all_csv
+from pipeline.fetch_data.weather.merge_asos import merge_to_all_csv
 from pipeline.prefect_flows.notify_tasks import notify_slack_success, notify_slack_failure
 
 
@@ -60,22 +60,16 @@ def process_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     return normalize_weather_data(df)
 
 
-@task(name="기상 데이터 저장", retries=2)
-def save_weather_data(df: pd.DataFrame, date_str: str, output_dir: str = "/app/data") -> str:
-    """처리된 기상 데이터를 CSV로 저장합니다."""
-    output_path = f"{output_dir}/asos_{date_str}_{date_str}.csv"
-    df.to_csv(output_path, index=False, encoding="utf-8-sig")
-
-    print(f"\n저장 완료: {output_path}")
-    print(f"데이터 shape: {df.shape}")
-
-    return output_path
-
-
 @task(name="기상 데이터 병합", retries=2)
-def merge_weather_to_all(output_path: str) -> str:
-    """새로 저장된 CSV를 통합 파일에 병합합니다."""
-    merged_path = merge_to_all_csv(output_path)
+def merge_weather_to_all(df: pd.DataFrame) -> str:
+    """수집한 데이터를 통합 CSV 에 바로 병합한다.
+
+    예전에는 일별 CSV(`data/asos_YYYYMMDD_*.csv`)를 만들어 그 경로를 넘겼는데,
+    병합·DB 적재가 끝난 뒤에도 지워지지 않아 `data/` 에 80개가 쌓였다(2026-10-21 정리).
+    `merge_to_all_csv` 가 DataFrame 을 받게 고쳐서 중간 파일을 없앴다.
+    """
+    merged_path = merge_to_all_csv(df)
+    print(f"데이터 shape: {df.shape}")
     return merged_path
 
 
@@ -84,8 +78,8 @@ def load_weather_to_db(df: pd.DataFrame) -> int:
     """정규화된 기상 데이터를 weather_asos 테이블에 적재합니다.
 
     예외를 여기서 삼키지 않는다 — 삼키면 retries가 발동하지 않고 Prefect UI에서도
-    Failed로 안 보여 조용히 데이터가 누락된다. CSV 저장 결과를 지키는 일은
-    (플로우가 output_path를 반환해 이 태스크의 실패 상태가 플로우 상태에
+    Failed로 안 보여 조용히 데이터가 누락된다. 병합 결과를 지키는 일은
+    (플로우가 merged_path를 반환해 이 태스크의 실패 상태가 플로우 상태에
     반영되지 않는 것과) 호출부의 `db_rows_future.result(raise_on_failure=False)`가
     맡는다.
     """
@@ -136,16 +130,12 @@ def daily_weather_collection_flow(target_date: str | None = None):
         # 2. 원본 컬럼 정규화
         df_processed_future = process_missing_values.submit(df_future)
 
-        # 3. 데이터 저장
-        output_path_future = save_weather_data.submit(df_processed_future, target_date)
+        # 3. 통합 파일에 병합 (중간 CSV 없이 DataFrame 을 바로 넘긴다)
+        merged_path_future = merge_weather_to_all.submit(df_processed_future)
 
-        # 4. 통합 파일에 병합
-        merged_path_future = merge_weather_to_all.submit(output_path_future)
-
-        # 5. DB 적재 (CSV 저장/병합과 별개로 병렬 진행, 실패해도 플로우에 영향 없음)
+        # 4. DB 적재 (병합과 별개로 병렬 진행, 실패해도 플로우에 영향 없음)
         db_rows_future = load_weather_to_db.submit(df_processed_future)
 
-        output_path = output_path_future.result()
         merged_path = merged_path_future.result()
         # DB 적재는 재시도까지 다 실패해도 CSV 결과를 되돌리지 않는다 — 예외를
         # 올리지 않고 결과만 받는다. 실패 시 Slack 문자열에 예외가 그대로 찍혀
@@ -157,10 +147,10 @@ def daily_weather_collection_flow(target_date: str | None = None):
         # 6. Slack 알림
         notify_slack_success.submit(
             "Weather ETL",
-            f"- 날짜: {target_date}\n- 파일: {output_path}\n- 통합: {merged_path}\n- DB 적재: {db_rows}행"
+            f"- 날짜: {target_date}\n- 통합: {merged_path}\n- DB 적재: {db_rows}행"
         )
 
-        return output_path
+        return merged_path
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"

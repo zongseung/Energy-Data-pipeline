@@ -9,7 +9,7 @@ from prefect import flow, task
 from pipeline.fetch_data.demand.aggregate import aggregate_demand_weather, refresh_demand_views
 from pipeline.fetch_data.demand.collect import collect_latest
 from pipeline.fetch_data.demand.database import get_demand_engine
-from pipeline.prefect_flows.merge_to_all import DEFAULT_MERGED_CSV
+from pipeline.fetch_data.weather.merge_asos import DEFAULT_MERGED_CSV
 from pipeline.prefect_flows.notify_tasks import notify_slack_failure
 
 

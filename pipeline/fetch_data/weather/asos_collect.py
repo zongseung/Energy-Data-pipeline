@@ -10,7 +10,8 @@ import pandas as pd
 from pipeline.fetch_data.common.config import get_service_key
 from pipeline.fetch_data.common.logger import get_logger
 from pipeline.fetch_data.constants import WeatherAPI
-from pipeline.prefect_flows.merge_to_all import merge_to_all_csv, DATA_DIR
+from pipeline.fetch_data.common.paths import DATA_DIR
+from pipeline.fetch_data.weather.merge_asos import merge_to_all_csv
 
 logger = get_logger(__name__)
 
@@ -44,7 +45,9 @@ def load_station_ids() -> list[str]:
 station_ids = load_station_ids()
 
 # 일별 결과 저장 디렉토리 (data/ 아래)
-OUTPUT_DIR = DATA_DIR  # 그냥 data/ 바로 아래에 저장
+# 일별 CSV 는 data/asos/ 하위에 둔다. 2026-10-21 까지는 data/ 루트에 떨어져
+# 80개가 흩어져 있었다(병합·DB 적재가 끝난 뒤에도 안 지워진다).
+OUTPUT_DIR = DATA_DIR / "asos"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

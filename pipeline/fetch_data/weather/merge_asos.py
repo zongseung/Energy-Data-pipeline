@@ -1,46 +1,54 @@
-"""
-매일 수집된 데이터를 asos_all_merged.csv에 추가하는 스크립트
+"""매일 수집된 ASOS 데이터를 asos_all_merged.csv 에 누적하는 모듈.
+
+원래 CLI 스크립트였고(파일 경로만 받았다) flow 가 그 함수를 재사용하면서
+"일별 CSV 를 만들어 경로를 넘기는" 구조가 됐다. 그 일별 파일이 병합·DB 적재 뒤에도
+지워지지 않아 `data/` 루트에 80개가 쌓였다(2026-10-21 정리).
+
+지금은 **DataFrame 을 직접 받을 수 있다** — flow 는 그 길을 쓰므로 일별 파일이 생기지 않는다.
+CLI(`python -m pipeline.fetch_data.weather.merge_asos <csv>`)는 그대로 둔다.
+
+2026-10-21 에 `prefect_flows/merge_to_all.py` 에서 여기로 옮겼다 — 수집기
+(`asos_collect.py`)가 flow 패키지를 import 하는 역방향 의존이었다.
 """
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
-# 프로젝트 루트 & data 디렉토리 기준 경로들
-BASE_DIR = Path(__file__).resolve().parents[2]   # /app/fetch_data/merge_to_all.py -> /app
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+from pipeline.fetch_data.common.paths import DATA_DIR
 
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_MERGED_CSV = DATA_DIR / "asos_all_merged.csv"
 
 
-def merge_to_all_csv(new_csv_path: str | Path,
+def merge_to_all_csv(new_data: "str | Path | pd.DataFrame",
                      merged_csv_path: str | Path = DEFAULT_MERGED_CSV):
-    """
-    새로 수집된 CSV 파일을 asos_all_merged.csv에 추가합니다.
-    
+    """새로 수집된 ASOS 데이터를 통합 CSV 에 누적한다.
+
     Parameters
     ----------
-    new_csv_path : str | Path
-        새로 수집된 CSV 파일 경로
+    new_data : str | Path | pandas.DataFrame
+        새 데이터. **DataFrame 을 주면 중간 파일을 만들지 않는다**(flow 가 쓰는 길).
+        경로를 주면 그 CSV 를 읽는다(CLI 호환).
     merged_csv_path : str | Path
-        통합 CSV 파일 경로 (기본값: data/asos_all_merged.csv)
+        통합 CSV 경로 (기본값: data/asos_all_merged.csv)
     """
-    new_csv_path = Path(new_csv_path)
     merged_csv_path = Path(merged_csv_path)
 
     print(f"\n{'='*80}")
     print(f"데이터 통합 시작")
     print(f"{'='*80}")
-    print(f"새 파일: {new_csv_path}")
+
+    if isinstance(new_data, pd.DataFrame):
+        df_new = new_data.copy()
+        print(f"새 데이터: {len(df_new)}건 (DataFrame 직접 전달 — 중간 파일 없음)")
+    else:
+        new_csv_path = Path(new_data)
+        if not new_csv_path.exists():
+            raise FileNotFoundError(f"새 파일을 찾을 수 없습니다: {new_csv_path}")
+        print(f"새 파일: {new_csv_path}")
+        df_new = pd.read_csv(new_csv_path, encoding="utf-8-sig")
+        print(f"새 데이터: {len(df_new)}건")
     print(f"통합 파일: {merged_csv_path}")
-    
-    # 새 파일 읽기
-    if not new_csv_path.exists():
-        raise FileNotFoundError(f"새 파일을 찾을 수 없습니다: {new_csv_path}")
-    
-    print(f"\n새 파일 읽는 중...")
-    df_new = pd.read_csv(new_csv_path, encoding="utf-8-sig")
-    print(f"새 데이터: {len(df_new)}건")
     
     merged_file = merged_csv_path
     
@@ -105,9 +113,9 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("사용법: python merge_to_all.py <새_CSV_파일_경로> [통합_CSV_파일_경로]")
+        print("사용법: python -m pipeline.fetch_data.weather.merge_asos <새_CSV_경로> [통합_CSV_경로]")
         print("\n예시:")
-        print("  python merge_to_all.py data/asos_20241203_20241203.csv")
+        print("  python -m pipeline.fetch_data.weather.merge_asos data/asos/asos_20241203_20241203.csv")
         sys.exit(1)
     
     new_csv = sys.argv[1]
